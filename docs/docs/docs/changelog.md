@@ -1,0 +1,1 @@
+--8<-- "https://raw.githubusercontent.com/AllenInstitute/cloudnwb/main/CHANGELOG.md"

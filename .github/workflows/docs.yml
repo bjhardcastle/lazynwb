@@ -1,0 +1,38 @@
+name: Build docs
+
+on:
+  push:
+    paths:
+      - "**.md"
+      - docs/**
+      - .github/workflows/docs.yml
+    tags:        
+      - '*'        
+  release:
+    types: [published]
+  workflow_dispatch:
+
+
+concurrency:
+  group: ${{ '{{' }} github.ref {{ '}}' }}
+
+
+jobs:
+  build-doc:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: pdm-project/setup-pdm@main
+        with:
+          python-version: 3.x
+          cache: true
+      - name: Build pages
+        run: |
+          pdm install -G docs
+          cd docs && pdm run mkdocs build
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ '{{' }} secrets.GITHUB_TOKEN {{ '}}' }}
+          publish_dir: ./docs/site

@@ -1,0 +1,111 @@
+# This workflow will install Python dependencies, run tests and lint/formatting - possibly with a variety of Python versions - bump version, re-commit  publish to PYPI
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Publish Python package
+
+on:
+  push:
+    branches: [ "main" ] 
+    paths: # pushing any files/folders marked ! will not trigger the workflow (exceptions can be added)
+      - '**'
+      - '!**.ipynb'
+      - '!**.json'
+      - '!.vscode'
+      - '!scripts/**'
+      - '!tests/**'
+      - '!notebooks/**'
+      - '!**.md'
+      - '!**.yml'
+      - '.github/workflows/publish.yml'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**.ipynb'
+      - '**.json'
+      - '.vscode'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'notebooks/**'
+      - '**.md'
+      - '**.yml'
+  workflow_dispatch:  # adds a 'Run Workflow' button for manual launching
+
+concurrency: # jobs currently running on main will be cancelled when this workflow starts
+  group: ${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.9", "3.11"]
+        os: [ubuntu-latest, macOS-latest, windows-latest]
+    permissions: write-all
+
+    steps:
+    - uses: actions/checkout@v4
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT }}
+        # use PAT, or push comes from `github-actions` bot, which can't trigger
+        # other workflows   
+    
+    - uses: pdm-project/setup-pdm@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        update-python: true
+        cache: true # speeds-up setup by caching downloaded packages 
+        
+    - name: Install dependencies
+      run: |
+        pdm install -G dev
+        
+    - name: Test, format, lint
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        DBHUB_API_KEY: ${{ secrets.DBHUB_API_KEY }}
+        CODE_OCEAN_API_TOKEN: ${{ secrets.CODE_OCEAN_API_TOKEN }}
+        CODE_OCEAN_DOMAIN: ${{ secrets.CODE_OCEAN_DOMAIN }}
+      run: |
+        mkdir .mypy_cache   
+        pdm run test
+    
+  publish:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: write-all
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0    # get all commits (on default branch)
+        fetch-tags: true  
+
+    - uses: pdm-project/setup-pdm@v4
+      with:
+        python-version: '3.11'
+        cache: true # speeds-up setup by caching downloaded packages 
+
+    - name: Publish with bump & tag
+      # actions/checkout 
+      run: |
+        pdm install -G dev
+        git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+        git config --global user.name "${{ github.actor }}"
+        pdm publish
+        git push
+        git push --tags
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT }}
+        # use PAT, or push comes from `github-actions` bot, which can't trigger
+        # other workflows   
+
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v3
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

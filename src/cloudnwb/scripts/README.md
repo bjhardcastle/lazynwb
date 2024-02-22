@@ -1,0 +1,6 @@
+- `.py` files in this folder import the package and use it to run jobs via a CLI
+- after creating a file, add it to the `[project.scripts]` section in [`pyproject.toml`](https://github.com/{{ repository_namespace }}/{{ repository_name }}/pyproject.toml)
+- once the package is installed, it can be run as an executable from the command line, from any path, provided the virtual environment is activated
+- also known as `console_scripts`: 
+  - https://peps.python.org/pep-0621/#entry-points
+  - https://packaging.python.org/en/latest/specifications/entry-points/

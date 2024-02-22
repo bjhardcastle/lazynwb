@@ -1,0 +1,21 @@
+# Changes here will be overwritten by Copier
+_commit: 3249a90
+_src_path: gh:alleninstitute/copier-pdm-npc
+add_requirements_txt: true
+author_email: ben.hardcastle@alleninstitue.org
+author_fullname: Ben Hardcastle
+author_username: bjhardcastle
+build_doc: true
+copyright_date: '2024'
+copyright_holder: Allen Institute for Neural Dynamics
+copyright_holder_email: ''
+copyright_license: MIT
+package_version: 0.1.0
+project_description: ''
+project_name: cloudnwb
+python_package_distribution_name: cloudnwb
+python_package_import_name: cloudnwb
+python_package_requires_python: '>=3.9'
+repository_name: cloudnwb
+repository_namespace: AllenInstitute
+

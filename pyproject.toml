@@ -1,0 +1,245 @@
+[project]
+name = "cloudnwb"
+description = "An attempt to speed-up access to large NWB (Neurodata Without Borders) files stored in the cloud."
+authors = [
+    { name = "Ben Hardcastle", email = "ben.hardcastle@alleninstitue.org" },
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "npc-io>=0.1.23",
+    "h5py>=3.10.0",
+    "zarr>=2.17.0",
+    "dandi>=0.59.1",
+]
+version = "0.1.0"
+classifiers = [
+    "Development Status :: 3 - Alpha", # https://pypi.org/classifiers/
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.license]
+text = "MIT"
+
+[project.urls]
+Repository = "https://github.com/AllenInstitute/cloudnwb"
+Issues = "https://github.com/AllenInstitute/cloudnwb/issues"
+
+[build-system]
+requires = [
+    "setuptools>=61",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = [
+    "src",
+]
+
+[tool.setuptools.package-data]
+cloudnwb = [
+    "py.typed",
+]
+
+[tool.black]
+# line-length = 100
+target-version = [
+    "py39", 
+    "py310", 
+    "py311",
+]
+
+[tool.ruff]
+line-length = 100
+select = [
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "PGH",  # pygrep-hooks
+    "RUF",  # ruff
+    "W",    # pycodestyle
+    "YTT",  # flake8-2020
+    "ANN",
+    "C",
+    "I",
+    "RUF100",
+    "N",
+    "UP",
+]
+# extend-ignore = ["B018", "B019"]
+src = [
+    "src",
+]
+extend-exclude = [
+    "tests/fixtures",
+]
+target-version = "py39"
+
+[tool.ruff.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.mccabe]
+max-complexity = 10
+
+# [tool.ruff.isort]
+# known-first-party = ["cloudnwb"]
+
+
+[tool.coverage.paths]
+source = [
+    "src",
+]
+
+[tool.coverage.run]
+branch = true
+source = [
+    "src",
+]
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
+skip_empty = true
+exclude_also = [
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "@(abc.)?abstractmethod",
+    "@typing.runtime_checkable",
+]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+    "--doctest-modules",
+    "--ignore-glob=*scripts*,*examples*,*docs*",
+    "--cov",
+    "--cov-report=html",
+    "--cov-config=pyproject.toml",
+    "--doctest-glob=*README.md",
+    "-x",
+    # "-n=auto", for use with pytest-xdist
+]
+doctest_optionflags = [
+    "NORMALIZE_WHITESPACE",
+    "IGNORE_EXCEPTION_DETAIL",
+    "ELLIPSIS",
+]
+testpaths = [
+    "src",
+    "tests",
+]
+
+[tool.mypy]
+check_untyped_defs = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_decorators = false
+disallow_any_unimported = false
+warn_return_any = false
+warn_unused_ignores = true
+no_implicit_optional = true
+show_error_codes = true
+ignore_missing_imports = true
+implicit_reexport = false
+exclude = [
+    "src/cloudnwb/scripts",
+]
+
+[tool.isort]
+profile = "black"
+atomic = true
+skip_glob = [
+    "*/setup.py",
+]
+filter_files = true
+known_first_party = [
+    "cloudnwb",
+]
+
+[tool.pdm]
+plugins = [
+    "pdm-bump",
+    "copier",
+]
+
+[tool.pdm.build]
+package-dir = "src"
+
+[tool.pdm.dev-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "ruff>=0.0.282",
+    "mypy>=1.4.1",
+    "pytest-cov>=4.1.0",
+    "black>=23.7.0",
+    "git-changelog>=2.3",
+    "parver>=0.3",
+]
+docs = [
+    "markdown-callouts>=0.3",
+    "markdown-exec>=1.7",
+    "mkdocs>=1.5",
+    "mkdocs-coverage>=1.0",
+    "mkdocs-gen-files>=0.5",
+    "mkdocs-git-committers-plugin-2>=1.2",
+    "mkdocs-git-revision-date-localized-plugin>=1.2",
+    "mkdocs-literate-nav>=0.6",
+    "mkdocs-material>=9.4",
+    "mkdocs-minify-plugin>=0.7",
+    "mkdocstrings[python]>=0.23",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[tool.pdm.scripts]
+ruff = "ruff check src --fix-only"
+black = "black src"
+pytest = "pytest --cov-report term-missing:skip-covered --cov-report=html"
+mypy = "mypy src --install-types --non-interactive"
+log = "git-changelog -o CHANGELOG.md"
+dryrun = "pdm publish --repository testpypi --dry-run"
+post_init = "pdm install --plugins"
+
+[tool.pdm.scripts.test]
+composite = [
+    "pdm run mypy",
+    "pdm run pytest",
+]
+
+[tool.pdm.scripts.docs]
+shell = "cd docs && mkdocs serve"
+help = "Start the dev server for doc preview"
+
+[tool.pdm.scripts.bumpver]
+composite = [
+    "pdm self add pdm-bump",
+    "pdm bump micro",
+]
+
+[tool.pdm.scripts.tag]
+composite = [
+    "pdm self add pdm-bump",
+    "pdm bump tag",
+]
+
+[tool.pdm.scripts.pre_build]
+composite = [
+    "pdm run black",
+    "pdm run ruff",
+    "pdm run bumpver",
+]
+
+[tool.pdm.scripts.post_build]
+composite = [
+    "git commit -am 'Bump'",
+    "pdm run tag",
+    "pdm run log",
+]
