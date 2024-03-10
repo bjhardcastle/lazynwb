@@ -1,10 +1,10 @@
-site_name: "cloudnwb"
+site_name: "lazynwb"
 site_description: ""
-site_url: "https://AllenInstitute.github.io/cloudnwb"
-repo_url: "https://github.com/AllenInstitute/cloudnwb"
-repo_name: "AllenInstitute/cloudnwb"
+site_url: "https://AllenInstitute.github.io/lazynwb"
+repo_url: "https://github.com/AllenInstitute/lazynwb"
+repo_name: "AllenInstitute/lazynwb"
 site_dir: "site"
-watch: [mkdocs.yml, ../src/cloudnwb]
+watch: [mkdocs.yml, ../src/lazynwb]
 copyright: Copyright &copy; 2024 Allen Institute for Neural Dynamics
 edit_uri: edit/main/docs/
 
@@ -65,9 +65,9 @@ extra_css:
 extra:
   social:
   - icon: fontawesome/brands/github
-    link: https://github.com/AllenInstitute/cloudnwb
+    link: https://github.com/AllenInstitute/lazynwb
   - icon: fontawesome/brands/python
-    link: https://pypi.org/project/cloudnwb/
+    link: https://pypi.org/project/lazynwb/
 
 
 validation:
@@ -137,7 +137,7 @@ plugins:
 
 # - git-committers:
 #     enabled: true
-#     repository: AllenInstitute/cloudnwb
+#     repository: AllenInstitute/lazynwb
 # - git-revision-date-localized:
 #     enable_creation_date: true
 #     type: timeago

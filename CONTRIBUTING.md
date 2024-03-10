@@ -7,8 +7,8 @@ Every little bit helps, and credit will always be given.
 
 1. Fork and clone the repository:
 ```bash
-git clone https://github.com/AllenInstitute/cloudnwb
-cd cloudnwb
+git clone https://github.com/AllenInstitute/lazynwb
+cd lazynwb
 ```
 
 2. Create a new virtual environment:
@@ -39,7 +39,7 @@ pdm install
 You now have an editable pip install of the project, with all dev dependencies.
 The following should work:
 ```bash
-python -c "import cloudnwb; print(cloudnwb.__version__)"
+python -c "import lazynwb; print(lazynwb.__version__)"
 ```
 
 ### Using PDM

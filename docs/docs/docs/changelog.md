@@ -1,1 +1,1 @@
---8<-- "https://raw.githubusercontent.com/AllenInstitute/cloudnwb/main/CHANGELOG.md"
+--8<-- "https://raw.githubusercontent.com/AllenInstitute/lazynwb/main/CHANGELOG.md"

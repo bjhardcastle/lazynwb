@@ -1,4 +1,4 @@
-"""Tests suite for `cloudnwb`."""
+"""Tests suite for `lazynwb`."""
 
 from pathlib import Path
 

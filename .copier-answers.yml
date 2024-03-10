@@ -12,10 +12,10 @@ copyright_holder_email: ''
 copyright_license: MIT
 package_version: 0.1.0
 project_description: ''
-project_name: cloudnwb
-python_package_distribution_name: cloudnwb
-python_package_import_name: cloudnwb
+project_name: lazynwb
+python_package_distribution_name: lazynwb
+python_package_import_name: lazynwb
 python_package_requires_python: '>=3.9'
-repository_name: cloudnwb
+repository_name: lazynwb
 repository_namespace: AllenInstitute
 

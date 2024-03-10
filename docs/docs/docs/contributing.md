@@ -1,1 +1,1 @@
---8<-- "https://raw.githubusercontent.com/AllenInstitute/cloudnwb/main/CONTRIBUTING.md"
+--8<-- "https://raw.githubusercontent.com/AllenInstitute/lazynwb/main/CONTRIBUTING.md"

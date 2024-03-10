@@ -1,1 +1,1 @@
---8<-- "https://raw.githubusercontent.com/AllenInstitute/cloudnwb/main/README.md"
+--8<-- "https://raw.githubusercontent.com/AllenInstitute/lazynwb/main/README.md"

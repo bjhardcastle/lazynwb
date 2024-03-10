@@ -6,12 +6,12 @@ import importlib.metadata
 import logging
 
 # import functions from submodules here:
-from cloudnwb.lazynwb import *
-from cloudnwb.io import *
+from lazynwb.base import *
+from lazynwb.file_io import *
 
 logger = logging.getLogger(__name__)
 
-__version__ = importlib.metadata.version("cloudnwb")
+__version__ = importlib.metadata.version("lazynwb")
 logger.debug(f"{__name__}.{__version__ = }")
 
     
