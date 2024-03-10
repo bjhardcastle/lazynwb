@@ -8,6 +8,7 @@ import logging
 # import functions from submodules here:
 from lazynwb.base import *
 from lazynwb.file_io import *
+from lazynwb.funcs import *
 
 logger = logging.getLogger(__name__)
 
