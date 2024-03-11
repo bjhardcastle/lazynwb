@@ -15,8 +15,8 @@ def open(path: npc_io.PathLike) -> h5py.File | zarr.Group:
     - currently supports NWB files saved in .hdf5 and .zarr format
 
     Examples:
-        >>> nwb = lazy_open_nwb('https://dandiarchive.s3.amazonaws.com/blobs/f78/fe2/f78fe2a6-3dc9-4c12-a288-fbf31ce6fc1c')
-        >>> nwb = lazy_open_nwb('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/39490bff-87c9-4ef2-b408-36334e748ac6/nwb/ecephys_620264_2022-08-02_15-39-59_experiment1_recording1.nwb')
+        >>> nwb = open('https://dandiarchive.s3.amazonaws.com/blobs/f78/fe2/f78fe2a6-3dc9-4c12-a288-fbf31ce6fc1c')
+        >>> nwb = open('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/39490bff-87c9-4ef2-b408-36334e748ac6/nwb/ecephys_620264_2022-08-02_15-39-59_experiment1_recording1.nwb')
     """
     path = npc_io.from_pathlike(path)
 
