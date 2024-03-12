@@ -58,7 +58,7 @@ class LazyNWB:
         raise AttributeError(f"No attribute named {name!r} in NWB file")
 
     def __getitem__(self, name) -> Any:
-        return getattr(self, name)
+        return self._nwb[name]
 
     def __contains__(self, name) -> bool:
         return name in self._nwb
