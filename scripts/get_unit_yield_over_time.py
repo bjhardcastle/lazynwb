@@ -58,7 +58,7 @@ def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
     with lazynwb.get_lazynwb_from_dandiset_asset(asset) as nwb:
         session_start_time = datetime.datetime.fromisoformat(nwb.session_start_time[()].decode())
         subject_id = nwb.general.subject.subject_id.asstr()[()]
-        classification = nwb.units.classification
+        classification = nwb.units.classification.asstr()[:]
         if classification.dtype == float:
             num_good_units = len(np.argwhere(~np.isnan(classification[:])).flatten())
             if num_good_units == 0:
@@ -70,7 +70,7 @@ def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
         results = []
         for device in np.unique(devices):
             device_units = devices == device
-            good_units = (classification.asstr()[:] == 'good') & device_units
+            good_units = (classification == 'good') & device_units
             unit_electrode_idx = nwb.units.electrodes[good_units]
             locations = []
             for electrode_idx in unit_electrode_idx:
