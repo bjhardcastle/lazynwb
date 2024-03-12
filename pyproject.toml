@@ -15,6 +15,7 @@ dependencies = [
     "polars>=0.20.14",
     "seaborn>=0.13.2",
     "tqdm>=4.66.2",
+    "dask>=2024.2.1",
 ]
 version = "0.1.0"
 classifiers = [
