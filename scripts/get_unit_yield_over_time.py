@@ -16,6 +16,8 @@ import tqdm
 
 import lazynwb
 
+CHEN_BRAINWIDE_DANDISET_ID = '000363'
+IBL_BRAINWIDE_DANDISET_ID = '000409'
 
 @dataclasses.dataclass
 class Result:
@@ -34,47 +36,49 @@ class Result:
 def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
     """Return one Result for each device in the nwb file (may be empty if no good units)."""
     nwb_path = asset.path
-    nwb = lazynwb.get_lazynwb_from_dandiset_asset(asset)
-    session_start_time = datetime.datetime.fromisoformat(nwb.session_start_time[()].decode())
-    subject_id = nwb.general.subject.subject_id.asstr()[()]
-    classification = nwb.units.classification
-    if classification.dtype == float:
-        num_good_units = len(np.argwhere(~np.isnan(classification[:])).flatten())
-        if num_good_units == 0:
-            assert nwb.units.anno_name.dtype == float
-            return [] # some sessions (e.g. 2019-02-16) are in dataset but apparently have no good units or area labels
-    if classification.dtype.name != 'object':
-        raise ValueError(f"Unrecognized classification dtype: {classification.dtype}")
-    devices = np.array([nwb[group]['device'].name.split('/')[-1] for group in nwb.units.electrode_group])
-    results = []
-    for device in np.unique(devices):
-        device_units = devices == device
-        good_units = (classification.asstr()[:] == 'good') & device_units
-        unit_electrode_idx = nwb.units.electrodes[good_units]
-        locations = []
-        for electrode_idx in unit_electrode_idx:
-            location: dict[str, str] = eval(nwb.general.extracellular_ephys.electrodes.location.asstr()[electrode_idx])
-            locations.append(location)
-        brain_region = locations[0]['brain_regions']
-        assert all(loc['brain_regions'] == brain_region for loc in locations)
-        num_good_units = len(np.argwhere(good_units).flatten())
-        assert num_good_units == len(locations)
-        most_common_area = next(name for name, count in collections.Counter(nwb.units.anno_name.asstr()[good_units]).most_common() if name)
-        results.append(
-            Result(
-                nwb_path=nwb_path, 
-                session_start_time=session_start_time, 
-                subject_id=subject_id, 
-                num_units=len(np.argwhere(device_units).flatten()),
-                num_good_units=num_good_units, 
-                device=device, 
-                is_single_shank='MS' not in device, # MS = multi-shank
-                is_v1_probe='1.0' in device,
-                brain_region=brain_region, 
-                most_common_area=most_common_area,
+    with lazynwb.get_lazynwb_from_dandiset_asset(asset) as nwb:
+        session_start_time = datetime.datetime.fromisoformat(nwb.session_start_time[()].decode())
+        subject_id = nwb.general.subject.subject_id.asstr()[()]
+        classification = nwb.units.classification
+        if classification.dtype == float:
+            num_good_units = len(np.argwhere(~np.isnan(classification[:])).flatten())
+            if num_good_units == 0:
+                assert nwb.units.anno_name.dtype == float
+                return [] # some sessions (e.g. 2019-02-16) are in dataset but apparently have no good units or area labels
+        if classification.dtype.name != 'object':
+            raise ValueError(f"Unrecognized classification dtype: {classification.dtype}")
+        devices = np.array([nwb[group]['device'].name.split('/')[-1] for group in nwb.units.electrode_group])
+        results = []
+        for device in np.unique(devices):
+            device_units = devices == device
+            good_units = (classification.asstr()[:] == 'good') & device_units
+            unit_electrode_idx = nwb.units.electrodes[good_units]
+            locations = []
+            for electrode_idx in unit_electrode_idx:
+                location: dict[str, str] = eval(nwb.general.extracellular_ephys.electrodes.location.asstr()[electrode_idx])
+                locations.append(location)
+            brain_region = locations[0]['brain_regions']
+            assert all(loc['brain_regions'] == brain_region for loc in locations)
+            num_good_units = len(np.argwhere(good_units).flatten())
+            assert num_good_units == len(locations)
+            most_common_area = next(name for name, count in collections.Counter(nwb.units.anno_name.asstr()[good_units]).most_common() if name)
+            results.append(
+                Result(
+                    nwb_path=nwb_path, 
+                    session_start_time=session_start_time, 
+                    subject_id=subject_id, 
+                    num_units=len(np.argwhere(device_units).flatten()),
+                    num_good_units=num_good_units, 
+                    device=device, 
+                    is_single_shank='MS' not in device, # MS = multi-shank
+                    is_v1_probe='1.0' in device,
+                    brain_region=brain_region, 
+                    most_common_area=most_common_area,
+                    )
                 )
-            )
-    return results
+        return results
+
+
 
 def append_to_csv(csv_name: str, results: Result | Iterable[Result]) -> None:
     if not isinstance(results, Iterable):
@@ -103,7 +107,18 @@ def save_results(dandiset_id: str, csv_name: str, helper: Callable, use_threadpo
             append_to_csv(csv_name, helper(asset))
 
 def main() -> None:
-    save_results(dandiset_id='000363', csv_name='chen_results.csv', helper=chen_helper, use_threadpool=False)
+    save_results(dandiset_id=CHEN_BRAINWIDE_DANDISET_ID, csv_name='chen_results.csv', helper=chen_helper, use_threadpool=False)
+    
+def get_ibl_brainwide_ephys_nwb_paths() -> tuple[dandi.dandiapi.RemoteBlobAsset, ...]:
+    assets = lazynwb.get_dandiset_assets(IBL_BRAINWIDE_DANDISET_ID)
+    assets = tuple(asset for asset in assets if all(label in asset.path for label in ('ecephys', '.nwb')))
+    subjects = {asset.path.split('/')[0] for asset in assets}
+    assets_for_subjects_with_multiple_days = []
+    for subject in subjects:
+        sessions = [asset for asset in assets if subject in asset.path]
+        if len(sessions) > 1:
+            assets_for_subjects_with_multiple_days.extend(sessions)
+    return tuple(assets_for_subjects_with_multiple_days)
 
 if __name__ == "__main__":
     main()
