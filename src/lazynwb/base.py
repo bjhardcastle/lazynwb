@@ -73,6 +73,15 @@ class LazyNWB:
             return f"{self.__class__.__name__}({self._path.as_posix()!r})"
         return repr(self._nwb)
 
+    def __enter__(self) -> LazyNWB:
+        return self
+    
+    def __exit__(self, *args, **kwargs) -> None:
+        if self._path is not None:
+            if isinstance(self._nwb, h5py.File):
+                self._nwb.close()
+            elif isinstance(self._nwb, zarr.Group):
+                self._nwb.store.close()
 
 if __name__ == "__main__":
     from npc_io import testmod
