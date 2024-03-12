@@ -23,6 +23,7 @@ class Result:
     session_start_time: datetime.datetime
     subject_id: str
     num_good_units: int
+    num_units: int
     brain_region: str
     device: str
     is_single_shank: bool 
@@ -47,22 +48,24 @@ def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
     devices = np.array([nwb[group]['device'].name.split('/')[-1] for group in nwb.units.electrode_group])
     results = []
     for device in np.unique(devices):
-        selected_units = (classification.asstr()[:] == 'good') & (devices == device)
-        unit_electrode_idx = nwb.units.electrodes[selected_units]
+        device_units = devices == device
+        good_units = (classification.asstr()[:] == 'good') & device_units
+        unit_electrode_idx = nwb.units.electrodes[good_units]
         locations = []
         for electrode_idx in unit_electrode_idx:
             location: dict[str, str] = eval(nwb.general.extracellular_ephys.electrodes.location.asstr()[electrode_idx])
             locations.append(location)
         brain_region = locations[0]['brain_regions']
         assert all(loc['brain_regions'] == brain_region for loc in locations)
-        num_good_units = len(np.argwhere(selected_units).flatten())
+        num_good_units = len(np.argwhere(good_units).flatten())
         assert num_good_units == len(locations)
-        most_common_area = next(name for name, count in collections.Counter(nwb.units.anno_name.asstr()[selected_units]).most_common() if name)
+        most_common_area = next(name for name, count in collections.Counter(nwb.units.anno_name.asstr()[good_units]).most_common() if name)
         results.append(
             Result(
                 nwb_path=nwb_path, 
                 session_start_time=session_start_time, 
                 subject_id=subject_id, 
+                num_units = len(device_units),
                 num_good_units=num_good_units, 
                 device=device, 
                 is_single_shank='MS' not in device, # MS = multi-shank
