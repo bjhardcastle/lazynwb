@@ -13,6 +13,8 @@ dependencies = [
     "dandi>=0.59.1",
     "remfile>=0.1.10",
     "polars>=0.20.14",
+    "seaborn>=0.13.2",
+    "tqdm>=4.66.2",
 ]
 version = "0.1.0"
 classifiers = [
