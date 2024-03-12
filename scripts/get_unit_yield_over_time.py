@@ -69,7 +69,8 @@ def append_to_csv(csv_name: str, results: Result | Iterable[Result]) -> None:
     df = pd.concat([df, pd.DataFrame.from_records(dataclasses.asdict(result) for result in results)])
     df.to_csv(csv_name, index=False)
 
-def save_results(dandiset_id: str, csv_name: str, helper: Callable, use_threadpool: bool = True) -> None:
+def save_results(dandiset_id: str, csv_name: str, helper: Callable, use_threadpool: bool = False) -> None:
+    """Threadpool currently encounters a deadlock - probably due to hdf5 file"""
     with contextlib.suppress(FileNotFoundError):
         os.unlink(csv_name)
     assets = lazynwb.get_dandiset_assets(dandiset_id)
