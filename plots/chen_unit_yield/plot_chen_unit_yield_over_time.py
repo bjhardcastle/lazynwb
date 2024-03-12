@@ -40,7 +40,7 @@ for brain_region in df.brain_region.unique():
     data = []
     for _, group_df in df.query(f'brain_region == "{brain_region}"').groupby('subject_id'):
         group_df.sort_values('session_start_time', ascending=True, inplace=True)
-        num_good_units_by_day = group_df['num_units'].array
+        num_good_units_by_day = group_df['num_good_units'].array
         a = np .full(10, np.nan)
         a[:len(group_df)] = (num_good_units_by_day - num_good_units_by_day[0])
         data.append(a)
