@@ -25,6 +25,8 @@ class Result:
     num_good_units: int
     brain_region: str
     device: str
+    is_single_shank: bool 
+    is_v1_probe: bool
     most_common_area: str
 
 
@@ -56,7 +58,19 @@ def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
         num_good_units = len(np.argwhere(selected_units).flatten())
         assert num_good_units == len(locations)
         most_common_area = next(name for name, count in collections.Counter(nwb.units.anno_name.asstr()[selected_units]).most_common() if name)
-        results.append(Result(nwb_path=nwb_path, session_start_time=session_start_time, subject_id=subject_id, num_good_units=num_good_units, device=device, brain_region=brain_region, most_common_area=most_common_area))
+        results.append(
+            Result(
+                nwb_path=nwb_path, 
+                session_start_time=session_start_time, 
+                subject_id=subject_id, 
+                num_good_units=num_good_units, 
+                device=device, 
+                is_single_shank='MS' not in device, # MS = multi-shank
+                is_v1_probe='1.0' in device,
+                brain_region=brain_region, 
+                most_common_area=most_common_area,
+                )
+            )
     return results
 
 def append_to_csv(csv_name: str, results: Result | Iterable[Result]) -> None:
