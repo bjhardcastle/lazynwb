@@ -33,7 +33,7 @@ def get_dandiset_nwbs(dandiset_id: str, version_id: str | None = None) -> Genera
         yield get_lazynwb_from_dandiset_asset(asset)
 
 def get_lazynwb_from_dandiset_asset(asset: dandi.dandiapi.BaseRemoteAsset) -> LazyNWB:
-    return LazyNWB(asset.get_content_url(follow_redirects=False, strip_query=False))
+    return LazyNWB(asset.get_content_url(follow_redirects=1, strip_query=False))
 
 def get_dandiset_assets(dandiset_id: str, version_id: str | None = None, lazy: bool = True) -> tuple[dandi.dandiapi.BaseRemoteAsset, ...]:
     """Get a sequence of assets from the specified Dandiset.
