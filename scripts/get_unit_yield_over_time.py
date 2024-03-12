@@ -65,7 +65,7 @@ def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
                 nwb_path=nwb_path, 
                 session_start_time=session_start_time, 
                 subject_id=subject_id, 
-                num_units = len(device_units),
+                num_units=len(np.argwhere(device_units).flatten()),
                 num_good_units=num_good_units, 
                 device=device, 
                 is_single_shank='MS' not in device, # MS = multi-shank
