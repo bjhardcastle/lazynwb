@@ -84,7 +84,7 @@ def get_spike_times(nwb: LazyNWB, unit_idx: int) -> Any:
         array([2925.85956667, 2931.19676667, 2944.81003333, ...,
            6696.99163333, 6700.57663333, 6700.89296667])
     """
-    return _get_indexed_units_column(nwb, "spike_times", unit_idx)
+    return get_indexed_units_column(nwb, "spike_times", unit_idx)
 
 def get_obs_intervals(nwb: LazyNWB, unit_idx: int) -> tuple[tuple[float, float], ...] | None:
     """Get the observation intervals for a single unit, from its index in the
@@ -97,10 +97,10 @@ def get_obs_intervals(nwb: LazyNWB, unit_idx: int) -> tuple[tuple[float, float],
         
     """
     with contextlib.suppress(KeyError):
-        return _get_indexed_units_column(nwb, "obs_intervals", unit_idx)
+        return get_indexed_units_column(nwb, "obs_intervals", unit_idx)
     return None
 
-def _get_indexed_units_column(nwb: LazyNWB, column: str, unit_idx: int) -> Any:
+def get_indexed_units_column(nwb: LazyNWB, column: str, unit_idx: int) -> Any:
     if column not in nwb.units:
         raise KeyError(f"Column {column!r} not found in units table")
     index_column = f"{column}_index"
