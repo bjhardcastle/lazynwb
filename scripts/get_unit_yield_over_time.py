@@ -7,6 +7,7 @@ import dataclasses
 import datetime
 import os
 from collections.abc import Iterable
+import threading
 from typing import Callable
 
 import dandi.dandiapi
@@ -18,6 +19,7 @@ import lazynwb
 
 CHEN_BRAINWIDE_DANDISET_ID = '000363'
 IBL_BRAINWIDE_DANDISET_ID = '000409'
+MUTEX_LOCK = threading.Lock()
 
 @dataclasses.dataclass
 class Result:
@@ -42,7 +44,9 @@ def append_to_csv(csv_name: str, results: Result | Iterable[Result]) -> None:
     except (FileNotFoundError, ValueError):
         df = pd.DataFrame()
     df = pd.concat([df, pd.DataFrame.from_records(dataclasses.asdict(result) for result in results)])
-    df.to_csv(csv_name, index=False)
+    # use lock to accommodate multi-threading
+    with MUTEX_LOCK:
+        df.to_csv(csv_name, index=False)
 
 def get_assets(dandiset_id: str) -> tuple[dandi.dandiapi.BaseRemoteAsset, ...]:
     if dandiset_id == CHEN_BRAINWIDE_DANDISET_ID:
@@ -57,15 +61,19 @@ def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
     nwb_path = asset.path
     with lazynwb.get_lazynwb_from_dandiset_asset(asset) as nwb:
         session_start_time = datetime.datetime.fromisoformat(nwb.session_start_time[()].decode())
+        if 'units' not in nwb:
+            return []
         subject_id = nwb.general.subject.subject_id.asstr()[()]
+        classification_dtype = nwb.units.classification.dtype
+        if classification_dtype == float:
+            assert nwb.units.anno_name.dtype == float
+            return [] # some sessions (e.g. 2019-02-16) are in dataset but apparently have no good units or area labels
+        if classification_dtype.name != 'object':
+            raise ValueError(f"Unrecognized classification dtype: {classification_dtype}")
         classification = nwb.units.classification.asstr()[:]
-        if classification.dtype == float:
-            num_good_units = len(np.argwhere(~np.isnan(classification[:])).flatten())
-            if num_good_units == 0:
-                assert nwb.units.anno_name.dtype == float
-                return [] # some sessions (e.g. 2019-02-16) are in dataset but apparently have no good units or area labels
-        if classification.dtype.name != 'object':
-            raise ValueError(f"Unrecognized classification dtype: {classification.dtype}")
+        #! this part is slow: looking up devices 100s/1000s of times 
+        # to speed it up, we need to get the path to the group (ie convert <HDF5
+        # object reference> to string, or something that can be used to index in dict)
         devices = np.array([nwb[group]['device'].name.split('/')[-1] for group in nwb.units.electrode_group])
         results = []
         for device in np.unique(devices):
@@ -162,8 +170,8 @@ def save_results(dandiset_id: str, csv_name: str, helper: Callable, use_threadpo
             append_to_csv(csv_name, results)
             
 def main() -> None:
-    save_results(dandiset_id=IBL_BRAINWIDE_DANDISET_ID, csv_name='ibl_results.csv', helper=ibl_helper, use_threadpool=False)
     save_results(dandiset_id=CHEN_BRAINWIDE_DANDISET_ID, csv_name='chen_results.csv', helper=chen_helper, use_threadpool=False)
+    save_results(dandiset_id=IBL_BRAINWIDE_DANDISET_ID, csv_name='ibl_results.csv', helper=ibl_helper, use_threadpool=False)
 
 if __name__ == "__main__":
     main()
