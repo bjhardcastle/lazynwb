@@ -1,0 +1,656 @@
+nwb_path,session_start_time,subject_id,num_good_units,num_units,brain_region,device,is_single_shank,is_v1_probe,most_common_area
+sub-440956/sub-440956_ses-20190208T133600_behavior+ecephys+ogen.nwb,2019-02-08 13:36:00-06:00,440956,124,534,left ALM,18005110031 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-440956/sub-440956_ses-20190208T133600_behavior+ecephys+ogen.nwb,2019-02-08 13:36:00-06:00,440956,58,348,right Striatum,18005117122 (neuropixels 1.0 - 3B),True,True,"Primary motor area, Layer 5"
+sub-440956/sub-440956_ses-20190208T133600_behavior+ecephys+ogen.nwb,2019-02-08 13:36:00-06:00,440956,100,397,right ALM,18005117412 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440956/sub-440956_ses-20190208T133600_behavior+ecephys+ogen.nwb,2019-02-08 13:36:00-06:00,440956,93,456,left Striatum,18005118502 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440956/sub-440956_ses-20190210T155629_behavior+ecephys+ogen.nwb,2019-02-10 15:56:29-06:00,440956,135,506,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 6a"
+sub-440956/sub-440956_ses-20190210T155629_behavior+ecephys+ogen.nwb,2019-02-10 15:56:29-06:00,440956,195,600,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-440956/sub-440956_ses-20190210T155629_behavior+ecephys+ogen.nwb,2019-02-10 15:56:29-06:00,440956,62,225,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Anteroventral nucleus of thalamus
+sub-440956/sub-440956_ses-20190210T155629_behavior+ecephys+ogen.nwb,2019-02-10 15:56:29-06:00,440956,160,680,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,"Globus pallidus, external segment"
+sub-442571/sub-442571_ses-20190301T140324_behavior+ecephys+ogen.nwb,2019-03-01 14:03:24-06:00,442571,76,338,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-442571/sub-442571_ses-20190301T140324_behavior+ecephys+ogen.nwb,2019-03-01 14:03:24-06:00,442571,158,459,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-442571/sub-442571_ses-20190301T140324_behavior+ecephys+ogen.nwb,2019-03-01 14:03:24-06:00,442571,146,467,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-442571/sub-442571_ses-20190301T140324_behavior+ecephys+ogen.nwb,2019-03-01 14:03:24-06:00,442571,53,328,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-455219/sub-455219_ses-20190807T134913_behavior+ecephys+ogen.nwb,2019-08-07 13:49:13-05:00,455219,246,676,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-455219/sub-455219_ses-20190807T134913_behavior+ecephys+ogen.nwb,2019-08-07 13:49:13-05:00,455219,151,409,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-455219/sub-455219_ses-20190807T134913_behavior+ecephys+ogen.nwb,2019-08-07 13:49:13-05:00,455219,66,342,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Pontine reticular nucleus
+sub-440957/sub-440957_ses-20190214T144611_behavior+ecephys+image+ogen.nwb,2019-02-14 14:46:11+00:00,440957,88,366,left ALM,18005106822 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440957/sub-440957_ses-20190214T144611_behavior+ecephys+image+ogen.nwb,2019-02-14 14:46:11+00:00,440957,8,107,right ALM,18005108721 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-440957/sub-440957_ses-20190214T144611_behavior+ecephys+image+ogen.nwb,2019-02-14 14:46:11+00:00,440957,73,395,right Striatum,18005117122 (neuropixels 1.0 - 3B),True,True,Reticular nucleus of the thalamus
+sub-440959/sub-440959_ses-20190223T173853_behavior+ecephys+image+ogen.nwb,2019-02-23 17:38:53-06:00,440959,115,427,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-440959/sub-440959_ses-20190223T173853_behavior+ecephys+image+ogen.nwb,2019-02-23 17:38:53-06:00,440959,167,607,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 2/3"
+sub-440959/sub-440959_ses-20190223T173853_behavior+ecephys+image+ogen.nwb,2019-02-23 17:38:53-06:00,440959,123,756,right Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain
+sub-440959/sub-440959_ses-20190223T173853_behavior+ecephys+image+ogen.nwb,2019-02-23 17:38:53-06:00,440959,132,415,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Ventral anterior-lateral complex of the thalamus
+sub-440958/sub-440958_ses-20190213T115547_behavior+ecephys+image+ogen.nwb,2019-02-13 11:55:47+00:00,440958,68,272,left ALM,18005106822 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 6a"
+sub-440958/sub-440958_ses-20190213T115547_behavior+ecephys+image+ogen.nwb,2019-02-13 11:55:47+00:00,440958,133,456,right ALM,18005108721 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440958/sub-440958_ses-20190213T115547_behavior+ecephys+image+ogen.nwb,2019-02-13 11:55:47+00:00,440958,29,144,right Striatum,18005117122 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440958/sub-440958_ses-20190213T115547_behavior+ecephys+image+ogen.nwb,2019-02-13 11:55:47+00:00,440958,117,488,left Striatum,18005118502 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440956/sub-440956_ses-20190207T120657_behavior+ecephys+image+ogen.nwb,2019-02-07 12:06:57+00:00,440956,189,674,left ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440956/sub-440956_ses-20190207T120657_behavior+ecephys+image+ogen.nwb,2019-02-07 12:06:57+00:00,440956,107,409,right ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440956/sub-440956_ses-20190207T120657_behavior+ecephys+image+ogen.nwb,2019-02-07 12:06:57+00:00,440956,79,489,right Striatum,18005117122 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440956/sub-440956_ses-20190207T120657_behavior+ecephys+image+ogen.nwb,2019-02-07 12:06:57+00:00,440956,84,380,left Striatum,18005118502 (neuropixels 1.0 - 3B),True,True,"Primary motor area, Layer 5"
+sub-440956/sub-440956_ses-20190209T150135_behavior+ecephys+image+ogen.nwb,2019-02-09 15:01:35+00:00,440956,95,478,right Striatum,18005117122 (neuropixels 1.0 - 3B),True,True,Reticular nucleus of the thalamus
+sub-440956/sub-440956_ses-20190209T150135_behavior+ecephys+image+ogen.nwb,2019-02-09 15:01:35+00:00,440956,110,677,left Striatum,18005118502 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440959/sub-440959_ses-20190219T121506_behavior+ecephys+image+ogen.nwb,2019-02-19 12:15:06+00:00,440959,44,211,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440959/sub-440959_ses-20190219T121506_behavior+ecephys+image+ogen.nwb,2019-02-19 12:15:06+00:00,440959,149,419,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-440959/sub-440959_ses-20190219T121506_behavior+ecephys+image+ogen.nwb,2019-02-19 12:15:06+00:00,440959,21,230,left Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Postsubiculum
+sub-440958/sub-440958_ses-20190217T154414_behavior+ecephys+image+ogen.nwb,2019-02-17 15:44:14+00:00,440958,100,381,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440958/sub-440958_ses-20190217T154414_behavior+ecephys+image+ogen.nwb,2019-02-17 15:44:14+00:00,440958,98,379,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-440958/sub-440958_ses-20190217T154414_behavior+ecephys+image+ogen.nwb,2019-02-17 15:44:14+00:00,440958,91,558,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Bed nuclei of the stria terminalis
+sub-440958/sub-440958_ses-20190217T154414_behavior+ecephys+image+ogen.nwb,2019-02-17 15:44:14+00:00,440958,78,502,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440958/sub-440958_ses-20190214T123412_behavior+ecephys+image+ogen.nwb,2019-02-14 12:34:12+00:00,440958,160,635,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-440958/sub-440958_ses-20190214T123412_behavior+ecephys+image+ogen.nwb,2019-02-14 12:34:12+00:00,440958,33,372,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 2/3"
+sub-440958/sub-440958_ses-20190214T123412_behavior+ecephys+image+ogen.nwb,2019-02-14 12:34:12+00:00,440958,54,283,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,"Primary motor area, Layer 5"
+sub-440958/sub-440958_ses-20190214T123412_behavior+ecephys+image+ogen.nwb,2019-02-14 12:34:12+00:00,440958,95,406,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440957/sub-440957_ses-20190211T143614_behavior+ecephys+image+ogen.nwb,2019-02-11 14:36:14+00:00,440957,133,511,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440957/sub-440957_ses-20190211T143614_behavior+ecephys+image+ogen.nwb,2019-02-11 14:36:14+00:00,440957,184,602,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440957/sub-440957_ses-20190211T143614_behavior+ecephys+image+ogen.nwb,2019-02-11 14:36:14+00:00,440957,154,617,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440957/sub-440957_ses-20190211T143614_behavior+ecephys+image+ogen.nwb,2019-02-11 14:36:14+00:00,440957,55,380,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440957/sub-440957_ses-20190212T153751_behavior+ecephys+image+ogen.nwb,2019-02-12 15:37:51+00:00,440957,79,389,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-440957/sub-440957_ses-20190212T153751_behavior+ecephys+image+ogen.nwb,2019-02-12 15:37:51+00:00,440957,272,753,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-440957/sub-440957_ses-20190212T153751_behavior+ecephys+image+ogen.nwb,2019-02-12 15:37:51+00:00,440957,83,421,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440957/sub-440957_ses-20190212T153751_behavior+ecephys+image+ogen.nwb,2019-02-12 15:37:51+00:00,440957,71,466,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440959/sub-440959_ses-20190220T134256_behavior+ecephys+image+ogen.nwb,2019-02-20 13:42:56+00:00,440959,32,185,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Frontal pole, layer 5"
+sub-440959/sub-440959_ses-20190220T134256_behavior+ecephys+image+ogen.nwb,2019-02-20 13:42:56+00:00,440959,102,354,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Ventral medial nucleus of the thalamus
+sub-440959/sub-440959_ses-20190220T134256_behavior+ecephys+image+ogen.nwb,2019-02-20 13:42:56+00:00,440959,26,167,left Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate gray layer"
+sub-440957/sub-440957_ses-20190213T145027_behavior+ecephys+image+ogen.nwb,2019-02-13 14:50:27+00:00,440957,59,293,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-440957/sub-440957_ses-20190213T145027_behavior+ecephys+image+ogen.nwb,2019-02-13 14:50:27+00:00,440957,70,315,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,"Primary motor area, Layer 5"
+sub-440957/sub-440957_ses-20190213T145027_behavior+ecephys+image+ogen.nwb,2019-02-13 14:50:27+00:00,440957,63,359,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440959/sub-440959_ses-20190224T133648_behavior+ecephys+image+ogen.nwb,2019-02-24 13:36:48+00:00,440959,136,508,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-440959/sub-440959_ses-20190224T133648_behavior+ecephys+image+ogen.nwb,2019-02-24 13:36:48+00:00,440959,84,563,right Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-440959/sub-440959_ses-20190224T133648_behavior+ecephys+image+ogen.nwb,2019-02-24 13:36:48+00:00,440959,176,525,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-440959/sub-440959_ses-20190221T140717_behavior+ecephys+image+ogen.nwb,2019-02-21 14:07:17+00:00,440959,145,480,left Thalamus,17216703352 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-440959/sub-440959_ses-20190221T140717_behavior+ecephys+image+ogen.nwb,2019-02-21 14:07:17+00:00,440959,175,593,left ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-440959/sub-440959_ses-20190221T140717_behavior+ecephys+image+ogen.nwb,2019-02-21 14:07:17+00:00,440959,63,293,left Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Postsubiculum
+sub-440958/sub-440958_ses-20190215T141028_behavior+ecephys+image+ogen.nwb,2019-02-15 14:10:28+00:00,440958,142,572,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-440958/sub-440958_ses-20190215T141028_behavior+ecephys+image+ogen.nwb,2019-02-15 14:10:28+00:00,440958,185,508,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, medial part, layer 6a"
+sub-440958/sub-440958_ses-20190215T141028_behavior+ecephys+image+ogen.nwb,2019-02-15 14:10:28+00:00,440958,38,134,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,"Primary motor area, Layer 2/3"
+sub-440958/sub-440958_ses-20190215T141028_behavior+ecephys+image+ogen.nwb,2019-02-15 14:10:28+00:00,440958,67,347,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440959/sub-440959_ses-20190225T142613_behavior+ecephys+image+ogen.nwb,2019-02-25 14:26:13+00:00,440959,151,489,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 6a"
+sub-440959/sub-440959_ses-20190225T142613_behavior+ecephys+image+ogen.nwb,2019-02-25 14:26:13+00:00,440959,102,700,right Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-440959/sub-440959_ses-20190225T142613_behavior+ecephys+image+ogen.nwb,2019-02-25 14:26:13+00:00,440959,138,588,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Ventral anterior-lateral complex of the thalamus
+sub-440959/sub-440959_ses-20190226T140636_behavior+ecephys+image+ogen.nwb,2019-02-26 14:06:36+00:00,440959,74,297,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 6a"
+sub-440959/sub-440959_ses-20190226T140636_behavior+ecephys+image+ogen.nwb,2019-02-26 14:06:36+00:00,440959,57,484,right Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Pedunculopontine nucleus
+sub-440959/sub-440959_ses-20190226T140636_behavior+ecephys+image+ogen.nwb,2019-02-26 14:06:36+00:00,440959,161,559,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Central lateral nucleus of the thalamus
+sub-442571/sub-442571_ses-20190227T134351_behavior+ecephys+image+ogen.nwb,2019-02-27 13:43:51+00:00,442571,40,266,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-442571/sub-442571_ses-20190227T134351_behavior+ecephys+image+ogen.nwb,2019-02-27 13:43:51+00:00,442571,86,290,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Frontal pole, layer 5"
+sub-442571/sub-442571_ses-20190227T134351_behavior+ecephys+image+ogen.nwb,2019-02-27 13:43:51+00:00,442571,69,401,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-442571/sub-442571_ses-20190227T134351_behavior+ecephys+image+ogen.nwb,2019-02-27 13:43:51+00:00,442571,84,472,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-441666/sub-441666_ses-20190517T150543_behavior+ecephys+image+ogen.nwb,2019-05-17 15:05:43+00:00,441666,99,365,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 6a"
+sub-441666/sub-441666_ses-20190517T150543_behavior+ecephys+image+ogen.nwb,2019-05-17 15:05:43+00:00,441666,51,247,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,Olfactory areas
+sub-441666/sub-441666_ses-20190517T150543_behavior+ecephys+image+ogen.nwb,2019-05-17 15:05:43+00:00,441666,76,412,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate white layer"
+sub-441666/sub-441666_ses-20190517T150543_behavior+ecephys+image+ogen.nwb,2019-05-17 15:05:43+00:00,441666,52,417,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-442571/sub-442571_ses-20190228T140832_behavior+ecephys+image+ogen.nwb,2019-02-28 14:08:32+00:00,442571,146,500,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-442571/sub-442571_ses-20190228T140832_behavior+ecephys+image+ogen.nwb,2019-02-28 14:08:32+00:00,442571,205,584,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-442571/sub-442571_ses-20190228T140832_behavior+ecephys+image+ogen.nwb,2019-02-28 14:08:32+00:00,442571,107,420,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-442571/sub-442571_ses-20190228T140832_behavior+ecephys+image+ogen.nwb,2019-02-28 14:08:32+00:00,442571,145,633,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-442571/sub-442571_ses-20190302T150148_behavior+ecephys+image+ogen.nwb,2019-03-02 15:01:48+00:00,442571,105,393,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-442571/sub-442571_ses-20190302T150148_behavior+ecephys+image+ogen.nwb,2019-03-02 15:01:48+00:00,442571,118,450,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-442571/sub-442571_ses-20190302T150148_behavior+ecephys+image+ogen.nwb,2019-03-02 15:01:48+00:00,442571,123,435,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,"Globus pallidus, external segment"
+sub-442571/sub-442571_ses-20190302T150148_behavior+ecephys+image+ogen.nwb,2019-03-02 15:01:48+00:00,442571,79,396,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-442571/sub-442571_ses-20190303T144606_behavior+ecephys+image+ogen.nwb,2019-03-03 14:46:06+00:00,442571,63,255,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-442571/sub-442571_ses-20190303T144606_behavior+ecephys+image+ogen.nwb,2019-03-03 14:46:06+00:00,442571,151,420,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-442571/sub-442571_ses-20190303T144606_behavior+ecephys+image+ogen.nwb,2019-03-03 14:46:06+00:00,442571,130,574,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Pallidum
+sub-442571/sub-442571_ses-20190303T144606_behavior+ecephys+image+ogen.nwb,2019-03-03 14:46:06+00:00,442571,92,499,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-440959/sub-440959_ses-20190222T130111_behavior+ecephys+image.nwb,2019-02-22 13:01:11+00:00,440959,131,513,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-440959/sub-440959_ses-20190222T130111_behavior+ecephys+image.nwb,2019-02-22 13:01:11+00:00,440959,224,632,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Ventral anterior-lateral complex of the thalamus
+sub-440959/sub-440959_ses-20190222T130111_behavior+ecephys+image.nwb,2019-02-22 13:01:11+00:00,440959,97,612,left Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-449141/sub-449141_ses-20190530T173316_behavior+ecephys+image+ogen.nwb,2019-05-30 17:33:16+00:00,449141,258,815,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-449141/sub-449141_ses-20190530T173316_behavior+ecephys+image+ogen.nwb,2019-05-30 17:33:16+00:00,449141,106,313,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 2/3"
+sub-449141/sub-449141_ses-20190530T173316_behavior+ecephys+image+ogen.nwb,2019-05-30 17:33:16+00:00,449141,98,499,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-449141/sub-449141_ses-20190530T173316_behavior+ecephys+image+ogen.nwb,2019-05-30 17:33:16+00:00,449141,91,489,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-441666/sub-441666_ses-20190513T144253_behavior+ecephys+image+ogen.nwb,2019-05-13 14:42:53+00:00,441666,68,299,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-441666/sub-441666_ses-20190513T144253_behavior+ecephys+image+ogen.nwb,2019-05-13 14:42:53+00:00,441666,100,378,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-441666/sub-441666_ses-20190513T144253_behavior+ecephys+image+ogen.nwb,2019-05-13 14:42:53+00:00,441666,68,524,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Red nucleus
+sub-441666/sub-441666_ses-20190513T144253_behavior+ecephys+image+ogen.nwb,2019-05-13 14:42:53+00:00,441666,64,374,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate gray layer"
+sub-441666/sub-441666_ses-20190514T154424_behavior+ecephys+image+ogen.nwb,2019-05-14 15:44:24+00:00,441666,41,234,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-441666/sub-441666_ses-20190514T154424_behavior+ecephys+image+ogen.nwb,2019-05-14 15:44:24+00:00,441666,98,371,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-441666/sub-441666_ses-20190514T154424_behavior+ecephys+image+ogen.nwb,2019-05-14 15:44:24+00:00,441666,88,577,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Postsubiculum
+sub-441666/sub-441666_ses-20190514T154424_behavior+ecephys+image+ogen.nwb,2019-05-14 15:44:24+00:00,441666,63,566,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-441666/sub-441666_ses-20190516T152922_behavior+ecephys+image+ogen.nwb,2019-05-16 15:29:22+00:00,441666,202,621,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 2/3"
+sub-441666/sub-441666_ses-20190516T152922_behavior+ecephys+image+ogen.nwb,2019-05-16 15:29:22+00:00,441666,115,415,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 2/3"
+sub-441666/sub-441666_ses-20190516T152922_behavior+ecephys+image+ogen.nwb,2019-05-16 15:29:22+00:00,441666,91,417,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-441666/sub-441666_ses-20190516T152922_behavior+ecephys+image+ogen.nwb,2019-05-16 15:29:22+00:00,441666,93,514,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-441666/sub-441666_ses-20190515T153723_behavior+ecephys+image+ogen.nwb,2019-05-15 15:37:23+00:00,441666,63,310,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-441666/sub-441666_ses-20190515T153723_behavior+ecephys+image+ogen.nwb,2019-05-15 15:37:23+00:00,441666,78,278,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 6a"
+sub-441666/sub-441666_ses-20190515T153723_behavior+ecephys+image+ogen.nwb,2019-05-15 15:37:23+00:00,441666,72,405,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-441666/sub-441666_ses-20190515T153723_behavior+ecephys+image+ogen.nwb,2019-05-15 15:37:23+00:00,441666,101,565,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Red nucleus
+sub-449141/sub-449141_ses-20190531T161406_behavior+ecephys+image+ogen.nwb,2019-05-31 16:14:06+00:00,449141,176,508,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-449141/sub-449141_ses-20190531T161406_behavior+ecephys+image+ogen.nwb,2019-05-31 16:14:06+00:00,449141,203,634,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-449141/sub-449141_ses-20190531T161406_behavior+ecephys+image+ogen.nwb,2019-05-31 16:14:06+00:00,449141,79,434,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-449141/sub-449141_ses-20190531T161406_behavior+ecephys+image+ogen.nwb,2019-05-31 16:14:06+00:00,449141,41,387,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-449141/sub-449141_ses-20190601T175411_behavior+ecephys+image+ogen.nwb,2019-06-01 17:54:11+00:00,449141,184,449,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-449141/sub-449141_ses-20190601T175411_behavior+ecephys+image+ogen.nwb,2019-06-01 17:54:11+00:00,449141,213,583,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-449141/sub-449141_ses-20190601T175411_behavior+ecephys+image+ogen.nwb,2019-06-01 17:54:11+00:00,449141,81,439,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-449141/sub-449141_ses-20190601T175411_behavior+ecephys+image+ogen.nwb,2019-06-01 17:54:11+00:00,449141,93,365,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-449141/sub-449141_ses-20190602T155210_behavior+ecephys+image+ogen.nwb,2019-06-02 15:52:10+00:00,449141,205,619,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-449141/sub-449141_ses-20190602T155210_behavior+ecephys+image+ogen.nwb,2019-06-02 15:52:10+00:00,449141,184,529,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-449141/sub-449141_ses-20190602T155210_behavior+ecephys+image+ogen.nwb,2019-06-02 15:52:10+00:00,449141,79,404,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Pontine reticular nucleus
+sub-449141/sub-449141_ses-20190602T155210_behavior+ecephys+image+ogen.nwb,2019-06-02 15:52:10+00:00,449141,65,407,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-449141/sub-449141_ses-20190603T160047_behavior+ecephys+image+ogen.nwb,2019-06-03 16:00:47+00:00,449141,137,462,right Striatum,17131309211 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-449141/sub-449141_ses-20190603T160047_behavior+ecephys+image+ogen.nwb,2019-06-03 16:00:47+00:00,449141,77,286,left Striatum,17216703352 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-449141/sub-449141_ses-20190603T160047_behavior+ecephys+image+ogen.nwb,2019-06-03 16:00:47+00:00,449141,205,580,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-449141/sub-449141_ses-20190603T160047_behavior+ecephys+image+ogen.nwb,2019-06-03 16:00:47+00:00,449141,256,776,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Lateral posterior nucleus of the thalamus
+sub-449141/sub-449141_ses-20190604T152447_behavior+ecephys+image+ogen.nwb,2019-06-04 15:24:47+00:00,449141,60,242,right Striatum,17131309211 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-449141/sub-449141_ses-20190604T152447_behavior+ecephys+image+ogen.nwb,2019-06-04 15:24:47+00:00,449141,71,258,left Striatum,17216703352 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-449141/sub-449141_ses-20190604T152447_behavior+ecephys+image+ogen.nwb,2019-06-04 15:24:47+00:00,449141,178,603,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Lateral posterior nucleus of the thalamus
+sub-449141/sub-449141_ses-20190604T152447_behavior+ecephys+image+ogen.nwb,2019-06-04 15:24:47+00:00,449141,187,530,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Ventral medial nucleus of the thalamus
+sub-455219/sub-455219_ses-20190805T152117_behavior+ecephys+image+ogen.nwb,2019-08-05 15:21:17+00:00,455219,80,375,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-455219/sub-455219_ses-20190805T152117_behavior+ecephys+image+ogen.nwb,2019-08-05 15:21:17+00:00,455219,195,524,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,Olfactory areas
+sub-455219/sub-455219_ses-20190805T152117_behavior+ecephys+image+ogen.nwb,2019-08-05 15:21:17+00:00,455219,163,505,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-455219/sub-455219_ses-20190805T152117_behavior+ecephys+image+ogen.nwb,2019-08-05 15:21:17+00:00,455219,60,296,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-455219/sub-455219_ses-20190806T143015_behavior+ecephys+image+ogen.nwb,2019-08-06 14:30:15+00:00,455219,130,521,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-455219/sub-455219_ses-20190806T143015_behavior+ecephys+image+ogen.nwb,2019-08-06 14:30:15+00:00,455219,187,529,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-455219/sub-455219_ses-20190806T143015_behavior+ecephys+image+ogen.nwb,2019-08-06 14:30:15+00:00,455219,162,489,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-455219/sub-455219_ses-20190806T143015_behavior+ecephys+image+ogen.nwb,2019-08-06 14:30:15+00:00,455219,51,279,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Pontine reticular nucleus
+sub-455219/sub-455219_ses-20190808T140448_behavior+ecephys+image+ogen.nwb,2019-08-08 14:04:48+00:00,455219,146,478,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-455219/sub-455219_ses-20190808T140448_behavior+ecephys+image+ogen.nwb,2019-08-08 14:04:48+00:00,455219,210,561,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-455219/sub-455219_ses-20190808T140448_behavior+ecephys+image+ogen.nwb,2019-08-08 14:04:48+00:00,455219,161,549,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-455219/sub-455219_ses-20190808T140448_behavior+ecephys+image+ogen.nwb,2019-08-08 14:04:48+00:00,455219,82,369,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Pontine reticular nucleus
+sub-455220/sub-455220_ses-20190729T145044_behavior+ecephys+image+ogen.nwb,2019-07-29 14:50:44+00:00,455220,45,264,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-455220/sub-455220_ses-20190729T145044_behavior+ecephys+image+ogen.nwb,2019-07-29 14:50:44+00:00,455220,118,565,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-455220/sub-455220_ses-20190729T145044_behavior+ecephys+image+ogen.nwb,2019-07-29 14:50:44+00:00,455220,61,375,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Red nucleus
+sub-455220/sub-455220_ses-20190730T154125_behavior+ecephys+image+ogen.nwb,2019-07-30 15:41:25+00:00,455220,120,448,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-455220/sub-455220_ses-20190730T154125_behavior+ecephys+image+ogen.nwb,2019-07-30 15:41:25+00:00,455220,236,732,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-455220/sub-455220_ses-20190730T154125_behavior+ecephys+image+ogen.nwb,2019-07-30 15:41:25+00:00,455220,46,381,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-455220/sub-455220_ses-20190730T154125_behavior+ecephys+image+ogen.nwb,2019-07-30 15:41:25+00:00,455220,76,438,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-455220/sub-455220_ses-20190731T151805_behavior+ecephys+image+ogen.nwb,2019-07-31 15:18:05+00:00,455220,128,517,right ALM,17131309211 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 2/3"
+sub-455220/sub-455220_ses-20190731T151805_behavior+ecephys+image+ogen.nwb,2019-07-31 15:18:05+00:00,455220,208,614,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-455220/sub-455220_ses-20190731T151805_behavior+ecephys+image+ogen.nwb,2019-07-31 15:18:05+00:00,455220,110,479,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-455220/sub-455220_ses-20190731T151805_behavior+ecephys+image+ogen.nwb,2019-07-31 15:18:05+00:00,455220,42,376,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate white layer"
+sub-455220/sub-455220_ses-20190801T135056_behavior+ecephys+image+ogen.nwb,2019-08-01 13:50:56+00:00,455220,290,723,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 5"
+sub-455220/sub-455220_ses-20190801T135056_behavior+ecephys+image+ogen.nwb,2019-08-01 13:50:56+00:00,455220,83,332,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-455220/sub-455220_ses-20190801T135056_behavior+ecephys+image+ogen.nwb,2019-08-01 13:50:56+00:00,455220,54,373,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-455220/sub-455220_ses-20190803T150200_behavior+ecephys+image+ogen.nwb,2019-08-03 15:02:00+00:00,455220,83,264,right Striatum,17131309211 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-455220/sub-455220_ses-20190803T150200_behavior+ecephys+image+ogen.nwb,2019-08-03 15:02:00+00:00,455220,60,215,left Striatum,17216703352 (neuropixels 1.0 - 3B),True,True,"Globus pallidus, external segment"
+sub-455220/sub-455220_ses-20190803T150200_behavior+ecephys+image+ogen.nwb,2019-08-03 15:02:00+00:00,455220,142,525,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-455220/sub-455220_ses-20190803T150200_behavior+ecephys+image+ogen.nwb,2019-08-03 15:02:00+00:00,455220,148,562,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-456772/sub-456772_ses-20191119T115109_behavior+ecephys+image+ogen.nwb,2019-11-19 11:51:09+00:00,456772,39,176,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,Subiculum
+sub-456772/sub-456772_ses-20191119T115109_behavior+ecephys+image+ogen.nwb,2019-11-19 11:51:09+00:00,456772,22,159,left Midbrain,19011116163 (neuropixels 2.0 - MS),False,False,Subiculum
+sub-456772/sub-456772_ses-20191119T115109_behavior+ecephys+image+ogen.nwb,2019-11-19 11:51:09+00:00,456772,45,194,left ALM,19011116211 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-456772/sub-456772_ses-20191119T130822_behavior+ecephys+image+ogen.nwb,2019-11-19 13:08:22+00:00,456772,80,219,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,"Superior colliculus, motor related, intermediate white layer"
+sub-456772/sub-456772_ses-20191119T130822_behavior+ecephys+image+ogen.nwb,2019-11-19 13:08:22+00:00,456772,39,142,left Midbrain,19011116163 (neuropixels 2.0 - MS),False,False,"Superior colliculus, motor related, intermediate white layer"
+sub-456772/sub-456772_ses-20191119T130822_behavior+ecephys+image+ogen.nwb,2019-11-19 13:08:22+00:00,456772,38,201,left ALM,19011116211 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-456772/sub-456772_ses-20191120T115527_behavior+ecephys+image+ogen.nwb,2019-11-20 11:55:27+00:00,456772,42,175,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,"Superior colliculus, motor related, intermediate white layer"
+sub-456772/sub-456772_ses-20191120T115527_behavior+ecephys+image+ogen.nwb,2019-11-20 11:55:27+00:00,456772,56,220,left Midbrain,19011116163 (neuropixels 2.0 - MS),False,False,"Superior colliculus, motor related, intermediate white layer"
+sub-456772/sub-456772_ses-20191120T115527_behavior+ecephys+image+ogen.nwb,2019-11-20 11:55:27+00:00,456772,119,394,left ALM,19011116211 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-456772/sub-456772_ses-20191120T130334_behavior+ecephys+image+ogen.nwb,2019-11-20 13:03:34+00:00,456772,53,150,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,Midbrain reticular nucleus
+sub-456772/sub-456772_ses-20191120T130334_behavior+ecephys+image+ogen.nwb,2019-11-20 13:03:34+00:00,456772,70,209,left Midbrain,19011116163 (neuropixels 2.0 - MS),False,False,Midbrain reticular nucleus
+sub-456772/sub-456772_ses-20191120T130334_behavior+ecephys+image+ogen.nwb,2019-11-20 13:03:34+00:00,456772,71,251,left ALM,19011116211 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-456772/sub-456772_ses-20191121T113844_behavior+ecephys+image+ogen.nwb,2019-11-21 11:38:44+00:00,456772,180,478,right Thalamus,19011111142 (neuropixels 2.0 - MS),False,False,Ventral anterior-lateral complex of the thalamus
+sub-456772/sub-456772_ses-20191121T113844_behavior+ecephys+image+ogen.nwb,2019-11-21 11:38:44+00:00,456772,143,362,left Thalamus,19011116163 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-456772/sub-456772_ses-20191121T113844_behavior+ecephys+image+ogen.nwb,2019-11-21 11:38:44+00:00,456772,21,173,right ALM,19011116211 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-456772/sub-456772_ses-20191121T124405_behavior+ecephys+image+ogen.nwb,2019-11-21 12:44:05+00:00,456772,91,334,right Thalamus,19011111142 (neuropixels 2.0 - MS),False,False,Lateral dorsal nucleus of thalamus
+sub-456772/sub-456772_ses-20191121T124405_behavior+ecephys+image+ogen.nwb,2019-11-21 12:44:05+00:00,456772,139,349,left Thalamus,19011116163 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-456772/sub-456772_ses-20191121T124405_behavior+ecephys+image+ogen.nwb,2019-11-21 12:44:05+00:00,456772,23,95,right ALM,19011116211 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-456772/sub-456772_ses-20191122T134226_behavior+ecephys+image+ogen.nwb,2019-11-22 13:42:26+00:00,456772,158,364,right Thalamus,19011111142 (neuropixels 2.0 - MS),False,False,Ventral anterior-lateral complex of the thalamus
+sub-456772/sub-456772_ses-20191122T134226_behavior+ecephys+image+ogen.nwb,2019-11-22 13:42:26+00:00,456772,120,336,left Thalamus,19011116163 (neuropixels 2.0 - MS),False,False,Paracentral nucleus
+sub-456772/sub-456772_ses-20191122T134226_behavior+ecephys+image+ogen.nwb,2019-11-22 13:42:26+00:00,456772,65,322,right ALM,19011116211 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-456772/sub-456772_ses-20191122T144855_behavior+ecephys+image+ogen.nwb,2019-11-22 14:48:55+00:00,456772,209,456,right Thalamus,19011111142 (neuropixels 2.0 - MS),False,False,Ventral anterior-lateral complex of the thalamus
+sub-456772/sub-456772_ses-20191122T144855_behavior+ecephys+image+ogen.nwb,2019-11-22 14:48:55+00:00,456772,163,398,left Thalamus,19011116163 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-456772/sub-456772_ses-20191122T144855_behavior+ecephys+image+ogen.nwb,2019-11-22 14:48:55+00:00,456772,105,294,right ALM,19011116211 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-456772/sub-456772_ses-20191123T135013_behavior+ecephys+image+ogen.nwb,2019-11-23 13:50:13+00:00,456772,68,245,right Striatum,19011111142 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-456772/sub-456772_ses-20191123T135013_behavior+ecephys+image+ogen.nwb,2019-11-23 13:50:13+00:00,456772,204,510,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, ventrolateral part, layer 5"
+sub-456772/sub-456772_ses-20191123T135013_behavior+ecephys+image+ogen.nwb,2019-11-23 13:50:13+00:00,456772,60,203,left Striatum,19011116163 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-456772/sub-456772_ses-20191123T145127_behavior+ecephys+image+ogen.nwb,2019-11-23 14:51:27+00:00,456772,128,307,right Striatum,19011111142 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-456772/sub-456772_ses-20191123T145127_behavior+ecephys+image+ogen.nwb,2019-11-23 14:51:27+00:00,456772,188,478,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, ventrolateral part, layer 6a"
+sub-456772/sub-456772_ses-20191123T145127_behavior+ecephys+image+ogen.nwb,2019-11-23 14:51:27+00:00,456772,126,378,left Striatum,19011116163 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-456773/sub-456773_ses-20191002T143533_behavior+ecephys+ogen.nwb,2019-10-02 14:35:33+00:00,456773,151,569,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Frontal pole, layer 5"
+sub-456773/sub-456773_ses-20191002T143533_behavior+ecephys+ogen.nwb,2019-10-02 14:35:33+00:00,456773,56,305,right Medulla,18005107871 (neuropixels 1.0 - 3B),True,True,Parvicellular reticular nucleus
+sub-456773/sub-456773_ses-20191002T143533_behavior+ecephys+ogen.nwb,2019-10-02 14:35:33+00:00,456773,79,545,left Medulla,18408406182 (neuropixels 1.0 - 3B),True,True,Gigantocellular reticular nucleus
+sub-456773/sub-456773_ses-20191002T143533_behavior+ecephys+ogen.nwb,2019-10-02 14:35:33+00:00,456773,166,538,right ALM,18408406312 (neuropixels 1.0 - 3B),True,True,"Frontal pole, layer 2/3"
+sub-456773/sub-456773_ses-20191003T153548_behavior+ecephys+image+ogen.nwb,2019-10-03 15:35:48+00:00,456773,28,231,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Frontal pole, layer 2/3"
+sub-456773/sub-456773_ses-20191003T153548_behavior+ecephys+image+ogen.nwb,2019-10-03 15:35:48+00:00,456773,111,396,right Medulla,18005107871 (neuropixels 1.0 - 3B),True,True,Gigantocellular reticular nucleus
+sub-456773/sub-456773_ses-20191003T153548_behavior+ecephys+image+ogen.nwb,2019-10-03 15:35:48+00:00,456773,83,446,left Medulla,18408406182 (neuropixels 1.0 - 3B),True,True,Gigantocellular reticular nucleus
+sub-456773/sub-456773_ses-20191003T153548_behavior+ecephys+image+ogen.nwb,2019-10-03 15:35:48+00:00,456773,50,319,right ALM,18408406312 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-456773/sub-456773_ses-20191004T143720_behavior+ecephys+image+ogen.nwb,2019-10-04 14:37:20+00:00,456773,135,421,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-456773/sub-456773_ses-20191004T143720_behavior+ecephys+image+ogen.nwb,2019-10-04 14:37:20+00:00,456773,60,367,right Medulla,18005107871 (neuropixels 1.0 - 3B),True,True,Intermediate reticular nucleus
+sub-456773/sub-456773_ses-20191004T143720_behavior+ecephys+image+ogen.nwb,2019-10-04 14:37:20+00:00,456773,91,523,left Medulla,18408406182 (neuropixels 1.0 - 3B),True,True,Intermediate reticular nucleus
+sub-456773/sub-456773_ses-20191004T143720_behavior+ecephys+image+ogen.nwb,2019-10-04 14:37:20+00:00,456773,128,498,right ALM,18408406312 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-456774/sub-456774_ses-20191021T142044_behavior+ecephys+image+ogen.nwb,2019-10-21 14:20:44+00:00,456774,175,529,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-456774/sub-456774_ses-20191021T142044_behavior+ecephys+image+ogen.nwb,2019-10-21 14:20:44+00:00,456774,49,354,right Medulla,18005107871 (neuropixels 1.0 - 3B),True,True,"Spinal nucleus of the trigeminal, oral part"
+sub-456774/sub-456774_ses-20191021T142044_behavior+ecephys+image+ogen.nwb,2019-10-21 14:20:44+00:00,456774,79,495,left Medulla,18408406182 (neuropixels 1.0 - 3B),True,True,Medial vestibular nucleus
+sub-456774/sub-456774_ses-20191021T142044_behavior+ecephys+image+ogen.nwb,2019-10-21 14:20:44+00:00,456774,229,832,right ALM,18408406312 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-456773/sub-456773_ses-20191005T142316_behavior+ecephys+image+ogen.nwb,2019-10-05 14:23:16+00:00,456773,145,457,left ALM,17216703352 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-456773/sub-456773_ses-20191005T142316_behavior+ecephys+image+ogen.nwb,2019-10-05 14:23:16+00:00,456773,20,338,right Medulla,18005107871 (neuropixels 1.0 - 3B),True,True,"Spinal nucleus of the trigeminal, oral part"
+sub-456773/sub-456773_ses-20191005T142316_behavior+ecephys+image+ogen.nwb,2019-10-05 14:23:16+00:00,456773,91,478,left Medulla,18408406182 (neuropixels 1.0 - 3B),True,True,Medial vestibular nucleus
+sub-456773/sub-456773_ses-20191005T142316_behavior+ecephys+image+ogen.nwb,2019-10-05 14:23:16+00:00,456773,90,457,right ALM,18408406312 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-456774/sub-456774_ses-20191023T142402_behavior+ecephys+image+ogen.nwb,2019-10-23 14:24:02+00:00,456774,58,272,left Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-456774/sub-456774_ses-20191023T142402_behavior+ecephys+image+ogen.nwb,2019-10-23 14:24:02+00:00,456774,48,236,right ALM,19011116153 (neuropixels 2.0 - MS),False,False,"Prelimbic area, layer 6a"
+sub-456774/sub-456774_ses-20191023T142402_behavior+ecephys+image+ogen.nwb,2019-10-23 14:24:02+00:00,456774,72,334,right Medulla,19011116211 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-456774/sub-456774_ses-20191022T133136_behavior+ecephys+image+ogen.nwb,2019-10-22 13:31:36+00:00,456774,95,395,left Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-456774/sub-456774_ses-20191022T133136_behavior+ecephys+image+ogen.nwb,2019-10-22 13:31:36+00:00,456774,88,308,left ALM,19011116153 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-456774/sub-456774_ses-20191022T133136_behavior+ecephys+image+ogen.nwb,2019-10-22 13:31:36+00:00,456774,96,502,right Medulla,19011116211 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-460432/sub-460432_ses-20191217T123303_behavior+ecephys+image+ogen.nwb,2019-12-17 12:33:03+00:00,460432,62,249,right Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Medulla
+sub-460432/sub-460432_ses-20191217T123303_behavior+ecephys+image+ogen.nwb,2019-12-17 12:33:03+00:00,460432,98,422,left Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Lateral posterior nucleus of the thalamus
+sub-460432/sub-460432_ses-20191217T123303_behavior+ecephys+image+ogen.nwb,2019-12-17 12:33:03+00:00,460432,99,486,left ALM,19011116163 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-460432/sub-460432_ses-20191218T111453_behavior+ecephys+image+ogen.nwb,2019-12-18 11:14:53+00:00,460432,98,321,right Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Medulla
+sub-460432/sub-460432_ses-20191218T111453_behavior+ecephys+image+ogen.nwb,2019-12-18 11:14:53+00:00,460432,62,195,left Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Midbrain reticular nucleus
+sub-460432/sub-460432_ses-20191218T111453_behavior+ecephys+image+ogen.nwb,2019-12-18 11:14:53+00:00,460432,162,690,left ALM,19011116163 (neuropixels 2.0 - MS),False,False,"Orbital area, lateral part, layer 5"
+sub-460432/sub-460432_ses-20191219T134919_behavior+ecephys+image+ogen.nwb,2019-12-19 13:49:19+00:00,460432,61,288,left Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-460432/sub-460432_ses-20191219T134919_behavior+ecephys+image+ogen.nwb,2019-12-19 13:49:19+00:00,460432,103,301,right Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Anterior pretectal nucleus
+sub-460432/sub-460432_ses-20191219T134919_behavior+ecephys+image+ogen.nwb,2019-12-19 13:49:19+00:00,460432,204,535,right ALM,19011116163 (neuropixels 2.0 - MS),False,False,"Orbital area, ventrolateral part, layer 5"
+sub-460432/sub-460432_ses-20191220T140433_behavior+ecephys+image+ogen.nwb,2019-12-20 14:04:33+00:00,460432,68,293,left Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Inferior olivary complex
+sub-460432/sub-460432_ses-20191220T140433_behavior+ecephys+image+ogen.nwb,2019-12-20 14:04:33+00:00,460432,78,321,right Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Posterior limiting nucleus of the thalamus
+sub-460432/sub-460432_ses-20191220T140433_behavior+ecephys+image+ogen.nwb,2019-12-20 14:04:33+00:00,460432,38,269,right ALM,19011116163 (neuropixels 2.0 - MS),False,False,"Orbital area, lateral part, layer 5"
+sub-460434/sub-460434_ses-20191112T114755_behavior+ecephys+image+ogen.nwb,2019-11-12 11:47:55+00:00,460434,5,104,left Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Pontine reticular nucleus
+sub-460434/sub-460434_ses-20191112T114755_behavior+ecephys+image+ogen.nwb,2019-11-12 11:47:55+00:00,460434,121,441,left ALM,19011116153 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 6a"
+sub-460434/sub-460434_ses-20191112T114755_behavior+ecephys+image+ogen.nwb,2019-11-12 11:47:55+00:00,460434,30,179,right Medulla,19011116211 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-460434/sub-460434_ses-20191113T135640_behavior+ecephys+image+ogen.nwb,2019-11-13 13:56:40+00:00,460434,48,276,right Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Magnocellular reticular nucleus
+sub-460434/sub-460434_ses-20191113T135640_behavior+ecephys+image+ogen.nwb,2019-11-13 13:56:40+00:00,460434,28,195,left Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Midbrain
+sub-460434/sub-460434_ses-20191113T135640_behavior+ecephys+image+ogen.nwb,2019-11-13 13:56:40+00:00,460434,74,641,left ALM,19011116153 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 6a"
+sub-455220/sub-455220_ses-20190804T152922_behavior+ecephys+image+ogen.nwb,2019-08-04 15:29:22+00:00,455220,111,421,right Striatum,17131309211 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-455220/sub-455220_ses-20190804T152922_behavior+ecephys+image+ogen.nwb,2019-08-04 15:29:22+00:00,455220,140,424,left Striatum,17216703352 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-455220/sub-455220_ses-20190804T152922_behavior+ecephys+image+ogen.nwb,2019-08-04 15:29:22+00:00,455220,110,506,left Thalamus,18005107812 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-455220/sub-455220_ses-20190804T152922_behavior+ecephys+image+ogen.nwb,2019-08-04 15:29:22+00:00,455220,67,396,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-460434/sub-460434_ses-20191114T142520_behavior+ecephys+image+ogen.nwb,2019-11-14 14:25:20+00:00,460434,72,229,left Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-460434/sub-460434_ses-20191114T142520_behavior+ecephys+image+ogen.nwb,2019-11-14 14:25:20+00:00,460434,74,336,right Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Midbrain reticular nucleus
+sub-460434/sub-460434_ses-20191114T142520_behavior+ecephys+image+ogen.nwb,2019-11-14 14:25:20+00:00,460434,44,261,right ALM,19011116153 (neuropixels 2.0 - MS),False,False,"Frontal pole, layer 5"
+sub-460436/sub-460436_ses-20200107T111633_behavior+ecephys+image+ogen.nwb,2020-01-07 11:16:33+00:00,460436,58,267,right Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Inferior olivary complex
+sub-460436/sub-460436_ses-20200107T111633_behavior+ecephys+image+ogen.nwb,2020-01-07 11:16:33+00:00,460436,88,238,left Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Midbrain
+sub-460436/sub-460436_ses-20200107T111633_behavior+ecephys+image+ogen.nwb,2020-01-07 11:16:33+00:00,460436,219,561,left ALM,19011116163 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 6a"
+sub-460436/sub-460436_ses-20200108T105741_behavior+ecephys+image+ogen.nwb,2020-01-08 10:57:41+00:00,460436,87,286,right Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-460436/sub-460436_ses-20200108T105741_behavior+ecephys+image+ogen.nwb,2020-01-08 10:57:41+00:00,460436,79,202,left Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Anterior pretectal nucleus
+sub-460436/sub-460436_ses-20200108T105741_behavior+ecephys+image+ogen.nwb,2020-01-08 10:57:41+00:00,460436,88,397,left ALM,19011116163 (neuropixels 2.0 - MS),False,False,"Orbital area, lateral part, layer 5"
+sub-460436/sub-460436_ses-20200109T111437_behavior+ecephys+image+ogen.nwb,2020-01-09 11:14:37+00:00,460436,84,235,left Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-460436/sub-460436_ses-20200109T111437_behavior+ecephys+image+ogen.nwb,2020-01-09 11:14:37+00:00,460436,95,228,right Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Midbrain reticular nucleus
+sub-460436/sub-460436_ses-20200109T111437_behavior+ecephys+image+ogen.nwb,2020-01-09 11:14:37+00:00,460436,144,382,right ALM,19011116163 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 6a"
+sub-479121/sub-479121_ses-20200922T135318_behavior+ecephys+ogen.nwb,2020-09-22 13:53:18+00:00,479121,130,447,right ALM,18005107871 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-479121/sub-479121_ses-20200922T135318_behavior+ecephys+ogen.nwb,2020-09-22 13:53:18+00:00,479121,125,431,left Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Uvula (IX)
+sub-479121/sub-479121_ses-20200922T135318_behavior+ecephys+ogen.nwb,2020-09-22 13:53:18+00:00,479121,68,313,right Medulla,18408406182 (neuropixels 1.0 - 3B),True,True,Nodulus (X)
+sub-479121/sub-479121_ses-20200922T135318_behavior+ecephys+ogen.nwb,2020-09-22 13:53:18+00:00,479121,55,255,left Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Interposed nucleus
+sub-460436/sub-460436_ses-20200110T142717_behavior+ecephys+image+ogen.nwb,2020-01-10 14:27:17+00:00,460436,67,217,left Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Gigantocellular reticular nucleus
+sub-460436/sub-460436_ses-20200110T142717_behavior+ecephys+image+ogen.nwb,2020-01-10 14:27:17+00:00,460436,95,282,right Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Midbrain reticular nucleus
+sub-460436/sub-460436_ses-20200110T142717_behavior+ecephys+image+ogen.nwb,2020-01-10 14:27:17+00:00,460436,107,300,right ALM,19011116163 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 6a"
+sub-479121/sub-479121_ses-20200923T151145_behavior+ecephys+ogen.nwb,2020-09-23 15:11:45+00:00,479121,197,601,left ALM,18005106822 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-479121/sub-479121_ses-20200923T151145_behavior+ecephys+ogen.nwb,2020-09-23 15:11:45+00:00,479121,100,438,right ALM,18005107871 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 2/3"
+sub-479121/sub-479121_ses-20200923T151145_behavior+ecephys+ogen.nwb,2020-09-23 15:11:45+00:00,479121,84,520,left Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Uvula (IX)
+sub-479121/sub-479121_ses-20200923T151145_behavior+ecephys+ogen.nwb,2020-09-23 15:11:45+00:00,479121,61,526,right Medulla,18408406182 (neuropixels 1.0 - 3B),True,True,"Spinal nucleus of the trigeminal, interpolar part"
+sub-479121/sub-479121_ses-20200923T151145_behavior+ecephys+ogen.nwb,2020-09-23 15:11:45+00:00,479121,95,600,left Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Copula pyramidis
+sub-479121/sub-479121_ses-20200924T134307_behavior+ecephys+ogen.nwb,2020-09-24 13:43:07+00:00,479121,38,262,left ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-479121/sub-479121_ses-20200924T134307_behavior+ecephys+ogen.nwb,2020-09-24 13:43:07+00:00,479121,69,345,right ALM,18005107871 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 2/3"
+sub-479121/sub-479121_ses-20200924T134307_behavior+ecephys+ogen.nwb,2020-09-24 13:43:07+00:00,479121,59,596,right Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Copula pyramidis
+sub-479121/sub-479121_ses-20200924T134307_behavior+ecephys+ogen.nwb,2020-09-24 13:43:07+00:00,479121,97,501,left Medulla,18408406182 (neuropixels 1.0 - 3B),True,True,Copula pyramidis
+sub-479121/sub-479121_ses-20200924T134307_behavior+ecephys+ogen.nwb,2020-09-24 13:43:07+00:00,479121,111,1074,right Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Nodulus (X)
+sub-479121/sub-479121_ses-20200925T153348_behavior+ecephys+ogen.nwb,2020-09-25 15:33:48+00:00,479121,60,268,right Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-479121/sub-479121_ses-20200925T153348_behavior+ecephys+ogen.nwb,2020-09-25 15:33:48+00:00,479121,42,241,left Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,"Substantia nigra, reticular part"
+sub-479121/sub-479121_ses-20200925T153348_behavior+ecephys+ogen.nwb,2020-09-25 15:33:48+00:00,479121,129,451,left ALM,18005117122 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-479121/sub-479121_ses-20200925T153348_behavior+ecephys+ogen.nwb,2020-09-25 15:33:48+00:00,479121,91,328,right ALM,18408406182 (neuropixels 1.0 - 3B),True,True,"Orbital area, ventrolateral part, layer 6a"
+sub-479121/sub-479121_ses-20200928T141416_behavior+ecephys+ogen.nwb,2020-09-28 14:14:16+00:00,479121,26,96,right Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain
+sub-479121/sub-479121_ses-20200928T141416_behavior+ecephys+ogen.nwb,2020-09-28 14:14:16+00:00,479121,26,140,left Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,"Inferior colliculus, external nucleus"
+sub-479121/sub-479121_ses-20200928T141416_behavior+ecephys+ogen.nwb,2020-09-28 14:14:16+00:00,479121,38,359,right ALM,18005117122 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-479121/sub-479121_ses-20200921T162104_behavior+ecephys+ogen.nwb,2020-09-21 16:21:04+00:00,479121,156,572,left ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Frontal pole, layer 5"
+sub-479121/sub-479121_ses-20200921T162104_behavior+ecephys+ogen.nwb,2020-09-21 16:21:04+00:00,479121,132,453,right ALM,18005107871 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-479121/sub-479121_ses-20200921T162104_behavior+ecephys+ogen.nwb,2020-09-21 16:21:04+00:00,479121,192,604,left Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Lobules IV-V
+sub-479121/sub-479121_ses-20200921T162104_behavior+ecephys+ogen.nwb,2020-09-21 16:21:04+00:00,479121,37,337,right Medulla,18408406182 (neuropixels 1.0 - 3B),True,True,Simple lobule
+sub-479121/sub-479121_ses-20200921T162104_behavior+ecephys+ogen.nwb,2020-09-21 16:21:04+00:00,479121,88,484,left Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Nodulus (X)
+sub-479149/sub-479149_ses-20201209T115448_behavior+ecephys.nwb,2020-12-09 11:54:48+00:00,479149,65,394,right Striatum,19011111142 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-479149/sub-479149_ses-20201209T115448_behavior+ecephys.nwb,2020-12-09 11:54:48+00:00,479149,25,183,left Striatum,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-479149/sub-479149_ses-20201209T115448_behavior+ecephys.nwb,2020-12-09 11:54:48+00:00,479149,20,123,left ALM,19011112282 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 6a"
+sub-479149/sub-479149_ses-20201210T113111_behavior+ecephys+ogen.nwb,2020-12-10 11:31:11+00:00,479149,75,338,right Striatum,19011111142 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-479149/sub-479149_ses-20201210T113111_behavior+ecephys+ogen.nwb,2020-12-10 11:31:11+00:00,479149,72,237,left Striatum,19011111612 (neuropixels 2.0 - MS),False,False,"Globus pallidus, external segment"
+sub-479149/sub-479149_ses-20201210T113111_behavior+ecephys+ogen.nwb,2020-12-10 11:31:11+00:00,479149,22,151,left ALM,19011112282 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 6a"
+sub-479149/sub-479149_ses-20201210T113111_behavior+ecephys+ogen.nwb,2020-12-10 11:31:11+00:00,479149,11,113,right ALM,19011112522 (neuropixels 2.0 - MS),False,False,"Orbital area, lateral part, layer 5"
+sub-479149/sub-479149_ses-20201217T120512_behavior+ecephys+ogen.nwb,2020-12-17 12:05:12+00:00,479149,67,311,left Midbrain,18005117122 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-479149/sub-479149_ses-20201217T120512_behavior+ecephys+ogen.nwb,2020-12-17 12:05:12+00:00,479149,173,421,left Thalamus,19011112282 (neuropixels 2.0 - MS),False,False,Ventral medial nucleus of the thalamus
+sub-479149/sub-479149_ses-20201217T120512_behavior+ecephys+ogen.nwb,2020-12-17 12:05:12+00:00,479149,64,226,right Thalamus,19011112522 (neuropixels 2.0 - MS),False,False,Zona incerta
+sub-479149/sub-479149_ses-20201214T120340_behavior+ecephys.nwb,2020-12-14 12:03:40+00:00,479149,139,493,left ECT,18005107812 (neuropixels 1.0 - 3B),True,True,"Supplemental somatosensory area, layer 5"
+sub-479149/sub-479149_ses-20201214T120340_behavior+ecephys.nwb,2020-12-14 12:03:40+00:00,479149,67,353,left Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate gray layer"
+sub-479149/sub-479149_ses-20201214T120340_behavior+ecephys.nwb,2020-12-14 12:03:40+00:00,479149,102,447,right Midbrain,18005117122 (neuropixels 1.0 - 3B),True,True,Postsubiculum
+sub-479149/sub-479149_ses-20201214T120340_behavior+ecephys.nwb,2020-12-14 12:03:40+00:00,479149,151,686,right ECT,18408406182 (neuropixels 1.0 - 3B),True,True,"Supplemental somatosensory area, layer 5"
+sub-479149/sub-479149_ses-20201216T120333_behavior+ecephys+ogen.nwb,2020-12-16 12:03:33+00:00,479149,183,611,left BLA,18005107812 (neuropixels 1.0 - 3B),True,True,"Basolateral amygdalar nucleus, anterior part"
+sub-479149/sub-479149_ses-20201216T120333_behavior+ecephys+ogen.nwb,2020-12-16 12:03:33+00:00,479149,213,739,right BLA,18005107871 (neuropixels 1.0 - 3B),True,True,"Visceral area, layer 6a"
+sub-479149/sub-479149_ses-20201216T120333_behavior+ecephys+ogen.nwb,2020-12-16 12:03:33+00:00,479149,84,355,right Midbrain,18005117122 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-479149/sub-479149_ses-20201218T113815_behavior+ecephys+ogen.nwb,2020-12-18 11:38:15+00:00,479149,90,307,left Midbrain,18005117122 (neuropixels 1.0 - 3B),True,True,Midbrain
+sub-479149/sub-479149_ses-20201218T113815_behavior+ecephys+ogen.nwb,2020-12-18 11:38:15+00:00,479149,135,349,left Thalamus,19011112282 (neuropixels 2.0 - MS),False,False,Parafascicular nucleus
+sub-479149/sub-479149_ses-20201218T113815_behavior+ecephys+ogen.nwb,2020-12-18 11:38:15+00:00,479149,103,358,right Thalamus,19011112522 (neuropixels 2.0 - MS),False,False,Zona incerta
+sub-480133/sub-480133_ses-20201224T122322_behavior+ecephys.nwb,2020-12-24 12:23:22+00:00,480133,47,121,right Midbrain,19011111612 (neuropixels 2.0 - MS),False,False,"Substantia nigra, reticular part"
+sub-480133/sub-480133_ses-20201224T122322_behavior+ecephys.nwb,2020-12-24 12:23:22+00:00,480133,25,144,left ALM,19011112282 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-480133/sub-480133_ses-20201224T122322_behavior+ecephys.nwb,2020-12-24 12:23:22+00:00,480133,76,228,left Thalamus,19011112522 (neuropixels 2.0 - MS),False,False,Ventral anterior-lateral complex of the thalamus
+sub-480133/sub-480133_ses-20201225T114244_behavior+ecephys+ogen.nwb,2020-12-25 11:42:44+00:00,480133,58,185,right Midbrain,19011111612 (neuropixels 2.0 - MS),False,False,Fields of Forel
+sub-480133/sub-480133_ses-20201225T114244_behavior+ecephys+ogen.nwb,2020-12-25 11:42:44+00:00,480133,19,224,left ALM,19011112282 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-480133/sub-480133_ses-20201225T114244_behavior+ecephys+ogen.nwb,2020-12-25 11:42:44+00:00,480133,160,457,left Thalamus,19011112522 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-480133/sub-480133_ses-20201226T121710_behavior+ecephys+ogen.nwb,2020-12-26 12:17:10+00:00,480133,85,375,left ALM,18005107812 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480133/sub-480133_ses-20201226T121710_behavior+ecephys+ogen.nwb,2020-12-26 12:17:10+00:00,480133,169,621,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Lateral posterior nucleus of the thalamus
+sub-480133/sub-480133_ses-20201226T121710_behavior+ecephys+ogen.nwb,2020-12-26 12:17:10+00:00,480133,117,560,left Thalamus,18005117122 (neuropixels 1.0 - 3B),True,True,Ventral posteromedial nucleus of the thalamus
+sub-480133/sub-480133_ses-20201229T125330_behavior+ecephys.nwb,2020-12-29 12:53:30+00:00,480133,110,395,right ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Primary motor area, Layer 5"
+sub-480133/sub-480133_ses-20201229T125330_behavior+ecephys.nwb,2020-12-29 12:53:30+00:00,480133,160,541,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Ventral posteromedial nucleus of the thalamus
+sub-480133/sub-480133_ses-20201229T125330_behavior+ecephys.nwb,2020-12-29 12:53:30+00:00,480133,123,556,left Midbrain,18005117122 (neuropixels 1.0 - 3B),True,True,"Medial geniculate complex, ventral part"
+sub-480133/sub-480133_ses-20201229T125330_behavior+ecephys.nwb,2020-12-29 12:53:30+00:00,480133,46,235,left ALM,18408406182 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480133/sub-480133_ses-20201230T112558_behavior+ecephys+ogen.nwb,2020-12-30 11:25:58+00:00,480133,22,117,left ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 2/3"
+sub-480133/sub-480133_ses-20201230T112558_behavior+ecephys+ogen.nwb,2020-12-30 11:25:58+00:00,480133,165,539,right ALM,18005107871 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480133/sub-480133_ses-20201230T112558_behavior+ecephys+ogen.nwb,2020-12-30 11:25:58+00:00,480133,155,586,right Thalamus,18005117122 (neuropixels 1.0 - 3B),True,True,Ventral posteromedial nucleus of the thalamus
+sub-480133/sub-480133_ses-20201230T112558_behavior+ecephys+ogen.nwb,2020-12-30 11:25:58+00:00,480133,152,515,left Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-480133/sub-480133_ses-20201230T112558_behavior+ecephys+ogen.nwb,2020-12-30 11:25:58+00:00,480133,145,610,left Midbrain,18408406312 (neuropixels 1.0 - 3B),True,True,Ventral posteromedial nucleus of the thalamus
+sub-480133/sub-480133_ses-20201231T114638_behavior+ecephys+ogen.nwb,2020-12-31 11:46:38+00:00,480133,125,521,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480133/sub-480133_ses-20201231T114638_behavior+ecephys+ogen.nwb,2020-12-31 11:46:38+00:00,480133,361,1226,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,"Supplemental somatosensory area, layer 6a"
+sub-480133/sub-480133_ses-20201231T114638_behavior+ecephys+ogen.nwb,2020-12-31 11:46:38+00:00,480133,132,610,left Midbrain,18005117122 (neuropixels 1.0 - 3B),True,True,Fields of Forel
+sub-480133/sub-480133_ses-20210101T123136_behavior+ecephys+ogen.nwb,2021-01-01 12:31:36+00:00,480133,30,206,left Striatum,18005107812 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480133/sub-480133_ses-20210101T123136_behavior+ecephys+ogen.nwb,2021-01-01 12:31:36+00:00,480133,140,577,right Striatum,18005107871 (neuropixels 1.0 - 3B),True,True,"Supplemental somatosensory area, layer 6a"
+sub-480133/sub-480133_ses-20210101T123136_behavior+ecephys+ogen.nwb,2021-01-01 12:31:36+00:00,480133,35,300,left Midbrain,18005117122 (neuropixels 1.0 - 3B),True,True,Lateral posterior nucleus of the thalamus
+sub-480133/sub-480133_ses-20210103T133044_behavior+ecephys+ogen.nwb,2021-01-03 13:30:44+00:00,480133,48,289,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-480133/sub-480133_ses-20210103T133044_behavior+ecephys+ogen.nwb,2021-01-03 13:30:44+00:00,480133,84,605,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,Midbrain
+sub-480133/sub-480133_ses-20210103T133044_behavior+ecephys+ogen.nwb,2021-01-03 13:30:44+00:00,480133,185,567,left ECT,19011112282 (neuropixels 2.0 - MS),False,False,"Endopiriform nucleus, dorsal part"
+sub-480133/sub-480133_ses-20210103T133044_behavior+ecephys+ogen.nwb,2021-01-03 13:30:44+00:00,480133,206,631,right ECT,19011112522 (neuropixels 2.0 - MS),False,False,"Entorhinal area, lateral part, layer 5"
+sub-480133/sub-480133_ses-20210104T131503_behavior+ecephys+ogen.nwb,2021-01-04 13:15:03+00:00,480133,72,291,left Midbrain,18005107812 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-480133/sub-480133_ses-20210104T131503_behavior+ecephys+ogen.nwb,2021-01-04 13:15:03+00:00,480133,61,395,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,"Substantia nigra, reticular part"
+sub-480133/sub-480133_ses-20210104T131503_behavior+ecephys+ogen.nwb,2021-01-04 13:15:03+00:00,480133,224,572,left BLA,19011112282 (neuropixels 2.0 - MS),False,False,"Basolateral amygdalar nucleus, anterior part"
+sub-480133/sub-480133_ses-20210104T131503_behavior+ecephys+ogen.nwb,2021-01-04 13:15:03+00:00,480133,198,532,right BLA,19011112522 (neuropixels 2.0 - MS),False,False,"Endopiriform nucleus, ventral part"
+sub-480134/sub-480134_ses-20210106T125834_behavior+ecephys+ogen.nwb,2021-01-06 12:58:34+00:00,480134,200,791,right ECT,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480134/sub-480134_ses-20210106T125834_behavior+ecephys+ogen.nwb,2021-01-06 12:58:34+00:00,480134,119,386,right Midbrain,18005117122 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate gray layer"
+sub-480134/sub-480134_ses-20210106T125834_behavior+ecephys+ogen.nwb,2021-01-06 12:58:34+00:00,480134,90,464,left Striatum,18194809181 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480134/sub-480134_ses-20210106T125834_behavior+ecephys+ogen.nwb,2021-01-06 12:58:34+00:00,480134,123,558,left ECT,18408406312 (neuropixels 1.0 - 3B),True,True,"Primary somatosensory area, nose, layer 5"
+sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen.nwb,2021-01-07 12:08:25+00:00,480134,12,151,right ECT,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen.nwb,2021-01-07 12:08:25+00:00,480134,83,401,right Midbrain,18005117122 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen.nwb,2021-01-07 12:08:25+00:00,480134,160,581,left Striatum,18194809181 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480134/sub-480134_ses-20210107T120825_behavior+ecephys+ogen.nwb,2021-01-07 12:08:25+00:00,480134,165,647,left ECT,18408406312 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480134/sub-480134_ses-20210108T135220_behavior+ecephys+ogen.nwb,2021-01-08 13:52:20+00:00,480134,90,414,right Midbrain,18005107871 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate gray layer"
+sub-480134/sub-480134_ses-20210108T135220_behavior+ecephys+ogen.nwb,2021-01-08 13:52:20+00:00,480134,166,734,left Striatum,18194809181 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480134/sub-480134_ses-20210108T135220_behavior+ecephys+ogen.nwb,2021-01-08 13:52:20+00:00,480134,223,715,right Striatum,18408406182 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480134/sub-480134_ses-20210108T135220_behavior+ecephys+ogen.nwb,2021-01-08 13:52:20+00:00,480134,204,785,left ECT,18408406312 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480134/sub-480134_ses-20210111T122809_behavior+ecephys+ogen.nwb,2021-01-11 12:28:09+00:00,480134,159,362,right BLA,19011111142 (neuropixels 2.0 - MS),False,False,Striatum
+sub-480134/sub-480134_ses-20210111T122809_behavior+ecephys+ogen.nwb,2021-01-11 12:28:09+00:00,480134,121,352,left BLA,19011111612 (neuropixels 2.0 - MS),False,False,Intercalated amygdalar nucleus
+sub-480134/sub-480134_ses-20210111T122809_behavior+ecephys+ogen.nwb,2021-01-11 12:28:09+00:00,480134,118,476,left ALM,19011112282 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-480134/sub-480134_ses-20210111T122809_behavior+ecephys+ogen.nwb,2021-01-11 12:28:09+00:00,480134,97,378,right ALM,19011112522 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-480134/sub-480134_ses-20210110T134005_behavior+ecephys+ogen.nwb,2021-01-10 13:40:05+00:00,480134,261,760,right BLA,19011111142 (neuropixels 2.0 - MS),False,False,"Endopiriform nucleus, ventral part"
+sub-480134/sub-480134_ses-20210110T134005_behavior+ecephys+ogen.nwb,2021-01-10 13:40:05+00:00,480134,75,297,left BLA,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-480134/sub-480134_ses-20210110T134005_behavior+ecephys+ogen.nwb,2021-01-10 13:40:05+00:00,480134,62,431,left ALM,19011112282 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-480134/sub-480134_ses-20210110T134005_behavior+ecephys+ogen.nwb,2021-01-10 13:40:05+00:00,480134,82,432,right ALM,19011112522 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 5"
+sub-480134/sub-480134_ses-20210112T130202_behavior+ecephys+ogen.nwb,2021-01-12 13:02:02+00:00,480134,178,469,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Lateral dorsal nucleus of thalamus
+sub-480134/sub-480134_ses-20210112T130202_behavior+ecephys+ogen.nwb,2021-01-12 13:02:02+00:00,480134,167,481,right ALM,18005117122 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480134/sub-480134_ses-20210112T130202_behavior+ecephys+ogen.nwb,2021-01-12 13:02:02+00:00,480134,173,623,left Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-480134/sub-480134_ses-20210112T130202_behavior+ecephys+ogen.nwb,2021-01-12 13:02:02+00:00,480134,157,599,left Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,Lateral posterior nucleus of the thalamus
+sub-480134/sub-480134_ses-20210113T125455_behavior+ecephys+ogen.nwb,2021-01-13 12:54:55+00:00,480134,180,545,left ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 2/3"
+sub-480134/sub-480134_ses-20210113T125455_behavior+ecephys+ogen.nwb,2021-01-13 12:54:55+00:00,480134,108,480,right Thalamus,18005107871 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-480134/sub-480134_ses-20210113T125455_behavior+ecephys+ogen.nwb,2021-01-13 12:54:55+00:00,480134,150,458,right ALM,18005117122 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-480134/sub-480134_ses-20210113T125455_behavior+ecephys+ogen.nwb,2021-01-13 12:54:55+00:00,480134,120,441,left Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-480134/sub-480134_ses-20210113T125455_behavior+ecephys+ogen.nwb,2021-01-13 12:54:55+00:00,480134,191,695,left Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-480135/sub-480135_ses-20210227T131716_behavior+ecephys+ogen.nwb,2021-02-27 13:17:16+00:00,480135,242,723,right ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480135/sub-480135_ses-20210227T131716_behavior+ecephys+ogen.nwb,2021-02-27 13:17:16+00:00,480135,185,609,left ALM,18194822541 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-480135/sub-480135_ses-20210227T131716_behavior+ecephys+ogen.nwb,2021-02-27 13:17:16+00:00,480135,181,465,right Thalamus,19011111142 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-480135/sub-480135_ses-20210227T131716_behavior+ecephys+ogen.nwb,2021-02-27 13:17:16+00:00,480135,157,431,left Thalamus,19011111612 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-480135/sub-480135_ses-20210301T144130_behavior+ecephys+ogen.nwb,2021-03-01 14:41:30+00:00,480135,178,513,right ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480135/sub-480135_ses-20210301T144130_behavior+ecephys+ogen.nwb,2021-03-01 14:41:30+00:00,480135,169,500,left ALM,18194822541 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480135/sub-480135_ses-20210301T144130_behavior+ecephys+ogen.nwb,2021-03-01 14:41:30+00:00,480135,62,282,left Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,Anterior pretectal nucleus
+sub-480135/sub-480135_ses-20210301T144130_behavior+ecephys+ogen.nwb,2021-03-01 14:41:30+00:00,480135,129,381,left Striatum,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-480135/sub-480135_ses-20210302T140243_behavior+ecephys+ogen.nwb,2021-03-02 14:02:43+00:00,480135,153,572,right ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480135/sub-480135_ses-20210302T140243_behavior+ecephys+ogen.nwb,2021-03-02 14:02:43+00:00,480135,109,381,left ALM,18194822541 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-480135/sub-480135_ses-20210302T140243_behavior+ecephys+ogen.nwb,2021-03-02 14:02:43+00:00,480135,74,222,left Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,Midbrain
+sub-480135/sub-480135_ses-20210302T140243_behavior+ecephys+ogen.nwb,2021-03-02 14:02:43+00:00,480135,166,456,left Striatum,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-480135/sub-480135_ses-20210226T161028_behavior+ecephys+ogen.nwb,2021-02-26 16:10:28+00:00,480135,193,601,right ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 2/3"
+sub-480135/sub-480135_ses-20210226T161028_behavior+ecephys+ogen.nwb,2021-02-26 16:10:28+00:00,480135,186,813,left ALM,18194822541 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480135/sub-480135_ses-20210226T161028_behavior+ecephys+ogen.nwb,2021-02-26 16:10:28+00:00,480135,179,453,right Thalamus,19011111142 (neuropixels 2.0 - MS),False,False,Paracentral nucleus
+sub-480135/sub-480135_ses-20210226T161028_behavior+ecephys+ogen.nwb,2021-02-26 16:10:28+00:00,480135,175,454,left Thalamus,19011111612 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-480135/sub-480135_ses-20210303T161010_behavior+ecephys+ogen.nwb,2021-03-03 16:10:10+00:00,480135,69,354,left ALM,18005107442 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 6a"
+sub-480135/sub-480135_ses-20210303T161010_behavior+ecephys+ogen.nwb,2021-03-03 16:10:10+00:00,480135,28,225,right ALM,18005107812 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480135/sub-480135_ses-20210303T161010_behavior+ecephys+ogen.nwb,2021-03-03 16:10:10+00:00,480135,66,203,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,"Superior colliculus, motor related, intermediate white layer"
+sub-480135/sub-480135_ses-20210303T161010_behavior+ecephys+ogen.nwb,2021-03-03 16:10:10+00:00,480135,94,302,right Striatum,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-480135/sub-480135_ses-20210304T163309_behavior+ecephys+ogen.nwb,2021-03-04 16:33:09+00:00,480135,55,358,right Striatum,18005107442 (neuropixels 1.0 - 3B),True,True,"Globus pallidus, external segment"
+sub-480135/sub-480135_ses-20210304T163309_behavior+ecephys+ogen.nwb,2021-03-04 16:33:09+00:00,480135,56,177,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,Midbrain reticular nucleus
+sub-480135/sub-480135_ses-20210304T163309_behavior+ecephys+ogen.nwb,2021-03-04 16:33:09+00:00,480135,108,357,right Striatum,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-480927/sub-480927_ses-20210219T132453_behavior+ecephys+ogen.nwb,2021-02-19 13:24:53+00:00,480927,191,873,left ECT,18005107442 (neuropixels 1.0 - 3B),True,True,Piriform area
+sub-480927/sub-480927_ses-20210219T132453_behavior+ecephys+ogen.nwb,2021-02-19 13:24:53+00:00,480927,110,454,left Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,Reticular nucleus of the thalamus
+sub-480927/sub-480927_ses-20210219T132453_behavior+ecephys+ogen.nwb,2021-02-19 13:24:53+00:00,480927,75,309,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,Anterior olfactory nucleus
+sub-480927/sub-480927_ses-20210221T130859_behavior+ecephys+ogen.nwb,2021-02-21 13:08:59+00:00,480927,224,858,left ECT,18005107442 (neuropixels 1.0 - 3B),True,True,Piriform area
+sub-480927/sub-480927_ses-20210221T130859_behavior+ecephys+ogen.nwb,2021-02-21 13:08:59+00:00,480927,174,564,left Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,Ventral anterior-lateral complex of the thalamus
+sub-480927/sub-480927_ses-20210221T130859_behavior+ecephys+ogen.nwb,2021-02-21 13:08:59+00:00,480927,138,510,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Anterior pretectal nucleus
+sub-480927/sub-480927_ses-20210221T130859_behavior+ecephys+ogen.nwb,2021-02-21 13:08:59+00:00,480927,152,444,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 5"
+sub-480927/sub-480927_ses-20210222T130313_behavior+ecephys+ogen.nwb,2021-02-22 13:03:13+00:00,480927,202,686,left BLA,18005107442 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480927/sub-480927_ses-20210222T130313_behavior+ecephys+ogen.nwb,2021-02-22 13:03:13+00:00,480927,99,396,left Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,Anterior pretectal nucleus
+sub-480927/sub-480927_ses-20210222T130313_behavior+ecephys+ogen.nwb,2021-02-22 13:03:13+00:00,480927,49,246,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,Anterior olfactory nucleus
+sub-480927/sub-480927_ses-20210223T135753_behavior+ecephys+ogen.nwb,2021-02-23 13:57:53+00:00,480927,6,47,right Thalamus,18005107442 (neuropixels 1.0 - 3B),True,True,Substantia innominata
+sub-480927/sub-480927_ses-20210223T135753_behavior+ecephys+ogen.nwb,2021-02-23 13:57:53+00:00,480927,182,692,right Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,Lateral posterior nucleus of the thalamus
+sub-480927/sub-480927_ses-20210223T135753_behavior+ecephys+ogen.nwb,2021-02-23 13:57:53+00:00,480927,31,179,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,Anterior olfactory nucleus
+sub-480927/sub-480927_ses-20210224T133042_behavior+ecephys+ogen.nwb,2021-02-24 13:30:42+00:00,480927,134,677,right ALM,18005107442 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-480927/sub-480927_ses-20210224T133042_behavior+ecephys+ogen.nwb,2021-02-24 13:30:42+00:00,480927,47,214,right Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,"Globus pallidus, external segment"
+sub-480927/sub-480927_ses-20210224T133042_behavior+ecephys+ogen.nwb,2021-02-24 13:30:42+00:00,480927,146,716,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Lateral posterior nucleus of the thalamus
+sub-480927/sub-480927_ses-20210224T133042_behavior+ecephys+ogen.nwb,2021-02-24 13:30:42+00:00,480927,142,341,right Striatum,19011111614 (neuropixels 2.0 - SS),True,False,"Primary somatosensory area, mouth, layer 5"
+sub-480927/sub-480927_ses-20210225T115002_behavior+ecephys+ogen.nwb,2021-02-25 11:50:02+00:00,480927,71,295,right ALM,18005107442 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-480927/sub-480927_ses-20210225T115002_behavior+ecephys+ogen.nwb,2021-02-25 11:50:02+00:00,480927,38,212,right Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,Anterior amygdalar area
+sub-480927/sub-480927_ses-20210225T115002_behavior+ecephys+ogen.nwb,2021-02-25 11:50:02+00:00,480927,86,407,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-480927/sub-480927_ses-20210225T115002_behavior+ecephys+ogen.nwb,2021-02-25 11:50:02+00:00,480927,171,501,right Striatum,19011111614 (neuropixels 2.0 - SS),True,False,Piriform area
+sub-480927/sub-480927_ses-20210226T133429_behavior+ecephys+ogen.nwb,2021-02-26 13:34:29+00:00,480927,118,424,right ALM,18005107442 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 2/3"
+sub-480927/sub-480927_ses-20210226T133429_behavior+ecephys+ogen.nwb,2021-02-26 13:34:29+00:00,480927,77,414,right Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,Ventral posterolateral nucleus of the thalamus
+sub-480927/sub-480927_ses-20210226T133429_behavior+ecephys+ogen.nwb,2021-02-26 13:34:29+00:00,480927,45,339,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Zona incerta
+sub-480927/sub-480927_ses-20210226T133429_behavior+ecephys+ogen.nwb,2021-02-26 13:34:29+00:00,480927,243,581,right Striatum,19011111614 (neuropixels 2.0 - SS),True,False,"Primary somatosensory area, mouth, layer 5"
+sub-480927/sub-480927_ses-20210228T131818_behavior+ecephys+ogen.nwb,2021-02-28 13:18:18+00:00,480927,130,373,left Striatum,19011111142 (neuropixels 2.0 - MS),False,False,Piriform area
+sub-480927/sub-480927_ses-20210228T131818_behavior+ecephys+ogen.nwb,2021-02-28 13:18:18+00:00,480927,42,212,left Midbrain,19011111612 (neuropixels 2.0 - MS),False,False,Anterior pretectal nucleus
+sub-480927/sub-480927_ses-20210228T131818_behavior+ecephys+ogen.nwb,2021-02-28 13:18:18+00:00,480927,96,407,right Striatum,19011111614 (neuropixels 2.0 - SS),True,False,Piriform area
+sub-480927/sub-480927_ses-20210220T124834_behavior+ecephys+ogen.nwb,2021-02-20 12:48:34+00:00,480927,142,463,left Thalamus,18005107442 (neuropixels 1.0 - 3B),True,True,Lateral dorsal nucleus of thalamus
+sub-480927/sub-480927_ses-20210220T124834_behavior+ecephys+ogen.nwb,2021-02-20 12:48:34+00:00,480927,234,887,left ECT,18005123392 (neuropixels 1.0 - 3B),True,True,"Endopiriform nucleus, dorsal part"
+sub-480927/sub-480927_ses-20210220T124834_behavior+ecephys+ogen.nwb,2021-02-20 12:48:34+00:00,480927,80,462,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate gray layer"
+sub-480927/sub-480927_ses-20210220T124834_behavior+ecephys+ogen.nwb,2021-02-20 12:48:34+00:00,480927,60,257,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,Anterior olfactory nucleus
+sub-480927/sub-480927_ses-20210218T122535_behavior+ecephys+ogen.nwb,2021-02-18 12:25:35+00:00,480927,139,603,left Striatum,18005107442 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480927/sub-480927_ses-20210218T122535_behavior+ecephys+ogen.nwb,2021-02-18 12:25:35+00:00,480927,75,552,left Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,Zona incerta
+sub-480927/sub-480927_ses-20210218T122535_behavior+ecephys+ogen.nwb,2021-02-18 12:25:35+00:00,480927,139,499,left Thalamus,18005123682 (neuropixels 1.0 - 3B),True,True,Ventral medial nucleus of the thalamus
+sub-480927/sub-480927_ses-20210218T122535_behavior+ecephys+ogen.nwb,2021-02-18 12:25:35+00:00,480927,124,676,left ALM,18194822541 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-480928/sub-480928_ses-20210121T153333_behavior+ecephys+ogen.nwb,2021-01-21 15:33:33+00:00,480928,111,571,right Striatum,18005107442 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480928/sub-480928_ses-20210121T153333_behavior+ecephys+ogen.nwb,2021-01-21 15:33:33+00:00,480928,119,437,right Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-480928/sub-480928_ses-20210121T153333_behavior+ecephys+ogen.nwb,2021-01-21 15:33:33+00:00,480928,90,383,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-480928/sub-480928_ses-20210121T153333_behavior+ecephys+ogen.nwb,2021-01-21 15:33:33+00:00,480928,112,549,left Striatum,18194822541 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480928/sub-480928_ses-20210122T131850_behavior+ecephys+ogen.nwb,2021-01-22 13:18:50+00:00,480928,82,547,right Striatum,18005107442 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480928/sub-480928_ses-20210122T131850_behavior+ecephys+ogen.nwb,2021-01-22 13:18:50+00:00,480928,67,375,right Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate white layer"
+sub-480928/sub-480928_ses-20210122T131850_behavior+ecephys+ogen.nwb,2021-01-22 13:18:50+00:00,480928,97,464,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-480928/sub-480928_ses-20210122T131850_behavior+ecephys+ogen.nwb,2021-01-22 13:18:50+00:00,480928,112,583,left Striatum,18194822541 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480928/sub-480928_ses-20210123T132015_behavior+ecephys+ogen.nwb,2021-01-23 13:20:15+00:00,480928,110,495,right Striatum,18005107442 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480928/sub-480928_ses-20210123T132015_behavior+ecephys+ogen.nwb,2021-01-23 13:20:15+00:00,480928,87,359,right Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-480928/sub-480928_ses-20210123T132015_behavior+ecephys+ogen.nwb,2021-01-23 13:20:15+00:00,480928,70,302,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-480928/sub-480928_ses-20210123T132015_behavior+ecephys+ogen.nwb,2021-01-23 13:20:15+00:00,480928,140,602,left Striatum,18194822541 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480928/sub-480928_ses-20210125T124258_behavior+ecephys+ogen.nwb,2021-01-25 12:42:58+00:00,480928,123,575,right ALM,18005107442 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480928/sub-480928_ses-20210125T124258_behavior+ecephys+ogen.nwb,2021-01-25 12:42:58+00:00,480928,89,489,right Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,Central lateral nucleus of the thalamus
+sub-480928/sub-480928_ses-20210125T124258_behavior+ecephys+ogen.nwb,2021-01-25 12:42:58+00:00,480928,135,516,left Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Anteroventral nucleus of thalamus
+sub-480928/sub-480928_ses-20210125T124258_behavior+ecephys+ogen.nwb,2021-01-25 12:42:58+00:00,480928,44,322,left ALM,18194822541 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480928/sub-480928_ses-20210125T124258_behavior+ecephys+ogen.nwb,2021-01-25 12:42:58+00:00,480928,118,461,left Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-480928/sub-480928_ses-20210126T134951_behavior+ecephys+ogen.nwb,2021-01-26 13:49:51+00:00,480928,235,658,left Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-480928/sub-480928_ses-20210126T134951_behavior+ecephys+ogen.nwb,2021-01-26 13:49:51+00:00,480928,251,700,right Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-480928/sub-480928_ses-20210126T134951_behavior+ecephys+ogen.nwb,2021-01-26 13:49:51+00:00,480928,96,395,left ALM,18194822541 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-480928/sub-480928_ses-20210126T134951_behavior+ecephys+ogen.nwb,2021-01-26 13:49:51+00:00,480928,68,314,right Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,"Ventral posteromedial nucleus of the thalamus, parvicellular part"
+sub-480928/sub-480928_ses-20210127T140737_behavior+ecephys+ogen.nwb,2021-01-27 14:07:37+00:00,480928,125,422,right ALM,18005107442 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-480928/sub-480928_ses-20210127T140737_behavior+ecephys+ogen.nwb,2021-01-27 14:07:37+00:00,480928,147,513,left Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-480928/sub-480928_ses-20210127T140737_behavior+ecephys+ogen.nwb,2021-01-27 14:07:37+00:00,480928,119,446,right Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-480928/sub-480928_ses-20210127T140737_behavior+ecephys+ogen.nwb,2021-01-27 14:07:37+00:00,480928,129,558,left ALM,18194822541 (neuropixels 1.0 - 3B),True,True,"Secondary motor area, layer 5"
+sub-480928/sub-480928_ses-20210127T140737_behavior+ecephys+ogen.nwb,2021-01-27 14:07:37+00:00,480928,211,657,right Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-480928/sub-480928_ses-20210128T133949_behavior+ecephys+ogen.nwb,2021-01-28 13:39:49+00:00,480928,169,665,left ALM,18005107442 (neuropixels 1.0 - 3B),True,True,Piriform area
+sub-480928/sub-480928_ses-20210128T133949_behavior+ecephys+ogen.nwb,2021-01-28 13:39:49+00:00,480928,185,601,left Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,Ventral anterior-lateral complex of the thalamus
+sub-480928/sub-480928_ses-20210128T133949_behavior+ecephys+ogen.nwb,2021-01-28 13:39:49+00:00,480928,207,598,right Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Ventral anterior-lateral complex of the thalamus
+sub-480928/sub-480928_ses-20210128T133949_behavior+ecephys+ogen.nwb,2021-01-28 13:39:49+00:00,480928,212,853,right ALM,18194822541 (neuropixels 1.0 - 3B),True,True,Anterior olfactory nucleus
+sub-480928/sub-480928_ses-20210128T133949_behavior+ecephys+ogen.nwb,2021-01-28 13:39:49+00:00,480928,150,474,right Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-480928/sub-480928_ses-20210129T132207_behavior+ecephys+ogen.nwb,2021-01-29 13:22:07+00:00,480928,120,486,left ALM,18005107442 (neuropixels 1.0 - 3B),True,True,Piriform area
+sub-480928/sub-480928_ses-20210129T132207_behavior+ecephys+ogen.nwb,2021-01-29 13:22:07+00:00,480928,184,522,right Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,Lateral dorsal nucleus of thalamus
+sub-480928/sub-480928_ses-20210129T132207_behavior+ecephys+ogen.nwb,2021-01-29 13:22:07+00:00,480928,173,557,left Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-480928/sub-480928_ses-20210129T132207_behavior+ecephys+ogen.nwb,2021-01-29 13:22:07+00:00,480928,99,500,right ALM,18194822541 (neuropixels 1.0 - 3B),True,True,Olfactory areas
+sub-480928/sub-480928_ses-20210129T132207_behavior+ecephys+ogen.nwb,2021-01-29 13:22:07+00:00,480928,148,567,left Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,Anteroventral nucleus of thalamus
+sub-484672/sub-484672_ses-20210318T171131_behavior+ecephys+ogen.nwb,2021-03-18 17:11:31+00:00,484672,99,397,left Striatum,19011111142 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484672/sub-484672_ses-20210318T171131_behavior+ecephys+ogen.nwb,2021-03-18 17:11:31+00:00,484672,85,266,left Midbrain,19011111612 (neuropixels 2.0 - MS),False,False,Anterior pretectal nucleus
+sub-484672/sub-484672_ses-20210318T171131_behavior+ecephys+ogen.nwb,2021-03-18 17:11:31+00:00,484672,14,78,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484672/sub-484672_ses-20210318T171131_behavior+ecephys+ogen.nwb,2021-03-18 17:11:31+00:00,484672,58,238,left ECT,19122511894 (neuropixels 2.0 - SS),True,False,"Primary somatosensory area, barrel field, layer 5"
+sub-484672/sub-484672_ses-20210319T144211_behavior+ecephys+ogen.nwb,2021-03-19 14:42:11+00:00,484672,99,517,left ECT,18005123392 (neuropixels 1.0 - 3B),True,True,"Supplemental somatosensory area, layer 6a"
+sub-484672/sub-484672_ses-20210319T144211_behavior+ecephys+ogen.nwb,2021-03-19 14:42:11+00:00,484672,97,477,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Subiculum
+sub-484672/sub-484672_ses-20210319T144211_behavior+ecephys+ogen.nwb,2021-03-19 14:42:11+00:00,484672,115,511,left Striatum,18194809181 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-484672/sub-484672_ses-20210319T144211_behavior+ecephys+ogen.nwb,2021-03-19 14:42:11+00:00,484672,74,403,left Striatum,18408406312 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-484672/sub-484672_ses-20210321T131204_behavior+ecephys+ogen.nwb,2021-03-21 13:12:04+00:00,484672,58,149,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,Midbrain reticular nucleus
+sub-484672/sub-484672_ses-20210321T131204_behavior+ecephys+ogen.nwb,2021-03-21 13:12:04+00:00,484672,105,370,right Striatum,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484672/sub-484672_ses-20210321T131204_behavior+ecephys+ogen.nwb,2021-03-21 13:12:04+00:00,484672,40,148,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 5"
+sub-484672/sub-484672_ses-20210321T131204_behavior+ecephys+ogen.nwb,2021-03-21 13:12:04+00:00,484672,10,61,right ECT,19122511894 (neuropixels 2.0 - SS),True,False,Field CA3
+sub-484672/sub-484672_ses-20210322T122309_behavior+ecephys+ogen.nwb,2021-03-22 12:23:09+00:00,484672,48,133,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,Midbrain reticular nucleus
+sub-484672/sub-484672_ses-20210322T122309_behavior+ecephys+ogen.nwb,2021-03-22 12:23:09+00:00,484672,124,407,right Striatum,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484672/sub-484672_ses-20210322T122309_behavior+ecephys+ogen.nwb,2021-03-22 12:23:09+00:00,484672,54,228,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 6a"
+sub-484672/sub-484672_ses-20210322T122309_behavior+ecephys+ogen.nwb,2021-03-22 12:23:09+00:00,484672,104,564,right ECT,19122511894 (neuropixels 2.0 - SS),True,False,Field CA1
+sub-484672/sub-484672_ses-20210323T121231_behavior+ecephys+ogen.nwb,2021-03-23 12:12:31+00:00,484672,154,439,right Thalamus,19011111142 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-484672/sub-484672_ses-20210323T121231_behavior+ecephys+ogen.nwb,2021-03-23 12:12:31+00:00,484672,205,454,left Thalamus,19011111612 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-484672/sub-484672_ses-20210323T121231_behavior+ecephys+ogen.nwb,2021-03-23 12:12:31+00:00,484672,90,285,left Striatum,19011111614 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484672/sub-484672_ses-20210323T121231_behavior+ecephys+ogen.nwb,2021-03-23 12:12:31+00:00,484672,43,150,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 2/3"
+sub-484672/sub-484672_ses-20210324T143423_behavior+ecephys+ogen.nwb,2021-03-24 14:34:23+00:00,484672,97,307,left Thalamus,19011116163 (neuropixels 2.0 - MS),False,False,Parafascicular nucleus
+sub-484672/sub-484672_ses-20210324T143423_behavior+ecephys+ogen.nwb,2021-03-24 14:34:23+00:00,484672,68,291,right Thalamus,19011119751 (neuropixels 2.0 - MS),False,False,Mediodorsal nucleus of thalamus
+sub-484672/sub-484672_ses-20210324T143423_behavior+ecephys+ogen.nwb,2021-03-24 14:34:23+00:00,484672,50,213,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484673/sub-484673_ses-20210427T145157_behavior+ecephys+ogen.nwb,2021-04-27 14:51:57+00:00,484673,61,350,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,"Substantia nigra, reticular part"
+sub-484673/sub-484673_ses-20210427T145157_behavior+ecephys+ogen.nwb,2021-04-27 14:51:57+00:00,484673,133,518,left Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Ventral anterior-lateral complex of the thalamus
+sub-484673/sub-484673_ses-20210427T145157_behavior+ecephys+ogen.nwb,2021-04-27 14:51:57+00:00,484673,147,490,left Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,Lateral posterior nucleus of the thalamus
+sub-484673/sub-484673_ses-20210427T145157_behavior+ecephys+ogen.nwb,2021-04-27 14:51:57+00:00,484673,67,234,left ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 5"
+sub-484673/sub-484673_ses-20210427T145157_behavior+ecephys+ogen.nwb,2021-04-27 14:51:57+00:00,484673,78,336,left ECT,19122516691 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-480928/sub-480928_ses-20210130T135022_behavior+ecephys+ogen.nwb,2021-01-30 13:50:22+00:00,480928,208,825,left ALM,18005107442 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480928/sub-480928_ses-20210130T135022_behavior+ecephys+ogen.nwb,2021-01-30 13:50:22+00:00,480928,235,835,right ALM,18194822541 (neuropixels 1.0 - 3B),True,True,Piriform area
+sub-480928/sub-480928_ses-20210130T135022_behavior+ecephys+ogen.nwb,2021-01-30 13:50:22+00:00,480928,258,612,left BLA,19011112282 (neuropixels 2.0 - MS),False,False,"Endopiriform nucleus, ventral part"
+sub-480928/sub-480928_ses-20210130T135022_behavior+ecephys+ogen.nwb,2021-01-30 13:50:22+00:00,480928,149,427,right BLA,19011112522 (neuropixels 2.0 - MS),False,False,"Endopiriform nucleus, ventral part"
+sub-484673/sub-484673_ses-20210428T133442_behavior+ecephys+ogen.nwb,2021-04-28 13:34:42+00:00,484673,56,373,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Subiculum
+sub-484673/sub-484673_ses-20210428T133442_behavior+ecephys+ogen.nwb,2021-04-28 13:34:42+00:00,484673,241,565,left ECT,19011111614 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484673/sub-484673_ses-20210428T133442_behavior+ecephys+ogen.nwb,2021-04-28 13:34:42+00:00,484673,152,436,left ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 6a"
+sub-484673/sub-484673_ses-20210428T133442_behavior+ecephys+ogen.nwb,2021-04-28 13:34:42+00:00,484673,184,495,left Thalamus,19122516691 (neuropixels 2.0 - MS),False,False,Posterior complex of the thalamus
+sub-484673/sub-484673_ses-20210429T131158_behavior+ecephys+ogen.nwb,2021-04-29 13:11:58+00:00,484673,75,449,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Anterior pretectal nucleus
+sub-484673/sub-484673_ses-20210429T131158_behavior+ecephys+ogen.nwb,2021-04-29 13:11:58+00:00,484673,119,327,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 6a"
+sub-484673/sub-484673_ses-20210429T131158_behavior+ecephys+ogen.nwb,2021-04-29 13:11:58+00:00,484673,55,278,left Thalamus,19122505854 (neuropixels 2.0 - SS),True,False,Central lateral nucleus of the thalamus
+sub-484673/sub-484673_ses-20210429T131158_behavior+ecephys+ogen.nwb,2021-04-29 13:11:58+00:00,484673,248,569,left ECT,19122511894 (neuropixels 2.0 - SS),True,False,"Supplemental somatosensory area, layer 6a"
+sub-484673/sub-484673_ses-20210430T132651_behavior+ecephys+ogen.nwb,2021-04-30 13:26:51+00:00,484673,101,501,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Anterior pretectal nucleus
+sub-484673/sub-484673_ses-20210430T132651_behavior+ecephys+ogen.nwb,2021-04-30 13:26:51+00:00,484673,97,392,left Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Posterior complex of the thalamus
+sub-484673/sub-484673_ses-20210430T132651_behavior+ecephys+ogen.nwb,2021-04-30 13:26:51+00:00,484673,101,398,left Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,Lateral dorsal nucleus of thalamus
+sub-484673/sub-484673_ses-20210430T132651_behavior+ecephys+ogen.nwb,2021-04-30 13:26:51+00:00,484673,97,251,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Primary motor area, Layer 5"
+sub-484673/sub-484673_ses-20210430T132651_behavior+ecephys+ogen.nwb,2021-04-30 13:26:51+00:00,484673,136,352,left BLA,19122511894 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484673/sub-484673_ses-20210504T121957_behavior+ecephys+ogen.nwb,2021-05-04 12:19:57+00:00,484673,29,371,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Subiculum
+sub-484673/sub-484673_ses-20210504T121957_behavior+ecephys+ogen.nwb,2021-05-04 12:19:57+00:00,484673,5,102,right ECT,19011111614 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484673/sub-484673_ses-20210504T121957_behavior+ecephys+ogen.nwb,2021-05-04 12:19:57+00:00,484673,82,369,right Striatum,19122505854 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484673/sub-484673_ses-20210504T121957_behavior+ecephys+ogen.nwb,2021-05-04 12:19:57+00:00,484673,169,428,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Orbital area, ventrolateral part, layer 5"
+sub-484673/sub-484673_ses-20210505T131153_behavior+ecephys+ogen.nwb,2021-05-05 13:11:53+00:00,484673,125,674,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Lateral posterior nucleus of the thalamus
+sub-484673/sub-484673_ses-20210505T131153_behavior+ecephys+ogen.nwb,2021-05-05 13:11:53+00:00,484673,24,132,right ECT,19011111614 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484673/sub-484673_ses-20210505T131153_behavior+ecephys+ogen.nwb,2021-05-05 13:11:53+00:00,484673,39,164,right Striatum,19122505854 (neuropixels 2.0 - SS),True,False,Olfactory areas
+sub-484673/sub-484673_ses-20210505T131153_behavior+ecephys+ogen.nwb,2021-05-05 13:11:53+00:00,484673,39,190,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484673/sub-484673_ses-20210506T134206_behavior+ecephys+ogen.nwb,2021-05-06 13:42:06+00:00,484673,104,568,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain
+sub-484673/sub-484673_ses-20210506T134206_behavior+ecephys+ogen.nwb,2021-05-06 13:42:06+00:00,484673,74,310,right ECT,19011111614 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484673/sub-484673_ses-20210506T134206_behavior+ecephys+ogen.nwb,2021-05-06 13:42:06+00:00,484673,45,219,right Striatum,19011119702 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484673/sub-484673_ses-20210506T134206_behavior+ecephys+ogen.nwb,2021-05-06 13:42:06+00:00,484673,119,379,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 5"
+sub-484673/sub-484673_ses-20210507T135524_behavior+ecephys+ogen.nwb,2021-05-07 13:55:24+00:00,484673,107,525,right Thalamus,18194809181 (neuropixels 1.0 - 3B),True,True,Anterodorsal nucleus
+sub-484673/sub-484673_ses-20210507T135524_behavior+ecephys+ogen.nwb,2021-05-07 13:55:24+00:00,484673,129,690,right Thalamus,18408406312 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-484673/sub-484673_ses-20210507T135524_behavior+ecephys+ogen.nwb,2021-05-07 13:55:24+00:00,484673,19,119,left Striatum,19011119702 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484673/sub-484673_ses-20210507T135524_behavior+ecephys+ogen.nwb,2021-05-07 13:55:24+00:00,484673,70,200,right BLA,19122505854 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484673/sub-484673_ses-20210507T135524_behavior+ecephys+ogen.nwb,2021-05-07 13:55:24+00:00,484673,105,339,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484673/sub-484673_ses-20210508T132858_behavior+ecephys+ogen.nwb,2021-05-08 13:28:58+00:00,484673,92,430,right Thalamus,18005123682 (neuropixels 1.0 - 3B),True,True,Lateral dorsal nucleus of thalamus
+sub-484673/sub-484673_ses-20210508T132858_behavior+ecephys+ogen.nwb,2021-05-08 13:28:58+00:00,484673,188,502,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484673/sub-484673_ses-20210508T132858_behavior+ecephys+ogen.nwb,2021-05-08 13:28:58+00:00,484673,16,101,left Striatum,19011119702 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484673/sub-484673_ses-20210508T132858_behavior+ecephys+ogen.nwb,2021-05-08 13:28:58+00:00,484673,94,415,right BLA,19122505354 (neuropixels 2.0 - SS),True,False,"Central amygdalar nucleus, lateral part"
+sub-484674/sub-484674_ses-20210504T155124_behavior+ecephys+ogen.nwb,2021-05-04 15:51:24+00:00,484674,133,538,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate white layer"
+sub-484674/sub-484674_ses-20210504T155124_behavior+ecephys+ogen.nwb,2021-05-04 15:51:24+00:00,484674,45,193,right ECT,19011111614 (neuropixels 2.0 - SS),True,False,"Supplemental somatosensory area, layer 6a"
+sub-484674/sub-484674_ses-20210504T155124_behavior+ecephys+ogen.nwb,2021-05-04 15:51:24+00:00,484674,74,297,right Striatum,19122505854 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484674/sub-484674_ses-20210504T155124_behavior+ecephys+ogen.nwb,2021-05-04 15:51:24+00:00,484674,56,285,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484674/sub-484674_ses-20210505T170309_behavior+ecephys+ogen.nwb,2021-05-05 17:03:09+00:00,484674,127,447,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate white layer"
+sub-484674/sub-484674_ses-20210505T170309_behavior+ecephys+ogen.nwb,2021-05-05 17:03:09+00:00,484674,51,213,right ECT,19011111614 (neuropixels 2.0 - SS),True,False,"Supplemental somatosensory area, layer 6a"
+sub-484674/sub-484674_ses-20210505T170309_behavior+ecephys+ogen.nwb,2021-05-05 17:03:09+00:00,484674,25,117,right Striatum,19122505854 (neuropixels 2.0 - SS),True,False,Piriform area
+sub-484674/sub-484674_ses-20210505T170309_behavior+ecephys+ogen.nwb,2021-05-05 17:03:09+00:00,484674,95,425,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Orbital area, ventrolateral part, layer 5"
+sub-484674/sub-484674_ses-20210506T174036_behavior+ecephys+ogen.nwb,2021-05-06 17:40:36+00:00,484674,115,455,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-484674/sub-484674_ses-20210506T174036_behavior+ecephys+ogen.nwb,2021-05-06 17:40:36+00:00,484674,189,518,right ECT,19011111614 (neuropixels 2.0 - SS),True,False,"Supplemental somatosensory area, layer 6a"
+sub-484674/sub-484674_ses-20210506T174036_behavior+ecephys+ogen.nwb,2021-05-06 17:40:36+00:00,484674,119,398,right Striatum,19122505854 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484674/sub-484674_ses-20210506T174036_behavior+ecephys+ogen.nwb,2021-05-06 17:40:36+00:00,484674,215,597,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Orbital area, ventrolateral part, layer 5"
+sub-484674/sub-484674_ses-20210507T172825_behavior+ecephys+ogen.nwb,2021-05-07 17:28:25+00:00,484674,141,468,right Thalamus,18005123682 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-484674/sub-484674_ses-20210507T172825_behavior+ecephys+ogen.nwb,2021-05-07 17:28:25+00:00,484674,67,287,right Striatum,19011111614 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484674/sub-484674_ses-20210509T131820_behavior+ecephys+ogen.nwb,2021-05-09 13:18:20+00:00,484674,122,366,right BLA,18005123392 (neuropixels 1.0 - 3B),True,True,"Central amygdalar nucleus, medial part"
+sub-484674/sub-484674_ses-20210509T131820_behavior+ecephys+ogen.nwb,2021-05-09 13:18:20+00:00,484674,171,532,right Thalamus,18005123682 (neuropixels 1.0 - 3B),True,True,Mediodorsal nucleus of thalamus
+sub-484674/sub-484674_ses-20210509T131820_behavior+ecephys+ogen.nwb,2021-05-09 13:18:20+00:00,484674,93,278,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 6a"
+sub-484674/sub-484674_ses-20210509T131820_behavior+ecephys+ogen.nwb,2021-05-09 13:18:20+00:00,484674,66,219,right Striatum,19122505354 (neuropixels 2.0 - SS),True,False,"Primary somatosensory area, mouth, layer 6a"
+sub-484674/sub-484674_ses-20210510T162815_behavior+ecephys+ogen.nwb,2021-05-10 16:28:15+00:00,484674,83,462,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Posterior limiting nucleus of the thalamus
+sub-484674/sub-484674_ses-20210510T162815_behavior+ecephys+ogen.nwb,2021-05-10 16:28:15+00:00,484674,61,191,left ECT,19011111614 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484674/sub-484674_ses-20210510T162815_behavior+ecephys+ogen.nwb,2021-05-10 16:28:15+00:00,484674,60,286,left Striatum,19011119702 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484674/sub-484674_ses-20210510T162815_behavior+ecephys+ogen.nwb,2021-05-10 16:28:15+00:00,484674,34,301,left ALM,19122505354 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 6a"
+sub-484674/sub-484674_ses-20210511T140555_behavior+ecephys+ogen.nwb,2021-05-11 14:05:55+00:00,484674,106,529,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Anterior pretectal nucleus
+sub-484674/sub-484674_ses-20210511T140555_behavior+ecephys+ogen.nwb,2021-05-11 14:05:55+00:00,484674,47,220,left ECT,19011111614 (neuropixels 2.0 - SS),True,False,Claustrum
+sub-484674/sub-484674_ses-20210511T140555_behavior+ecephys+ogen.nwb,2021-05-11 14:05:55+00:00,484674,42,224,left Striatum,19011119702 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484674/sub-484674_ses-20210511T140555_behavior+ecephys+ogen.nwb,2021-05-11 14:05:55+00:00,484674,11,249,left ALM,19122505354 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484674/sub-484674_ses-20210513T120445_behavior+ecephys+ogen.nwb,2021-05-13 12:04:45+00:00,484674,93,431,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Posterior limiting nucleus of the thalamus
+sub-484674/sub-484674_ses-20210513T120445_behavior+ecephys+ogen.nwb,2021-05-13 12:04:45+00:00,484674,52,274,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484674/sub-484674_ses-20210513T120445_behavior+ecephys+ogen.nwb,2021-05-13 12:04:45+00:00,484674,192,608,left Thalamus,19011119702 (neuropixels 2.0 - MS),False,False,Ventral posteromedial nucleus of the thalamus
+sub-484674/sub-484674_ses-20210513T120445_behavior+ecephys+ogen.nwb,2021-05-13 12:04:45+00:00,484674,67,227,left BLA,19122505354 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484674/sub-484674_ses-20210514T111526_behavior+ecephys+ogen.nwb,2021-05-14 11:15:26+00:00,484674,57,241,left Thalamus,18005123392 (neuropixels 1.0 - 3B),True,True,"Globus pallidus, external segment"
+sub-484674/sub-484674_ses-20210514T111526_behavior+ecephys+ogen.nwb,2021-05-14 11:15:26+00:00,484674,120,460,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Anterior pretectal nucleus
+sub-484674/sub-484674_ses-20210514T111526_behavior+ecephys+ogen.nwb,2021-05-14 11:15:26+00:00,484674,14,112,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484674/sub-484674_ses-20210514T111526_behavior+ecephys+ogen.nwb,2021-05-14 11:15:26+00:00,484674,78,297,left BLA,19122505354 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484675/sub-484675_ses-20210318T122039_behavior+ecephys+ogen.nwb,2021-03-18 12:20:39+00:00,484675,109,371,left Striatum,19011111142 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484675/sub-484675_ses-20210318T122039_behavior+ecephys+ogen.nwb,2021-03-18 12:20:39+00:00,484675,64,215,left Midbrain,19011111612 (neuropixels 2.0 - MS),False,False,Midbrain reticular nucleus
+sub-484675/sub-484675_ses-20210318T122039_behavior+ecephys+ogen.nwb,2021-03-18 12:20:39+00:00,484675,55,313,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 2/3"
+sub-484675/sub-484675_ses-20210318T122039_behavior+ecephys+ogen.nwb,2021-03-18 12:20:39+00:00,484675,137,420,left ECT,19122511894 (neuropixels 2.0 - SS),True,False,"Endopiriform nucleus, dorsal part"
+sub-484675/sub-484675_ses-20210319T121514_behavior+ecephys+ogen.nwb,2021-03-19 12:15:14+00:00,484675,100,317,left Striatum,19011111142 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484675/sub-484675_ses-20210319T121514_behavior+ecephys+ogen.nwb,2021-03-19 12:15:14+00:00,484675,83,200,left Midbrain,19011111612 (neuropixels 2.0 - MS),False,False,Midbrain
+sub-484675/sub-484675_ses-20210319T121514_behavior+ecephys+ogen.nwb,2021-03-19 12:15:14+00:00,484675,10,81,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 5"
+sub-484675/sub-484675_ses-20210319T121514_behavior+ecephys+ogen.nwb,2021-03-19 12:15:14+00:00,484675,200,518,left ECT,19122511894 (neuropixels 2.0 - SS),True,False,"Temporal association areas, layer 6a"
+sub-484675/sub-484675_ses-20210320T130513_behavior+ecephys+ogen.nwb,2021-03-20 13:05:13+00:00,484675,69,267,left Thalamus,19011111142 (neuropixels 2.0 - MS),False,False,Zona incerta
+sub-484675/sub-484675_ses-20210320T130513_behavior+ecephys+ogen.nwb,2021-03-20 13:05:13+00:00,484675,63,212,left Midbrain,19011111612 (neuropixels 2.0 - MS),False,False,Midbrain reticular nucleus
+sub-484675/sub-484675_ses-20210320T130513_behavior+ecephys+ogen.nwb,2021-03-20 13:05:13+00:00,484675,24,113,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 5"
+sub-484675/sub-484675_ses-20210320T130513_behavior+ecephys+ogen.nwb,2021-03-20 13:05:13+00:00,484675,327,822,left ECT,19122511894 (neuropixels 2.0 - SS),True,False,"Temporal association areas, layer 6a"
+sub-484675/sub-484675_ses-20210322T164725_behavior+ecephys+ogen.nwb,2021-03-22 16:47:25+00:00,484675,52,153,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,"Superior colliculus, motor related, intermediate white layer"
+sub-484675/sub-484675_ses-20210322T164725_behavior+ecephys+ogen.nwb,2021-03-22 16:47:25+00:00,484675,127,481,right Striatum,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484675/sub-484675_ses-20210322T164725_behavior+ecephys+ogen.nwb,2021-03-22 16:47:25+00:00,484675,51,312,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 5"
+sub-484675/sub-484675_ses-20210322T164725_behavior+ecephys+ogen.nwb,2021-03-22 16:47:25+00:00,484675,58,225,right ECT,19122511894 (neuropixels 2.0 - SS),True,False,"Supplemental somatosensory area, layer 5"
+sub-484675/sub-484675_ses-20210323T164459_behavior+ecephys+ogen.nwb,2021-03-23 16:44:59+00:00,484675,48,164,right Midbrain,19011111142 (neuropixels 2.0 - MS),False,False,"Superior colliculus, motor related, intermediate white layer"
+sub-484675/sub-484675_ses-20210323T164459_behavior+ecephys+ogen.nwb,2021-03-23 16:44:59+00:00,484675,154,467,right Striatum,19011111612 (neuropixels 2.0 - MS),False,False,Caudoputamen
+sub-484675/sub-484675_ses-20210323T164459_behavior+ecephys+ogen.nwb,2021-03-23 16:44:59+00:00,484675,62,303,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484675/sub-484675_ses-20210323T164459_behavior+ecephys+ogen.nwb,2021-03-23 16:44:59+00:00,484675,61,194,right ECT,19122511894 (neuropixels 2.0 - SS),True,False,"Supplemental somatosensory area, layer 5"
+sub-484675/sub-484675_ses-20210324T182545_behavior+ecephys+ogen.nwb,2021-03-24 18:25:45+00:00,484675,23,186,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,Claustrum
+sub-484675/sub-484675_ses-20210324T182545_behavior+ecephys+ogen.nwb,2021-03-24 18:25:45+00:00,484675,121,415,left Thalamus,19011116163 (neuropixels 2.0 - MS),False,False,Parafascicular nucleus
+sub-484675/sub-484675_ses-20210324T182545_behavior+ecephys+ogen.nwb,2021-03-24 18:25:45+00:00,484675,38,183,right ALM,19122511894 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484676/sub-484676_ses-20210413T112028_behavior+ecephys+image+ogen.nwb,2021-04-13 11:20:28+00:00,484676,127,445,left Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-484676/sub-484676_ses-20210413T112028_behavior+ecephys+image+ogen.nwb,2021-04-13 11:20:28+00:00,484676,105,494,right Medulla,18005123682 (neuropixels 1.0 - 3B),True,True,Lobule III
+sub-484676/sub-484676_ses-20210413T112028_behavior+ecephys+image+ogen.nwb,2021-04-13 11:20:28+00:00,484676,204,479,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 5"
+sub-484676/sub-484676_ses-20210413T112028_behavior+ecephys+image+ogen.nwb,2021-04-13 11:20:28+00:00,484676,101,427,left Striatum,19011116163 (neuropixels 2.0 - MS),False,False,Ventral posterolateral nucleus of the thalamus
+sub-484676/sub-484676_ses-20210414T121243_behavior+ecephys+ogen.nwb,2021-04-14 12:12:43+00:00,484676,65,349,left Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate white layer"
+sub-484676/sub-484676_ses-20210414T121243_behavior+ecephys+ogen.nwb,2021-04-14 12:12:43+00:00,484676,100,493,right Medulla,18005123682 (neuropixels 1.0 - 3B),True,True,Lobules IV-V
+sub-484676/sub-484676_ses-20210414T121243_behavior+ecephys+ogen.nwb,2021-04-14 12:12:43+00:00,484676,227,495,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, ventrolateral part, layer 5"
+sub-484676/sub-484676_ses-20210414T121243_behavior+ecephys+ogen.nwb,2021-04-14 12:12:43+00:00,484676,81,329,left Striatum,19011116163 (neuropixels 2.0 - MS),False,False,Ventral posterolateral nucleus of the thalamus
+sub-484676/sub-484676_ses-20210415T121842_behavior+ecephys+ogen.nwb,2021-04-15 12:18:42+00:00,484676,18,382,right Medulla,18005123392 (neuropixels 1.0 - 3B),True,True,"Spinal nucleus of the trigeminal, oral part"
+sub-484676/sub-484676_ses-20210415T121842_behavior+ecephys+ogen.nwb,2021-04-15 12:18:42+00:00,484676,100,372,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-484676/sub-484676_ses-20210415T121842_behavior+ecephys+ogen.nwb,2021-04-15 12:18:42+00:00,484676,99,273,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484676/sub-484676_ses-20210415T121842_behavior+ecephys+ogen.nwb,2021-04-15 12:18:42+00:00,484676,85,247,left Striatum,19122511894 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484676/sub-484676_ses-20210416T140326_behavior+ecephys+ogen.nwb,2021-04-16 14:03:26+00:00,484676,51,482,right Medulla,18005123392 (neuropixels 1.0 - 3B),True,True,Simple lobule
+sub-484676/sub-484676_ses-20210416T140326_behavior+ecephys+ogen.nwb,2021-04-16 14:03:26+00:00,484676,71,311,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-484676/sub-484676_ses-20210416T140326_behavior+ecephys+ogen.nwb,2021-04-16 14:03:26+00:00,484676,117,333,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484676/sub-484676_ses-20210416T140326_behavior+ecephys+ogen.nwb,2021-04-16 14:03:26+00:00,484676,78,231,left Striatum,19122511894 (neuropixels 2.0 - SS),True,False,"Globus pallidus, external segment"
+sub-484676/sub-484676_ses-20210419T130102_behavior+ecephys+ogen.nwb,2021-04-19 13:01:02+00:00,484676,67,285,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-484676/sub-484676_ses-20210419T130102_behavior+ecephys+ogen.nwb,2021-04-19 13:01:02+00:00,484676,111,455,left Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Lobule III
+sub-484676/sub-484676_ses-20210419T130102_behavior+ecephys+ogen.nwb,2021-04-19 13:01:02+00:00,484676,70,682,left Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Medulla
+sub-484676/sub-484676_ses-20210419T130102_behavior+ecephys+ogen.nwb,2021-04-19 13:01:02+00:00,484676,138,288,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, ventrolateral part, layer 6a"
+sub-484676/sub-484676_ses-20210419T130102_behavior+ecephys+ogen.nwb,2021-04-19 13:01:02+00:00,484676,144,385,right Striatum,19122511894 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484676/sub-484676_ses-20210420T130906_behavior+ecephys+ogen.nwb,2021-04-20 13:09:06+00:00,484676,92,427,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-484676/sub-484676_ses-20210420T130906_behavior+ecephys+ogen.nwb,2021-04-20 13:09:06+00:00,484676,86,529,left Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Lobule II
+sub-484676/sub-484676_ses-20210420T130906_behavior+ecephys+ogen.nwb,2021-04-20 13:09:06+00:00,484676,101,618,left Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Lobules IV-V
+sub-484676/sub-484676_ses-20210420T130906_behavior+ecephys+ogen.nwb,2021-04-20 13:09:06+00:00,484676,55,185,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484676/sub-484676_ses-20210420T130906_behavior+ecephys+ogen.nwb,2021-04-20 13:09:06+00:00,484676,103,319,right Striatum,19122511894 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484676/sub-484676_ses-20210421T141806_behavior+ecephys+ogen.nwb,2021-04-21 14:18:06+00:00,484676,97,397,right Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,Midbrain
+sub-484676/sub-484676_ses-20210421T141806_behavior+ecephys+ogen.nwb,2021-04-21 14:18:06+00:00,484676,56,503,left Medulla,18005123682 (neuropixels 1.0 - 3B),True,True,Facial motor nucleus
+sub-484676/sub-484676_ses-20210421T141806_behavior+ecephys+ogen.nwb,2021-04-21 14:18:06+00:00,484676,81,270,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484676/sub-484676_ses-20210421T141806_behavior+ecephys+ogen.nwb,2021-04-21 14:18:06+00:00,484676,105,315,right Striatum,19122511894 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484677/sub-484677_ses-20210413T150250_behavior+ecephys+ogen.nwb,2021-04-13 15:02:50+00:00,484677,101,440,left Midbrain,18005123392 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-484677/sub-484677_ses-20210413T150250_behavior+ecephys+ogen.nwb,2021-04-13 15:02:50+00:00,484677,88,635,right Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Intermediate reticular nucleus
+sub-484677/sub-484677_ses-20210413T150250_behavior+ecephys+ogen.nwb,2021-04-13 15:02:50+00:00,484677,110,949,right Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Simple lobule
+sub-484677/sub-484677_ses-20210413T150250_behavior+ecephys+ogen.nwb,2021-04-13 15:02:50+00:00,484677,74,233,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, lateral part, layer 2/3"
+sub-484677/sub-484677_ses-20210413T150250_behavior+ecephys+ogen.nwb,2021-04-13 15:02:50+00:00,484677,72,221,left Striatum,19011116163 (neuropixels 2.0 - MS),False,False,"Central amygdalar nucleus, medial part"
+sub-484677/sub-484677_ses-20210414T153241_behavior+ecephys+ogen.nwb,2021-04-14 15:32:41+00:00,484677,86,378,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate white layer"
+sub-484677/sub-484677_ses-20210414T153241_behavior+ecephys+ogen.nwb,2021-04-14 15:32:41+00:00,484677,104,446,right Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Lobules IV-V
+sub-484677/sub-484677_ses-20210414T153241_behavior+ecephys+ogen.nwb,2021-04-14 15:32:41+00:00,484677,59,402,right Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Simple lobule
+sub-484677/sub-484677_ses-20210414T153241_behavior+ecephys+ogen.nwb,2021-04-14 15:32:41+00:00,484677,93,322,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 5"
+sub-484677/sub-484677_ses-20210414T153241_behavior+ecephys+ogen.nwb,2021-04-14 15:32:41+00:00,484677,48,238,left Striatum,19011116163 (neuropixels 2.0 - MS),False,False,"Globus pallidus, external segment"
+sub-484677/sub-484677_ses-20210415T161621_behavior+ecephys+ogen.nwb,2021-04-15 16:16:21+00:00,484677,94,610,right Medulla,18005123392 (neuropixels 1.0 - 3B),True,True,Lobules IV-V
+sub-484677/sub-484677_ses-20210415T161621_behavior+ecephys+ogen.nwb,2021-04-15 16:16:21+00:00,484677,78,376,left Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-484677/sub-484677_ses-20210415T161621_behavior+ecephys+ogen.nwb,2021-04-15 16:16:21+00:00,484677,60,199,left ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, ventrolateral part, layer 6a"
+sub-484677/sub-484677_ses-20210415T161621_behavior+ecephys+ogen.nwb,2021-04-15 16:16:21+00:00,484677,76,256,left Striatum,19122511894 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484677/sub-484677_ses-20210418T132006_behavior+ecephys+ogen.nwb,2021-04-18 13:20:06+00:00,484677,83,399,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Postsubiculum
+sub-484677/sub-484677_ses-20210418T132006_behavior+ecephys+ogen.nwb,2021-04-18 13:20:06+00:00,484677,144,517,left Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Lobule III
+sub-484677/sub-484677_ses-20210418T132006_behavior+ecephys+ogen.nwb,2021-04-18 13:20:06+00:00,484677,169,665,left Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Simple lobule
+sub-484677/sub-484677_ses-20210418T132006_behavior+ecephys+ogen.nwb,2021-04-18 13:20:06+00:00,484677,258,559,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,Olfactory areas
+sub-484677/sub-484677_ses-20210418T132006_behavior+ecephys+ogen.nwb,2021-04-18 13:20:06+00:00,484677,133,366,right Striatum,19122511894 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484677/sub-484677_ses-20210419T161140_behavior+ecephys+ogen.nwb,2021-04-19 16:11:40+00:00,484677,79,406,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,Midbrain reticular nucleus
+sub-484677/sub-484677_ses-20210419T161140_behavior+ecephys+ogen.nwb,2021-04-19 16:11:40+00:00,484677,64,317,left Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Lobule III
+sub-484677/sub-484677_ses-20210419T161140_behavior+ecephys+ogen.nwb,2021-04-19 16:11:40+00:00,484677,139,527,left Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Lobules IV-V
+sub-484677/sub-484677_ses-20210419T161140_behavior+ecephys+ogen.nwb,2021-04-19 16:11:40+00:00,484677,131,423,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Orbital area, ventrolateral part, layer 5"
+sub-484677/sub-484677_ses-20210419T161140_behavior+ecephys+ogen.nwb,2021-04-19 16:11:40+00:00,484677,59,264,right Striatum,19122511894 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-484677/sub-484677_ses-20210420T170516_behavior+ecephys+ogen.nwb,2021-04-20 17:05:16+00:00,484677,98,516,right Midbrain,18005123682 (neuropixels 1.0 - 3B),True,True,"Superior colliculus, motor related, intermediate gray layer"
+sub-484677/sub-484677_ses-20210420T170516_behavior+ecephys+ogen.nwb,2021-04-20 17:05:16+00:00,484677,77,267,left Medulla,18194809181 (neuropixels 1.0 - 3B),True,True,Lobule III
+sub-484677/sub-484677_ses-20210420T170516_behavior+ecephys+ogen.nwb,2021-04-20 17:05:16+00:00,484677,113,555,left Medulla,18408406312 (neuropixels 1.0 - 3B),True,True,Simple lobule
+sub-484677/sub-484677_ses-20210420T170516_behavior+ecephys+ogen.nwb,2021-04-20 17:05:16+00:00,484677,38,187,right ALM,19011111614 (neuropixels 2.0 - SS),True,False,"Secondary motor area, layer 6a"
+sub-484677/sub-484677_ses-20210420T170516_behavior+ecephys+ogen.nwb,2021-04-20 17:05:16+00:00,484677,42,228,right Striatum,19122511894 (neuropixels 2.0 - SS),True,False,Caudoputamen
+sub-460434/sub-460434_ses-20191115T135939_behavior+ecephys+image+ogen.nwb,2019-11-15 13:59:39+00:00,460434,94,233,left Medulla,19011111142 (neuropixels 2.0 - MS),False,False,Magnocellular reticular nucleus
+sub-460434/sub-460434_ses-20191115T135939_behavior+ecephys+image+ogen.nwb,2019-11-15 13:59:39+00:00,460434,26,264,right Midbrain,19011111614 (neuropixels 2.0 - SS),True,False,Pontine reticular nucleus
+sub-460434/sub-460434_ses-20191115T135939_behavior+ecephys+image+ogen.nwb,2019-11-15 13:59:39+00:00,460434,21,155,right ALM,19011116211 (neuropixels 2.0 - MS),False,False,"Secondary motor area, layer 6a"
+sub-479149/sub-479149_ses-20201211T110651_behavior+ecephys.nwb,2020-12-11 11:06:51+00:00,479149,46,199,left ALM,18005107812 (neuropixels 1.0 - 3B),True,True,Nucleus accumbens
+sub-479149/sub-479149_ses-20201211T110651_behavior+ecephys.nwb,2020-12-11 11:06:51+00:00,479149,26,178,right ALM,18005107871 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-479149/sub-479149_ses-20201211T110651_behavior+ecephys.nwb,2020-12-11 11:06:51+00:00,479149,77,493,right Striatum,18194809181 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-479149/sub-479149_ses-20201211T110651_behavior+ecephys.nwb,2020-12-11 11:06:51+00:00,479149,41,252,left Striatum,18408406182 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-479149/sub-479149_ses-20201211T110651_behavior+ecephys.nwb,2020-12-11 11:06:51+00:00,479149,43,320,right Striatum,18408406312 (neuropixels 1.0 - 3B),True,True,Caudoputamen
+sub-480135/sub-480135_ses-20210225T155426_behavior+ecephys+ogen.nwb,2021-02-25 15:54:26+00:00,480135,149,574,right ALM,18005107812 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 6a"
+sub-480135/sub-480135_ses-20210225T155426_behavior+ecephys+ogen.nwb,2021-02-25 15:54:26+00:00,480135,199,896,left ALM,18194822541 (neuropixels 1.0 - 3B),True,True,"Orbital area, lateral part, layer 5"
+sub-480135/sub-480135_ses-20210225T155426_behavior+ecephys+ogen.nwb,2021-02-25 15:54:26+00:00,480135,132,383,right Thalamus,19011111142 (neuropixels 2.0 - MS),False,False,Ventral anterior-lateral complex of the thalamus
+sub-480135/sub-480135_ses-20210225T155426_behavior+ecephys+ogen.nwb,2021-02-25 15:54:26+00:00,480135,150,405,left Thalamus,19011111612 (neuropixels 2.0 - MS),False,False,Submedial nucleus of the thalamus
