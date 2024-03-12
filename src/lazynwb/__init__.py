@@ -9,7 +9,7 @@ import logging
 from lazynwb.base import *
 from lazynwb.file_io import *
 from lazynwb.funcs import *
-from lazynwb.datasets import *
+from lazynwb.dandisets import *
 
 logger = logging.getLogger(__name__)
 

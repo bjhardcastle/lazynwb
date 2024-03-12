@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 
 import dandi.dandiapi
 
 from lazynwb.base import LazyNWB
 
+
+def get_dandi_client(token: str | None = None) -> dandi.dandiapi.DandiAPIClient:
+    if token is None:
+        token = os.getenv("DANDI_API_TOKEN", default=None)
+    return dandi.dandiapi.DandiAPIClient(token=token)
 
 def get_dandiset_nwbs(dandiset_id: str, version_id: str | None = None) -> Generator[LazyNWB, None, None]:
     """Get a LazyNWB object for each file in the specified Dandiset.
@@ -38,7 +44,7 @@ def get_dandiset_assets(dandiset_id: str, version_id: str | None = None, lazy: b
     >>> assets[0].version_id
     '0.231012.2129'
     """
-    with dandi.dandiapi.DandiAPIClient() as client:
+    with get_dandi_client() as client:
         dandiset = client.get_dandiset(dandiset_id=dandiset_id, version_id=version_id, lazy=lazy)
         return tuple(dandiset.get_assets())
 
