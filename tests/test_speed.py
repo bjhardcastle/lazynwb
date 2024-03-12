@@ -14,7 +14,7 @@ def get_large_hdf5_url() -> str:
     dandiset_id = '000363'  # ephys dataset from the Svoboda Lab
     filepath = 'sub-440957/sub-440957_ses-20190211T143614_behavior+ecephys+image+ogen.nwb' # 437 GB file
     with dandi.dandiapi.DandiAPIClient() as client:
-        asset = client.get_dandiset(dandiset_id, 'draft').get_asset_by_path(filepath)
+        asset = client.get_dandiset(dandiset_id=dandiset_id, version='draft').get_asset_by_path(filepath)
         return asset.get_content_url(follow_redirects=1, strip_query=True)
 
 def get_small_zarr_url() -> str:
