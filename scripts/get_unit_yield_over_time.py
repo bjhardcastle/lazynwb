@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import concurrent.futures
 import contextlib
 import dataclasses
@@ -25,7 +26,7 @@ class Result:
     brain_region: str
     device: str
     most_common_area: str
-    
+
 
 def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
     """Return one Result for each device in the nwb file (may be empty if no good units)."""
@@ -54,7 +55,7 @@ def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
         assert all(loc['brain_regions'] == brain_region for loc in locations)
         num_good_units = len(np.argwhere(selected_units).flatten())
         assert num_good_units == len(locations)
-        most_common_area = next(name for name, count in Counter(nwb.units.anno_name.asstr()[selected_units]).most_common() if name)
+        most_common_area = next(name for name, count in collections.Counter(nwb.units.anno_name.asstr()[selected_units]).most_common() if name)
         results.append(Result(nwb_path=nwb_path, session_start_time=session_start_time, subject_id=subject_id, num_good_units=num_good_units, device=device, brain_region=brain_region, most_common_area=most_common_area))
     return results
 
