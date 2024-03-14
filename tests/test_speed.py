@@ -1,5 +1,7 @@
+import contextlib
 import logging
 import time
+from typing import Generator
 
 import pytest
 
@@ -29,14 +31,24 @@ def url(request: pytest.FixtureRequest) -> str:
         raise ValueError(f'Unknown url fixture value: {request.param}')
 
 @pytest.mark.parametrize('url', ['large_hdf5', 'small_zarr'], indirect=True)
-def test_open_large_hdf5_time(url: str) -> None:
+def test_open_time(url: str) -> None:
+    # may need to try this more than once: S3 storage can be slow on first request in a while
     t0 = time.time()
     nwb = lazynwb.LazyNWB(url)
     t = time.time() - t0
-    assert t < MIN_OPEN_TIME_SECONDS, f'Opening {url} with {nwb.__class__.__name__} took too long: {t:.1f} seconds (expected < {MIN_OPEN_TIME_SECONDS})'
     logger.info(f'Opened {url} with {nwb.__class__.__name__} in {t} seconds')
+    assert t < MIN_OPEN_TIME_SECONDS, f'Opening {url} with {nwb.__class__.__name__} took too long: {t:.1f} seconds (expected < {MIN_OPEN_TIME_SECONDS})'
 
-
+@pytest.mark.parametrize('url', ['large_hdf5'], indirect=True)
+def test_remfile_vs_h5py(url: str) -> None:
+    times = []
+    for use_remfile in [True, False]:
+        t0 = time.time()
+        _ = lazynwb.open(url, use_remfile=use_remfile)
+        times.append( t:= time.time() - t0)
+        logger.info(f'Opened {url} with {use_remfile=} in {t} seconds')
+    assert times[0] < times[1], f'Opening {url} with remfile {times[0]=} was not faster than h5py {times[1]=}: default to remfile=False in open()'
+        
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     pytest.main([__file__])
