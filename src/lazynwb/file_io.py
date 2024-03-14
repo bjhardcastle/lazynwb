@@ -37,7 +37,7 @@ def open(path: npc_io.PathLike, use_remfile: bool = True, **fsspec_storage_optio
     # hdf5 ------------------------------------------------------------- #
     if not use_remfile:
         # conventional method is open the file with fsspec and then pass the file handle to h5py:
-        file = path.open(mode="rb")
+        file = path.open(mode="rb", cache_type="first")
     else:
         # but using remfile is slightly faster in practice, at least for the initial opening:
         file = remfile.File(url=path.as_posix())
