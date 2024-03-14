@@ -42,7 +42,7 @@ def test_open_time(url: str) -> None:
 @pytest.mark.parametrize('url', ['large_hdf5'], indirect=True)
 def test_remfile_vs_h5py(url: str) -> None:
     times = []
-    for use_remfile in [True, False]:
+    for use_remfile in [True, False]: # the first S3 access of data is typically slower than subseqeuent ones, so this is biased against remfile
         t0 = time.time()
         _ = lazynwb.open(url, use_remfile=use_remfile)
         times.append( t:= time.time() - t0)
