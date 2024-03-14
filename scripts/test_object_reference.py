@@ -7,7 +7,7 @@ SMALL_HDF5_URL = 'https://dandiarchive.s3.amazonaws.com/blobs/56c/31a/56c31a1f-a
 
 url = LARGE_HDF5_URL    #for quicker testing use small file 
 
-nwb = h5py.File(remfile.File(url), mode="r")
+nwb = h5py.File(remfile.File(url, verbose=True, _max_threads=10), mode="r")
 
 # this is an instance of <HDF5 object reference>:
 object_reference = nwb['units/electrode_group'][0]
