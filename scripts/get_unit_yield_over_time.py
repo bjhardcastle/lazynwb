@@ -5,9 +5,11 @@ import concurrent.futures
 import contextlib
 import dataclasses
 import datetime
+import logging
 import os
 from collections.abc import Iterable
 import threading
+import time
 from typing import Callable
 
 import dandi.dandiapi
@@ -17,9 +19,12 @@ import tqdm
 
 import lazynwb
 
+logger = logging.getLogger(__name__)
+
 CHEN_BRAINWIDE_DANDISET_ID = '000363'
 IBL_BRAINWIDE_DANDISET_ID = '000409'
-MUTEX_LOCK = threading.Lock()
+
+results_file_lock = threading.Lock()
 
 @dataclasses.dataclass
 class Result:
@@ -45,7 +50,7 @@ def append_to_csv(csv_name: str, results: Result | Iterable[Result]) -> None:
         df = pd.DataFrame()
     df = pd.concat([df, pd.DataFrame.from_records(dataclasses.asdict(result) for result in results)])
     # use lock to accommodate multi-threading
-    with MUTEX_LOCK:
+    with results_file_lock:
         df.to_csv(csv_name, index=False)
 
 def get_assets(dandiset_id: str) -> tuple[dandi.dandiapi.BaseRemoteAsset, ...]:
@@ -71,10 +76,22 @@ def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
         if classification_dtype.name != 'object':
             raise ValueError(f"Unrecognized classification dtype: {classification_dtype}")
         classification = nwb.units.classification.asstr()[:]
-        #! this part is slow: looking up devices 100s/1000s of times 
-        # to speed it up, we need to get the path to the group (ie convert <HDF5
-        # object reference> to string, or something that can be used to index in dict)
-        devices = np.array([nwb[group]['device'].name.split('/')[-1] for group in nwb.units.electrode_group])
+        # ----------------------------------------------------------------- #
+        #! this part is slow!
+        # - reading electrode_group for each unit (100s/1000s units) via hdf5 object references
+        # - there are only a few electrode_groups (one per shank): ideally we
+        #   would access each one only once
+        # - but every reference object is unique even
+        #   if they point to the same location in the file and there's no way to
+        #   know what the object reference points to, other than to read it, which
+        #   is slow 
+        # - if we could convert <HDF5 object reference> to a string path, like in
+        #   zarr files, this would be much faster
+        t0 = time.time()
+        devices = np.array([nwb._nwb[group]['device'].name.split('/')[-1] for group in nwb.units.electrode_group[:]])
+        t = time.time() - t0
+        logger.info(f"Time to get devices: {t:.2f} seconds")
+        # ----------------------------------------------------------------- #
         results = []
         for device in np.unique(devices):
             device_units = devices == device
@@ -158,20 +175,27 @@ def save_results(dandiset_id: str, csv_name: str, helper: Callable, use_threadpo
     with contextlib.suppress(FileNotFoundError):
         os.unlink(csv_name)
     assets = get_assets(dandiset_id)
+    tqdm_kwargs = dict(total=len(assets), desc=f"Processing dandiset {dandiset_id}", unit="nwb file", ncols=80)
     if use_threadpool:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
             futures = [pool.submit(helper, asset) for asset in assets]
-            for future in tqdm.tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
+            for future in tqdm.tqdm(concurrent.futures.as_completed(futures), **tqdm_kwargs):
                 results = future.result()
                 append_to_csv(csv_name, results)
     else:
-        for asset in tqdm.tqdm(assets):
+        for asset in tqdm.tqdm(assets, **tqdm_kwargs):
             results = helper(asset)
             append_to_csv(csv_name, results)
             
 def main() -> None:
-    save_results(dandiset_id=CHEN_BRAINWIDE_DANDISET_ID, csv_name='chen_results.csv', helper=chen_helper, use_threadpool=False)
-    save_results(dandiset_id=IBL_BRAINWIDE_DANDISET_ID, csv_name='ibl_results.csv', helper=ibl_helper, use_threadpool=False)
+    t0 = time.time()
+    save_results(dandiset_id=IBL_BRAINWIDE_DANDISET_ID, csv_name='ibl_results.csv', helper=ibl_helper, use_threadpool=True)
+    logging.info(f"Total time: {time.time() - t0:.2f} seconds")
+    
+    t0 = time.time()
+    save_results(dandiset_id=CHEN_BRAINWIDE_DANDISET_ID, csv_name='chen_results.csv', helper=chen_helper, use_threadpool=True)
+    logging.info(f"Total time: {time.time() - t0:.2f} seconds")
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.WARNING)
     main()
