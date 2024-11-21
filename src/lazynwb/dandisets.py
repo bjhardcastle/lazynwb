@@ -5,7 +5,7 @@ from collections.abc import Generator
 
 import dandi.dandiapi
 
-from lazynwb.base import LazyNWB
+from lazynwb.base import LazyFile
 
 
 def get_dandi_client(token: str | None = None) -> dandi.dandiapi.DandiAPIClient:
@@ -13,16 +13,16 @@ def get_dandi_client(token: str | None = None) -> dandi.dandiapi.DandiAPIClient:
         token = os.getenv("DANDI_API_TOKEN", default=None)
     return dandi.dandiapi.DandiAPIClient(token=token)
 
-def get_dandiset_nwbs(dandiset_id: str, version_id: str | None = None) -> Generator[LazyNWB, None, None]:
-    """Get a LazyNWB object for each file in the specified Dandiset.
+def get_dandiset_nwbs(dandiset_id: str, version_id: str | None = None) -> Generator[LazyFile, None, None]:
+    """Get a LazyFile object for each file in the specified Dandiset.
     
     >>> next(get_dandiset_nwbs('000363'))           # ephys dataset from the Svoboda Lab
-    LazyNWB('https://dandiarchive.s3.amazonaws.com/blobs/56c/31a/56c31a1f-a6fb-4b73-ab7d-98fb5ef9a553')
+    LazyFile('https://dandiarchive.s3.amazonaws.com/blobs/56c/31a/56c31a1f-a6fb-4b73-ab7d-98fb5ef9a553')
     """
     # assets = get_dandiset_assets(dandiset_id, version_id)
-    # def _helper(asset) -> LazyNWB:
-    #     return LazyNWB(asset.get_content_url(follow_redirects=1, strip_query=True))
-    # future_to_nwb: dict[concurrent.futures.Future, LazyNWB] = {}
+    # def _helper(asset) -> LazyFile:
+    #     return LazyFile(asset.get_content_url(follow_redirects=1, strip_query=True))
+    # future_to_nwb: dict[concurrent.futures.Future, LazyFile] = {}
     # with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
     #     for asset in assets:
     #         pool.submit(_helper, asset)
@@ -32,8 +32,8 @@ def get_dandiset_nwbs(dandiset_id: str, version_id: str | None = None) -> Genera
     for asset in assets:
         yield get_lazynwb_from_dandiset_asset(asset)
 
-def get_lazynwb_from_dandiset_asset(asset: dandi.dandiapi.BaseRemoteAsset) -> LazyNWB:
-    return LazyNWB(asset.get_content_url(follow_redirects=1, strip_query=False))
+def get_lazynwb_from_dandiset_asset(asset: dandi.dandiapi.BaseRemoteAsset) -> LazyFile:
+    return LazyFile(asset.get_content_url(follow_redirects=1, strip_query=False))
 
 def get_dandiset_assets(dandiset_id: str, version_id: str | None = None, lazy: bool = True) -> tuple[dandi.dandiapi.BaseRemoteAsset, ...]:
     """Get a sequence of assets from the specified Dandiset.

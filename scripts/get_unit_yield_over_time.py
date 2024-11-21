@@ -7,9 +7,9 @@ import dataclasses
 import datetime
 import logging
 import os
-from collections.abc import Iterable
 import threading
 import time
+from collections.abc import Iterable
 from typing import Callable
 
 import dandi.dandiapi
@@ -84,11 +84,11 @@ def chen_helper(asset: dandi.dandiapi.BaseRemoteAsset) -> list[Result]:
         # - but every reference object is unique even
         #   if they point to the same location in the file and there's no way to
         #   know what the object reference points to, other than to read it, which
-        #   is slow 
+        #   is slow
         # - if we could convert <HDF5 object reference> to a string path, like in
         #   zarr files, this would be much faster
         t0 = time.time()
-        devices = np.array([nwb._nwb[group]['device'].name.split('/')[-1] for group in nwb.units.electrode_group[:]])
+        devices = np.array([nwb._data[group]['device'].name.split('/')[-1] for group in nwb.units.electrode_group[:]])
         t = time.time() - t0
         logger.info(f"Time to get devices: {t:.2f} seconds")
         # ----------------------------------------------------------------- #
@@ -186,14 +186,15 @@ def save_results(dandiset_id: str, csv_name: str, helper: Callable, use_threadpo
         for asset in tqdm.tqdm(assets, **tqdm_kwargs):
             results = helper(asset)
             append_to_csv(csv_name, results)
-            
+
 def main() -> None:
+
+    t0 = time.time()
+    save_results(dandiset_id=CHEN_BRAINWIDE_DANDISET_ID, csv_name='chen_results.csv', helper=chen_helper, use_threadpool=False)
+    logging.info(f"Total time: {time.time() - t0:.2f} seconds")
+
     t0 = time.time()
     save_results(dandiset_id=IBL_BRAINWIDE_DANDISET_ID, csv_name='ibl_results.csv', helper=ibl_helper, use_threadpool=True)
-    logging.info(f"Total time: {time.time() - t0:.2f} seconds")
-    
-    t0 = time.time()
-    save_results(dandiset_id=CHEN_BRAINWIDE_DANDISET_ID, csv_name='chen_results.csv', helper=chen_helper, use_threadpool=True)
     logging.info(f"Total time: {time.time() - t0:.2f} seconds")
 
 if __name__ == "__main__":

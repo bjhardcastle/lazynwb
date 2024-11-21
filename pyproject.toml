@@ -16,6 +16,8 @@ dependencies = [
     "seaborn>=0.13.2",
     "tqdm>=4.66.2",
     "dask>=2024.2.1",
+    "pip>=24.0",
+    "ipykernel>=6.29.4",
 ]
 version = "0.1.0"
 classifiers = [
@@ -188,6 +190,7 @@ dev = [
     "black>=23.7.0",
     "git-changelog>=2.3",
     "parver>=0.3",
+    "psutil>=5.9.8",
 ]
 docs = [
     "markdown-callouts>=0.3",

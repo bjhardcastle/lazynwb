@@ -50,12 +50,13 @@ next(tm)
 lazy_object_data = nwb[object_reference]
 print(f"2. Got lazy object reference: {next(tm)}")
 
-# 3'. de-reference the lazy object to get location and use directly:
+# 3''. use specific function for getting location:
 tm = get_time_and_memory()
 next(tm)
 loc = h5py.h5r.get_name(object_reference, nwb.id)
 print(f"3''. Got de-referenced location: {next(tm)}")
 
+# 3'. de-reference the lazy object to get location and use directly:
 tm = get_time_and_memory()
 next(tm)
 reference_path = nwb[loc].name

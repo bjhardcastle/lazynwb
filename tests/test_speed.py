@@ -1,7 +1,5 @@
-import contextlib
 import logging
 import time
-from typing import Generator
 
 import pytest
 
@@ -34,7 +32,7 @@ def url(request: pytest.FixtureRequest) -> str:
 def test_open_time(url: str) -> None:
     # may need to try this more than once: S3 storage can be slow on first request in a while
     t0 = time.time()
-    nwb = lazynwb.LazyNWB(url)
+    nwb = lazynwb.LazyFile(url)
     t = time.time() - t0
     logger.info(f'Opened {url} with {nwb.__class__.__name__} in {t} seconds')
     assert t < MIN_OPEN_TIME_SECONDS, f'Opening {url} with {nwb.__class__.__name__} took too long: {t:.1f} seconds (expected < {MIN_OPEN_TIME_SECONDS})'
@@ -48,7 +46,7 @@ def test_remfile_vs_h5py(url: str) -> None:
         times.append( t:= time.time() - t0)
         logger.info(f'Opened {url} with {use_remfile=} in {t} seconds')
     assert times[0] < times[1], f'Opening {url} with remfile {times[0]=} was not faster than h5py {times[1]=}: default to remfile=False in open()'
-        
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     pytest.main([__file__])
