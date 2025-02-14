@@ -16,8 +16,7 @@ import polars as pl
 import zarr
 from polars.type_aliases import PolarsDataType, PythonDataType
 
-if typing.TYPE_CHECKING:
-    from lazynwb.base import LazyFile
+from lazynwb.file_io import LazyFile
 
 logger = logging.getLogger(__name__)
 

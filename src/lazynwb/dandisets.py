@@ -5,7 +5,7 @@ from collections.abc import Generator
 
 import dandi.dandiapi
 
-from lazynwb.base import LazyFile
+from lazynwb.file_io import LazyFile
 
 
 def get_dandi_client(token: str | None = None) -> dandi.dandiapi.DandiAPIClient:
