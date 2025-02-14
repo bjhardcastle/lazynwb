@@ -10,7 +10,6 @@ import npc_io
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-import polars as pl
 import tqdm
 import zarr
 
@@ -224,7 +223,7 @@ def get_indexed_column_data(
             )
         else:
             # we need to get the start of the first requested row
-            index_array = [indexed_column_accessor[table_row_indices[0] - 1]] + table_row_indices
+            index_array = np.concatenate(([indexed_column_accessor[table_row_indices[0] - 1]], table_row_indices))
 
     # get indices in the data array for all requested rows, so we can read from accessor in one go:
     data_indices: list[int] = []
@@ -307,12 +306,6 @@ def _get_table_column_accessors(
         f"retrieved {len(names_to_columns)} column accessors from {file._accessor} in {time.time() - t0:.2f} s ({use_thread_pool=})"
     )
     return names_to_columns
-
-
-def _get_polars_dtype_override(data: zarr.Array | h5py.Dataset) -> pl.DataType | None:
-    if data.dtype.kind == "O" or "name" in data.name.split("/")[-1]:
-        return pl.String()
-    return None
 
 
 def get_indexed_table_column(

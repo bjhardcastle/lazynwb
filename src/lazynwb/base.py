@@ -3,13 +3,15 @@ from __future__ import annotations
 import datetime
 from collections.abc import Iterable
 from typing import Any
+import typing
 
 import npc_io
-import polars as pl
 
 import lazynwb.file_io
 import lazynwb.funcs
 
+if typing.TYPE_CHECKING:
+    import pandas as pd
 
 class LazyNWB:
     """
@@ -54,8 +56,8 @@ class LazyNWB:
         return LazyComponent(self._file).session_description
 
     @property
-    def units(self) -> pl.LazyFrame:
-        return lazynwb.funcs.get_units(self._file)
+    def units(self) -> pd.DataFrame:
+        return lazynwb.funcs.get_df(self._file, table_path='units', exclude_column_names=('spike_times', 'waveform_mean', 'waveform_sd', 'spike_amplitudes'))
 
     @property
     def experiment_description(self) -> str:
