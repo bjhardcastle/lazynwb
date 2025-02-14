@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-import contextlib
-import dataclasses
 import datetime
-import enum
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
-import h5py
 import npc_io
 import polars as pl
-import upath
-import zarr
 
 import lazynwb.file_io
 import lazynwb.funcs
+
 
 class LazyNWB:
     """
@@ -21,7 +17,7 @@ class LazyNWB:
 
     - initialize with a path to an NWB file or an open h5py.File, h5py.Group, or
     zarr.Group object
-    
+
     Examples:
         >>> nwb = LazyNWB('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/39490bff-87c9-4ef2-b408-36334e748ac6/nwb/ecephys_620264_2022-08-02_15-39-59_experiment1_recording1.nwb')
         >>> nwb.subject.date_of_birth
@@ -29,94 +25,96 @@ class LazyNWB:
         >>> nwb.session_start_time
         datetime.datetime(2022, 8, 2, 15, 39, 59, tzinfo=datetime.timezone.utc)
     """
+
     _file: lazynwb.file_io.LazyFile
 
     def __init__(
-        self, 
-        path_or_data: npc_io.PathLike | h5py.File | h5py.Group | zarr.Group,
+        self,
+        path: npc_io.PathLike,
         fsspec_storage_options: dict[str, Any] | None = None,
     ) -> None:
-        self._file = lazynwb.file_io.LazyFile(path_or_data, fsspec_storage_options)
+        self._file = lazynwb.file_io.LazyFile(
+            path=path, fsspec_storage_options=fsspec_storage_options
+        )
 
     @property
     def subject(self) -> Subject:
-        return Subject(self._file, 'general/subject')
-    
+        return Subject(self._file, "general/subject")
+
     @property
     def session_start_time(self) -> datetime.datetime:
         return LazyComponent(self._file).session_start_time
-    
+
     @property
     def session_id(self) -> str:
-        return LazyComponent(self._file, 'general').session_id
-    
+        return LazyComponent(self._file, "general").session_id
+
     @property
     def session_description(self) -> str:
         return LazyComponent(self._file).session_description
-    
+
     @property
     def units(self) -> pl.LazyFrame:
         return lazynwb.funcs.get_units(self._file)
 
     @property
     def experiment_description(self) -> str:
-        return LazyComponent(self._file, 'general').experiment_description
-    
+        return LazyComponent(self._file, "general").experiment_description
+
     @property
     def experimenter(self) -> str:
-        return LazyComponent(self._file, 'general').experimenter
-    
+        return LazyComponent(self._file, "general").experimenter
+
     @property
     def lab(self) -> str:
-        return LazyComponent(self._file, 'general').lab
-    
+        return LazyComponent(self._file, "general").lab
+
     @property
     def institution(self) -> str:
-        return LazyComponent(self._file, 'general').institution
-    
+        return LazyComponent(self._file, "general").institution
+
     @property
     def related_publications(self) -> str:
-        return LazyComponent(self._file, 'general').related_publications
-    
+        return LazyComponent(self._file, "general").related_publications
+
     @property
-    def keywords(self) -> str | None:
-        k: str | Iterable[str] | None = LazyComponent(self._file, 'general').keywords
+    def keywords(self) -> list[str] | None:
+        k: str | Iterable[str] | None = LazyComponent(self._file, "general").keywords
         if k is None:
             return None
         if isinstance(k, str):
             k = [k]
         return list(k)
-    
+
     @property
     def notes(self) -> str:
-        return LazyComponent(self._file, 'general').notes
-    
+        return LazyComponent(self._file, "general").notes
+
     @property
     def data_collection(self) -> str:
-        return LazyComponent(self._file, 'general').data_collection
-    
+        return LazyComponent(self._file, "general").data_collection
+
     @property
     def surgery(self) -> str:
-        return LazyComponent(self._file, 'general').surgery
-    
+        return LazyComponent(self._file, "general").surgery
+
     @property
     def pharmacology(self) -> str:
-        return LazyComponent(self._file, 'general').pharmacology
-    
+        return LazyComponent(self._file, "general").pharmacology
+
     @property
     def virus(self) -> str:
-        return LazyComponent(self._file, 'general').virus
-    
+        return LazyComponent(self._file, "general").virus
+
     @property
     def source_script(self) -> str:
-        return LazyComponent(self._file, 'general').source_script
-    
+        return LazyComponent(self._file, "general").source_script
+
     @property
     def source_script_file_name(self) -> str:
-        return LazyComponent(self._file, 'general').source_script_file_name
-    
-    
-    
+        return LazyComponent(self._file, "general").source_script_file_name
+
+
 class LazyComponent:
     def __init__(
         self,
@@ -125,9 +123,9 @@ class LazyComponent:
     ) -> None:
         self._file = file
         if path is None:
-            path = ''
-        self._path = path.strip().strip('/')
-            
+            path = ""
+        self._path = path.strip().strip("/")
+
     def __getattr__(self, name: str) -> Any:
         path = f"{self._path}/{name}" if self._path else name
         v = self._file.get(path, None)
@@ -142,42 +140,43 @@ class LazyComponent:
         if len(v) > 1:
             return v
         return v[0]
-    
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self._file}, {self._path!r})"
-    
-    
+
+
 class Subject(LazyComponent):
     age: str | None
     """The age of the subject. The ISO 8601 Duration format is recommended, e.g., “P90D” for 90 days old."""
-    
+
     age__reference: str | None
-    """Age is with reference to this event. Can be ‘birth’ or ‘gestational’. If reference is omitted, then ‘birth’ is implied. Value can be None when read from an NWB file with schema version 2.0 to 2.5 where age__reference is missing."""
-    
+    """Age is with reference to this event. Can be `birth` or `gestational`. If reference is omitted, then `birth` is implied. Value can be None when read from an NWB file with schema version 2.0 to 2.5 where age__reference is missing."""
+
     description: str | None
     """A description of the subject, e.g., “mouse A10”."""
-    
+
     genotype: str | None
     """The genotype of the subject, e.g., “Sst-IRES-Cre/wt;Ai32(RCL-ChR2(H134R)_EYFP"""
-    
+
     sex: str | None
     """The sex of the subject. Using “F” (female), “M” (male), “U” (unknown), or
     “O” (other) is recommended."""
-    
+
     species: str | None
     """The species of the subject. The formal latin binomal name is recommended, e.g., “Mus musculus”."""
-    
+
     subject_id: str | None
     """A unique identifier for the subject, e.g., “A10”."""
-    
+
     weight: str | None
     """The weight of the subject, including units. Using kilograms is recommended. e.g., “0.02 kg”. If a float is provided, then the weight will be stored as “[value] kg”."""
-    
+
     strain: str | None
     """The strain of the subject, e.g., “C57BL/6J”."""
-    
+
     date_of_birth: datetime.datetime | None
     """The datetime of the date of birth. May be supplied instead of age."""
+
 
 if __name__ == "__main__":
     from npc_io import testmod
