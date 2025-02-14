@@ -78,7 +78,7 @@ class LazyFile:
         'amplitude'
     """
 
-    class HDMFBackend(enum.StrEnum):
+    class HDMFBackend(enum.Enum):
         """Enum for file-type backend used by LazyFile instance (e.g. HDF5, ZARR)"""
 
         HDF5 = "hdf5"
