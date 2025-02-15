@@ -148,7 +148,7 @@ def _get_df(
             column_accessors.pop(name.removesuffix("_index"), None)
 
     # indexed columns (columns containing lists) need to be handled differently:
-    indexed_column_names: set[str] = get_indexed_columns(column_accessors.keys())
+    indexed_column_names: set[str] = get_indexed_column_names(column_accessors.keys())
     non_indexed_column_names = column_accessors.keys() - indexed_column_names
     # some columns have >2 dims but no index - they also need to be handled differently
     multi_dim_column_names = []
@@ -263,7 +263,7 @@ def is_indexed_column(column_name: str, all_column_names: Iterable[str]) -> bool
         return f"{column_name}_index" in all_column_names
 
 
-def get_indexed_columns(column_names: Iterable[str]) -> set[str]:
+def get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
     """
     >>> get_indexed_columns(['spike_times', 'presence_ratio'])
     set()
