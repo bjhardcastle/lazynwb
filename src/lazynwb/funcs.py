@@ -15,6 +15,8 @@ import zarr
 
 from lazynwb.file_io import LazyFile
 
+pd.options.mode.copy_on_write = True
+
 logger = logging.getLogger(__name__)
 
 NWB_PATH_COLUMN_NAME = "_nwb_path"
@@ -271,6 +273,59 @@ def get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
     ['spike_times', 'spike_times_index']
     """
     return {k for k in column_names if is_indexed_column(k, column_names)}
+
+def _indexed_column_helper(
+    nwb_path: npc_io.PathLike,
+    table_path: str,
+    column_name: str,
+    table_row_indices: Sequence[int],
+) -> pd.DataFrame:
+    with LazyFile(nwb_path) as file:
+        data_column_accessor = file[table_path][column_name]
+        if data_column_accessor.ndim >= 2:
+            column_data = data_column_accessor[table_row_indices].tolist()
+        else:
+            column_data = get_indexed_column_data(
+                data_column_accessor=data_column_accessor,
+                index_column_accessor=file[table_path][f"{column_name}_index"],
+                table_row_indices=table_row_indices,
+            )
+    return pd.DataFrame(
+        {
+            column_name: column_data,
+            TABLE_INDEX_COLUMN_NAME: table_row_indices,
+            NWB_PATH_COLUMN_NAME: [nwb_path] * len(table_row_indices),
+        },
+    )
+
+def merge_array_column(
+    df: pd.DataFrame,
+    column_name: str,
+) -> pd.DataFrame:
+    column_data: list[pd.DataFrame] = []
+    future_to_path = {}
+    for nwb_path, session_df in df.groupby(NWB_PATH_COLUMN_NAME):
+        future = get_threadpool_executor().submit(
+            _indexed_column_helper,
+            nwb_path=nwb_path,
+            table_path=session_df[TABLE_PATH_COLUMN_NAME].iloc[0],
+            column_name=column_name,
+            table_row_indices=session_df[TABLE_INDEX_COLUMN_NAME].values,
+        )
+        future_to_path[future] = nwb_path
+    for future in concurrent.futures.as_completed(future_to_path):
+        try:
+            column_data.append(future.result())
+        except:
+            logger.error(
+                f"Error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
+            )
+            raise
+    return df.merge(
+        pd.concat(column_data), 
+        how="left",
+        on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
+    ).set_index(df[TABLE_INDEX_COLUMN_NAME].values)
 
 
 def _get_table_column_accessors(
