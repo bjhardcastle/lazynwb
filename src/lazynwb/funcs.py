@@ -200,9 +200,9 @@ def _get_df(
 
 def get_indexed_column_data(
     data_column_accessor: zarr.Array | h5py.Dataset,
-    indexed_column_accessor: zarr.Array | h5py.Dataset,
+    index_column_accessor: zarr.Array | h5py.Dataset,
     table_row_indices: Sequence[int] | None = None,
-) -> tuple[list[np.float64 | list[np.float64]], ...]:
+) -> list[list[np.float64 | list[np.float64]]]:
     """Get the data for an indexed column in a table, given the data and index array accessors.
 
     - default behavior is to return the data for all rows in the table
@@ -221,37 +221,24 @@ def get_indexed_column_data(
             ...
         }
     """
-    index_array: npt.NDArray[np.uint32]
-    if not table_row_indices:
-        index_array = np.concatenate(([0], indexed_column_accessor[slice(None)]))
-    else:
-        table_row_indices = sorted(table_row_indices)
-        if table_row_indices[0] == 0:
-            index_array = np.concatenate(
-                ([0], indexed_column_accessor[table_row_indices])
-            )
-        else:
-            # we need to get the start of the first requested row
-            index_array = np.concatenate(([indexed_column_accessor[table_row_indices[0] - 1]], table_row_indices))
-
     # get indices in the data array for all requested rows, so we can read from accessor in one go:
+    index_array: npt.NDArray[np.int32] = np.concatenate(([0], index_column_accessor[:]))  # small enough to read in one go
+    if table_row_indices is None:
+        table_row_indices = list(range(len(index_array) - 1)) # -1 because of the inserted 0 above
     data_indices: list[int] = []
-    for i in range(1, len(index_array)):
-        start_idx, end_idx = index_array[i - 1], index_array[i]
-        data_indices.extend(range(start_idx, end_idx))
-    assert np.all(
-        np.sign(np.diff(data_indices))
-    ), f"non-sequential data indices: {data_indices}"
-    # read actual data with fancy-indexing:
+    for i in table_row_indices:
+        data_indices.extend(range(index_array[i], index_array[i + 1]))
+    assert len(data_indices) == np.sum(np.diff(index_array)[table_row_indices]), "length of data_indices is incorrect"
+
+    # read actual data and split into sub-vectors for each row of the table:
     data_array: list[np.float64 | list[np.float64]] = data_column_accessor[data_indices]
-    # split into sub-vectors for each row of the table:
     column_data = []
     start_idx = 0
-    for run_length in np.diff(index_array):
+    for run_length in np.diff(index_array)[table_row_indices]: 
         end_idx = start_idx + run_length
         column_data.append(data_array[start_idx:end_idx])
         start_idx = end_idx
-    return tuple(column_data)
+    return column_data
 
 
 def is_indexed_column(column_name: str, all_column_names: Iterable[str]) -> bool:
