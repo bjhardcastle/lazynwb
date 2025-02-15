@@ -187,7 +187,7 @@ def _get_df(
     # add identifiers to each row, so they can be linked back their source at a later time:
     identifier_column_data = {
         NWB_PATH_COLUMN_NAME: [file._path.as_posix()] * column_length,
-        NWB_ID_COLUMN_NAME: [str(file["identifier"])] * column_length,
+        NWB_ID_COLUMN_NAME: [str(file["identifier"][0])] * column_length,
         TABLE_PATH_COLUMN_NAME: [table_path] * column_length,
         TABLE_INDEX_COLUMN_NAME: np.arange(column_length),
     }
