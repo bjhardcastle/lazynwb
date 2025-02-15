@@ -302,40 +302,6 @@ def _get_table_column_accessors(
     return names_to_columns
 
 
-def get_indexed_table_column(
-    nwb: LazyFile,
-    table_path: str,
-    column: str,
-    specific_indices: int | Iterable[int] | None = None,
-) -> tuple[npt.NDArray, ...]:
-    table = nwb[table_path]
-    if column not in table:
-        raise KeyError(f"Column {column!r} not found in table {table_path!r}")
-    index_column_name = f"{column}_index"
-    if isinstance(specific_indices, int):
-        specific_indices = (specific_indices,)
-    else:
-        specific_indices = tuple(specific_indices)
-
-    logger.debug(f"getting {table_path}.{column} for {len(specific_indices)} indices")
-    t0 = time.time()
-    index_array = table.get(index_column_name)[:]
-    data_array = table.get(column)
-    if len(specific_indices) > 1000:
-        t1 = time.time()
-        data_array = data_array[:]
-        logger.warning(
-            f"read {table_path}.{column} from disk (len={len(data_array)}) for {len(specific_indices)} indices in {time.time() - t1:.1f} s"
-        )
-    else:
-        data_array = data_array
-    sub_arrays = _convert_indexed_column_data(data_array, index_array)
-    logger.warning(
-        f"got {table_path}.{column} for {len(specific_indices)} entries in {time.time() - t0:.1f} s total"
-    )
-    return tuple(sub_arrays)
-
-
 if __name__ == "__main__":
     from npc_io import testmod
 
