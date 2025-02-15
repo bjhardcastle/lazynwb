@@ -150,12 +150,18 @@ def _get_df(
     # indexed columns (columns containing lists) need to be handled differently:
     indexed_column_names: set[str] = get_indexed_columns(column_accessors.keys())
     non_indexed_column_names = column_accessors.keys() - indexed_column_names
+    # some columns have >2 dims but no index - they also need to be handled differently
+    multi_dim_column_names = []
 
     column_data: dict[str, npt.NDArray | tuple[list, ...]] = {}
     logger.debug(
         f"materializing non-indexed columns for {file._path}/{table_path}: {non_indexed_column_names}"
     )
     for column_name in non_indexed_column_names:
+        if (ndim := column_accessors[column_name].ndim) >= 3:
+            logger.warning(f"non-indexed column {column_name!r} has {ndim=}: will be treated as an indexed column")
+            multi_dim_column_names.append(column_name)
+            continue
         if column_accessors[column_name].dtype.kind in ("S", "O"):
             column_data[column_name] = column_accessors[column_name][:].astype(str)
         else:
@@ -173,6 +179,9 @@ def _get_df(
                 data_column_accessor=column_accessors[column_name],
                 indexed_column_accessor=column_accessors[f"{column_name}_index"],
             )
+        for column_name in multi_dim_column_names:
+            column_data[column_name] = column_accessors[column_name][:].tolist()
+            
     column_length = len(next(iter(column_data.values())))
 
     # add identifiers to each row, so they can be linked back their source at a later time:
