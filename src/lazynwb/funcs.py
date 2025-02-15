@@ -234,9 +234,7 @@ def get_indexed_column_data(
         np.sign(np.diff(data_indices))
     ), f"non-sequential data indices: {data_indices}"
     # read actual data with fancy-indexing:
-    data_array: list[np.float64 | list[np.float64]] = data_column_accessor[
-        data_indices, ...
-    ]
+    data_array: list[np.float64 | list[np.float64]] = data_column_accessor[data_indices]
     # split into sub-vectors for each row of the table:
     column_data = []
     start_idx = 0
