@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Iterable
+import inspect
+from os import name
 from typing import Any
 import typing
 
@@ -80,10 +82,10 @@ class LazyNWB:
         return LazyComponent(self._file, "general").related_publications
 
     @property
-    def keywords(self) -> list[str] | None:
+    def keywords(self) -> list[str]:
         k: str | Iterable[str] | None = LazyComponent(self._file, "general").keywords
         if k is None:
-            return None
+            return []
         if isinstance(k, str):
             k = [k]
         return list(k)
@@ -116,6 +118,15 @@ class LazyNWB:
     def source_script_file_name(self) -> str:
         return LazyComponent(self._file, "general").source_script_file_name
 
+    def _to_dict(self) -> dict[str, str | list[str]]:
+        def _get_attr_names(obj: Any) -> list[str]:
+            return [
+                name
+                for name, prop in obj.__class__.__dict__.items()
+                if isinstance(prop, property)
+                and inspect.signature(prop.fget).return_annotation in ('str', 'list[str]')
+            ]
+        return {name: getattr(self, name) for name in _get_attr_names(self)}
 
 class LazyComponent:
     def __init__(
@@ -178,8 +189,10 @@ class Subject(LazyComponent):
 
     date_of_birth: datetime.datetime | None
     """The datetime of the date of birth. May be supplied instead of age."""
-
-
+    
+    def _to_dict(self) -> dict[str, str | list[str]]:
+        return {name: getattr(self, name) for name in self.__class__.__annotations__}
+    
 if __name__ == "__main__":
     from npc_io import testmod
 
