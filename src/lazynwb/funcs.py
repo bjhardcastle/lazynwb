@@ -101,9 +101,7 @@ def get_df(
         )
         future_to_path[future] = path
     futures = concurrent.futures.as_completed(future_to_path)
-    if (
-        use_process_pool and not disable_progress
-    ):  # only show progress bar for process pool - threadpool will be fast
+    if not disable_progress:  
         futures = tqdm.tqdm(
             futures,
             total=len(future_to_path),
