@@ -1,19 +1,20 @@
 from __future__ import annotations
 
+import concurrent.futures
 import datetime
-from collections.abc import Iterable
 import inspect
-from os import name
+import logging
+from collections.abc import Iterable
 from typing import Any
-import typing
 
 import npc_io
+import pandas as pd
 
 import lazynwb.file_io
 import lazynwb.funcs
 
-if typing.TYPE_CHECKING:
-    import pandas as pd
+logger = logging.getLogger(__name__)
+
 
 class LazyNWB:
     """
@@ -59,7 +60,16 @@ class LazyNWB:
 
     @property
     def units(self) -> pd.DataFrame:
-        return lazynwb.funcs.get_df(self._file, table_path='units', exclude_column_names=('spike_times', 'waveform_mean', 'waveform_sd', 'spike_amplitudes'))
+        return lazynwb.funcs.get_df(
+            self._file,
+            table_path="units",
+            exclude_column_names=(
+                "spike_times",
+                "waveform_mean",
+                "waveform_sd",
+                "spike_amplitudes",
+            ),
+        )
 
     @property
     def experiment_description(self) -> str:
@@ -124,9 +134,12 @@ class LazyNWB:
                 name
                 for name, prop in obj.__class__.__dict__.items()
                 if isinstance(prop, property)
-                and inspect.signature(prop.fget).return_annotation in ('str', 'list[str]')
+                and inspect.signature(prop.fget).return_annotation
+                in ("str", "list[str]")
             ]
+
         return {name: getattr(self, name) for name in _get_attr_names(self)}
+
 
 class LazyComponent:
     def __init__(
@@ -189,10 +202,43 @@ class Subject(LazyComponent):
 
     date_of_birth: datetime.datetime | None
     """The datetime of the date of birth. May be supplied instead of age."""
-    
+
     def _to_dict(self) -> dict[str, str | list[str]]:
         return {name: getattr(self, name) for name in self.__class__.__annotations__}
-    
+
+
+def get_metadata_df(
+    nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
+):
+    if isinstance(nwb_path_or_paths, str) or not isinstance(
+        nwb_path_or_paths, Iterable
+    ):
+        paths = (nwb_path_or_paths,)
+    else:
+        paths = tuple(nwb_path_or_paths)
+
+    def _get_metadata_df_helper(nwb_path: npc_io.PathLike) -> dict[str, Any]:
+        nwb = LazyNWB(nwb_path)
+        return {**nwb._to_dict(), **nwb.subject._to_dict()}
+
+    future_to_path = {}
+    for path in paths:
+        future = lazynwb.funcs.get_threadpool_executor().submit(
+            _get_metadata_df_helper,
+            nwb_path=path,
+        )
+        future_to_path[future] = path
+    records = []
+    for future in concurrent.futures.as_completed(future_to_path):
+        path = future_to_path[future]
+        try:
+            records.append(future.result())
+        except:
+            logger.error(f"Error processing {path}:")
+            raise
+    return pd.DataFrame.from_records(records)
+
+
 if __name__ == "__main__":
     from npc_io import testmod
 

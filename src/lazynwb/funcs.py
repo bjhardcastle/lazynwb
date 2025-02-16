@@ -4,6 +4,7 @@ import concurrent.futures
 import logging
 import time
 from collections.abc import Iterable, Sequence
+from typing import Any
 
 import h5py
 import npc_io
