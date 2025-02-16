@@ -59,6 +59,18 @@ class LazyNWB:
         return LazyComponent(self._file).session_description
 
     @property
+    def trials(self) -> pd.DataFrame:
+        return lazynwb.funcs.get_df(self._file, table_path="/intervals/trials")
+    
+    @property
+    def epochs(self) -> pd.DataFrame:
+        return lazynwb.funcs.get_df(self._file, table_path="/intervals/epochs")
+    
+    @property
+    def electrodes(self) -> pd.DataFrame:
+        return lazynwb.funcs.get_df(self._file, table_path="/general/extracellular_ephys/electrodes")
+    
+    @property
     def units(self) -> pd.DataFrame:
         return lazynwb.funcs.get_df(
             self._file,
