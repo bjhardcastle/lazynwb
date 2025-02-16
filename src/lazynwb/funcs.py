@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import logging
 import time
 from collections.abc import Iterable, Sequence
@@ -21,7 +22,6 @@ pd.options.mode.copy_on_write = True
 logger = logging.getLogger(__name__)
 
 NWB_PATH_COLUMN_NAME = "_nwb_path"
-NWB_ID_COLUMN_NAME = "_nwb_id"
 TABLE_PATH_COLUMN_NAME = "_table_path"
 TABLE_INDEX_COLUMN_NAME = "_table_index"
 
@@ -44,7 +44,11 @@ def get_processpool_executor() -> concurrent.futures.ProcessPoolExecutor:
 
 
 def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> pd.DataFrame:
-    with LazyFile(nwb_path) as file:
+    if isinstance(nwb_path, LazyFile):
+        context = contextlib.nullcontext(nwb_path)
+    else:
+        context = LazyFile(nwb_path) # type: ignore[assignment]
+    with context as file:
         return _get_df(
             file=file,
             **get_df_kwargs,
@@ -52,7 +56,7 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> pd.DataFrame:
 
 
 def get_df(
-    nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
+    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike | LazyFile] | LazyFile,
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_indexed_columns: bool = False,
@@ -60,12 +64,13 @@ def get_df(
     disable_progress: bool = False,
 ) -> pd.DataFrame:
     t0 = time.time()
-    if isinstance(nwb_path_or_paths, str) or not isinstance(
-        nwb_path_or_paths, Iterable
+
+    if isinstance(nwb_data_sources, (str, LazyFile)) or not isinstance(
+        nwb_data_sources, Iterable
     ):
-        paths = (nwb_path_or_paths,)
+        paths = (nwb_data_sources,)
     else:
-        paths = tuple(nwb_path_or_paths)
+        paths = tuple(nwb_data_sources)
 
     if len(paths) == 1:  # don't use a pool for a single file
         return _get_df_helper(
@@ -192,7 +197,6 @@ def _get_df(
     # add identifiers to each row, so they can be linked back their source at a later time:
     identifier_column_data = {
         NWB_PATH_COLUMN_NAME: [file._path.as_posix()] * column_length,
-        NWB_ID_COLUMN_NAME: [str(file["identifier"][0])] * column_length,
         TABLE_PATH_COLUMN_NAME: [table_path] * column_length,
         TABLE_INDEX_COLUMN_NAME: np.arange(column_length),
     }
