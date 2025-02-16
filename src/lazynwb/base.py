@@ -9,6 +9,7 @@ from typing import Any
 
 import npc_io
 import pandas as pd
+import tqdm
 
 import lazynwb.file_io
 import lazynwb.funcs
@@ -225,7 +226,8 @@ class Subject(LazyComponent):
 
 def get_metadata_df(
     nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
-):
+    disable_progress: bool = False,
+) -> pd.DataFrame:
     if isinstance(nwb_path_or_paths, str) or not isinstance(
         nwb_path_or_paths, Iterable
     ):
@@ -244,8 +246,17 @@ def get_metadata_df(
             nwb_path=path,
         )
         future_to_path[future] = path
+    futures = concurrent.futures.as_completed(future_to_path)
+    if not disable_progress:
+        futures = tqdm.tqdm(
+            futures,
+            total=len(future_to_path),
+            desc="Getting metadata",
+            unit="file",
+            ncols=80,
+        )
     records = []
-    for future in concurrent.futures.as_completed(future_to_path):
+    for future in futures:
         path = future_to_path[future]
         try:
             records.append(future.result())
