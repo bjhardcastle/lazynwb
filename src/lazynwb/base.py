@@ -174,6 +174,8 @@ class LazyComponent:
         v = self._file.get(path, None)
         if v is None:
             return None
+        if not getattr(v, 'shape', True):
+            v = [v[()]]
         if isinstance(v[0], bytes):
             s = v[0].decode()
             try:
