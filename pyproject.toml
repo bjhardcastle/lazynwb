@@ -7,7 +7,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "npc-io>=0.1.23",
+    "npc-io>=0.1.32",
     "h5py>=3.10.0",
     "zarr>=2.17.0",
     "dandi>=0.59.1",

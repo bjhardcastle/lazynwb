@@ -11,43 +11,15 @@ resolution-markers = [
 name = "aiobotocore"
 version = "2.7.0"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version == '3.11.*'",
-]
 dependencies = [
-    { name = "aiohttp", marker = "python_full_version == '3.11.*'" },
-    { name = "aioitertools", marker = "python_full_version == '3.11.*'" },
-    { name = "botocore", version = "1.31.64", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "wrapt", marker = "python_full_version == '3.11.*'" },
+    { name = "aiohttp" },
+    { name = "aioitertools" },
+    { name = "botocore" },
+    { name = "wrapt" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f3/e5/11b237a28df05dd782766450de0eedcad05799793f2303a14ac583e04359/aiobotocore-2.7.0.tar.gz", hash = "sha256:506591374cc0aee1bdf0ebe290560424a24af176dfe2ea7057fe1df97c4f0467", size = 99164 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/bc/6a96a686845c9f5958fac0ecafa6050ed77d0e71553b3cfe69acbaa70191/aiobotocore-2.7.0-py3-none-any.whl", hash = "sha256:aec605df77ce4635a0479b50fd849aa6b640900f7b295021ecca192e1140e551", size = 73455 },
-]
-
-[[package]]
-name = "aiobotocore"
-version = "2.19.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.10.*'",
-    "python_full_version < '3.10'",
-]
-dependencies = [
-    { name = "aiohttp", marker = "python_full_version != '3.11.*'" },
-    { name = "aioitertools", marker = "python_full_version != '3.11.*'" },
-    { name = "botocore", version = "1.36.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.11.*'" },
-    { name = "jmespath", marker = "python_full_version != '3.11.*'" },
-    { name = "multidict", marker = "python_full_version != '3.11.*'" },
-    { name = "python-dateutil", marker = "python_full_version != '3.11.*'" },
-    { name = "urllib3", version = "1.26.20", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
-    { name = "urllib3", version = "2.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*' or python_full_version >= '3.12'" },
-    { name = "wrapt", marker = "python_full_version != '3.11.*'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/46/86a52025bb356bc38bfba9fa11f754b8411f400265094c3448148a931280/aiobotocore-2.19.0.tar.gz", hash = "sha256:552d5756989621b5274f1b4a4840cd76ae83dd930d0b1839af6443743a893faf", size = 107828 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/43/8a1bdf8dd7f0d7eca7be0d64bacdd96c593cf3f3aea6c452f90e052cf9e8/aiobotocore-2.19.0-py3-none-any.whl", hash = "sha256:12c2960a21472b8eb3452cde5eb31d541ca1464d236f4221556320fa8aed2ee8", size = 77659 },
 ]
 
 [[package]]
@@ -266,13 +238,10 @@ wheels = [
 name = "boto3"
 version = "1.28.17"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version == '3.11.*'",
-]
 dependencies = [
-    { name = "botocore", version = "1.31.64", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "jmespath", marker = "python_full_version == '3.11.*'" },
-    { name = "s3transfer", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "botocore" },
+    { name = "jmespath" },
+    { name = "s3transfer" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1b/f9/889e0c7d07bc5616d193d63b9600145d2d83f21a09fca40be078ef9323eb/boto3-1.28.17.tar.gz", hash = "sha256:90f7cfb5e1821af95b1fc084bc50e6c47fa3edc99f32de1a2591faa0c546bea7", size = 103328 }
 wheels = [
@@ -280,59 +249,18 @@ wheels = [
 ]
 
 [[package]]
-name = "boto3"
-version = "1.36.3"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.10.*'",
-    "python_full_version < '3.10'",
-]
-dependencies = [
-    { name = "botocore", version = "1.36.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.11.*'" },
-    { name = "jmespath", marker = "python_full_version != '3.11.*'" },
-    { name = "s3transfer", version = "0.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.11.*'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/07/12/b9ad4c3dd6e6044243d08bae076795e41357651683f4fad99d5828c4291c/boto3-1.36.3.tar.gz", hash = "sha256:53a5307f6a3526ee2f8590e3c45efa504a3ea4532c1bfe4926c0c19bf188d141", size = 110987 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/97/4697aa8050e306d6139815996adeb263ddc83024399a188e8b42587665db/boto3-1.36.3-py3-none-any.whl", hash = "sha256:f9843a5d06f501d66ada06f5a5417f671823af2cf319e36ceefa1bafaaaaa953", size = 139165 },
-]
-
-[[package]]
 name = "botocore"
 version = "1.31.64"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version == '3.11.*'",
-]
 dependencies = [
-    { name = "jmespath", marker = "python_full_version == '3.11.*'" },
-    { name = "python-dateutil", marker = "python_full_version == '3.11.*'" },
-    { name = "urllib3", version = "2.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "jmespath" },
+    { name = "python-dateutil" },
+    { name = "urllib3", version = "1.26.20", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "urllib3", version = "2.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/01/98/3635fd827cd7f758d2010e7bb432853c37b14d58b7bc728d0797d0199480/botocore-1.31.64.tar.gz", hash = "sha256:d8eb4b724ac437343359b318d73de0cfae0fecb24095827e56135b0ad6b44caf", size = 11392630 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/68/6a9c405bc6c6e7d832743a458c87f21cee393ef2cf32437a0a3a07cd0ae9/botocore-1.31.64-py3-none-any.whl", hash = "sha256:7b709310343a5b430ec9025b2e17c0bac6b16c05f1ac1d9521dece3f10c71bac", size = 11266687 },
-]
-
-[[package]]
-name = "botocore"
-version = "1.36.3"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.10.*'",
-    "python_full_version < '3.10'",
-]
-dependencies = [
-    { name = "jmespath", marker = "python_full_version != '3.11.*'" },
-    { name = "python-dateutil", marker = "python_full_version != '3.11.*'" },
-    { name = "urllib3", version = "1.26.20", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
-    { name = "urllib3", version = "2.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*' or python_full_version >= '3.12'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/61/69eb06a803c83e0da733b60b2bc65880c18ef2dee19ee10cf8732794a3c1/botocore-1.36.3.tar.gz", hash = "sha256:775b835e979da5c96548ed1a0b798101a145aec3cd46541d62e27dda5a94d7f8", size = 13507880 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/14/f952fed35b9c04aa66453b5fb5d1262a5a9f5dfdcb396d387c1ff0c6da41/botocore-1.36.3-py3-none-any.whl", hash = "sha256:536ab828e6f90dbb000e3702ac45fd76642113ae2db1b7b1373ad24104e89255", size = 13304681 },
 ]
 
 [[package]]
@@ -703,8 +631,7 @@ dependencies = [
     { name = "ruamel-yaml", marker = "python_full_version >= '3.10'" },
     { name = "semantic-version", marker = "python_full_version >= '3.10'" },
     { name = "tenacity", marker = "python_full_version >= '3.10'" },
-    { name = "urllib3", version = "2.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "urllib3", version = "2.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*' or python_full_version >= '3.12'" },
+    { name = "urllib3", version = "2.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "yarl", marker = "python_full_version >= '3.10'" },
     { name = "zarr", version = "2.18.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "zarr", version = "2.18.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -1210,8 +1137,7 @@ dependencies = [
     { name = "dandi", version = "0.63.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "dandi", version = "0.66.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "h5py" },
-    { name = "npc-io", version = "0.1.28", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.11.*'" },
-    { name = "npc-io", version = "0.1.32", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "npc-io" },
     { name = "pandas" },
     { name = "remfile" },
     { name = "tqdm" },
@@ -1224,7 +1150,7 @@ dependencies = [
 requires-dist = [
     { name = "dandi", specifier = ">=0.59.1" },
     { name = "h5py", specifier = ">=3.10.0" },
-    { name = "npc-io", specifier = ">=0.1.23" },
+    { name = "npc-io", specifier = ">=0.1.32" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "remfile", specifier = ">=0.1.10" },
     { name = "tqdm", specifier = ">=4.66.2" },
@@ -1338,40 +1264,15 @@ wheels = [
 
 [[package]]
 name = "npc-io"
-version = "0.1.28"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.10.*'",
-    "python_full_version < '3.10'",
-]
-dependencies = [
-    { name = "boto3", version = "1.36.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.11.*'" },
-    { name = "crc32c", marker = "python_full_version != '3.11.*'" },
-    { name = "python-dotenv", marker = "python_full_version != '3.11.*'" },
-    { name = "s3fs", marker = "python_full_version != '3.11.*'" },
-    { name = "typing-extensions", marker = "python_full_version != '3.11.*'" },
-    { name = "universal-pathlib", marker = "python_full_version != '3.11.*'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/79/0a/3c1d9a346621c746fc4e91b670f14f8ac0711b99b6ef52fb73f40acfc586/npc_io-0.1.28.tar.gz", hash = "sha256:4287147a55e2bba427b2d0ff851620b4b611616e560e01961085fd1c827f6199", size = 10564 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/cf/fc5f36633f1e431dcfa9d34204ae3f48620d6d963453ad48329a4f79eeb2/npc_io-0.1.28-py3-none-any.whl", hash = "sha256:72f6d3f481b5776dddfffad342722d2b7e724c9a298481a2bd3fac08d1479f5b", size = 9942 },
-]
-
-[[package]]
-name = "npc-io"
 version = "0.1.32"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version == '3.11.*'",
-]
 dependencies = [
-    { name = "boto3", version = "1.28.17", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "crc32c", marker = "python_full_version == '3.11.*'" },
-    { name = "python-dotenv", marker = "python_full_version == '3.11.*'" },
-    { name = "s3fs", marker = "python_full_version == '3.11.*'" },
-    { name = "typing-extensions", marker = "python_full_version == '3.11.*'" },
-    { name = "universal-pathlib", marker = "python_full_version == '3.11.*'" },
+    { name = "boto3" },
+    { name = "crc32c" },
+    { name = "python-dotenv" },
+    { name = "s3fs" },
+    { name = "typing-extensions" },
+    { name = "universal-pathlib" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/13/f9/c51f770d0a34e88a85482e3063be57ed271ff584a21b233208579b6e6262/npc_io-0.1.32.tar.gz", hash = "sha256:3d4c269e9ab1beac6466ba6dcb1665adf912ac9b5d44677680fd23eb777c9177", size = 10934 }
 wheels = [
@@ -2087,8 +1988,7 @@ dependencies = [
     { name = "charset-normalizer" },
     { name = "idna" },
     { name = "urllib3", version = "1.26.20", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
-    { name = "urllib3", version = "2.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "urllib3", version = "2.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*' or python_full_version >= '3.12'" },
+    { name = "urllib3", version = "2.0.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/63/70/2bf7780ad2d390a8d301ad0b550f1581eadbd9a20f896afe06353c2a2913/requests-2.32.3.tar.gz", hash = "sha256:55365417734eb18255590a9ff9eb97e9e1da868d4ccd6402399eaf68af20a760", size = 131218 }
 wheels = [
@@ -2296,8 +2196,7 @@ name = "s3fs"
 version = "2025.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "aiobotocore", version = "2.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "aiobotocore", version = "2.19.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.11.*'" },
+    { name = "aiobotocore" },
     { name = "aiohttp" },
     { name = "fsspec" },
 ]
@@ -2310,32 +2209,12 @@ wheels = [
 name = "s3transfer"
 version = "0.6.2"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version == '3.11.*'",
-]
 dependencies = [
-    { name = "botocore", version = "1.31.64", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "botocore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5a/47/d676353674e651910085e3537866f093d2b9e9699e95e89d960e78df9ecf/s3transfer-0.6.2.tar.gz", hash = "sha256:cab66d3380cca3e70939ef2255d01cd8aece6a4907a9528740f668c4b0611861", size = 132821 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d9/17/a3b666f5ef9543cfd3c661d39d1e193abb9649d0cfbbfee3cf3b51d5af02/s3transfer-0.6.2-py3-none-any.whl", hash = "sha256:b014be3a8a2aab98cfe1abc7229cc5a9a0cf05eb9c1f2b86b230fd8df3f78084", size = 79765 },
-]
-
-[[package]]
-name = "s3transfer"
-version = "0.11.2"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.10.*'",
-    "python_full_version < '3.10'",
-]
-dependencies = [
-    { name = "botocore", version = "1.36.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version != '3.11.*'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/62/45/2323b5928f86fd29f9afdcef4659f68fa73eaa5356912b774227f5cf46b5/s3transfer-0.11.2.tar.gz", hash = "sha256:3b39185cb72f5acc77db1a58b6e25b977f28d20496b6e58d6813d75f464d632f", size = 147885 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/ac/e7dc469e49048dc57f62e0c555d2ee3117fa30813d2a1a2962cce3a2a82a/s3transfer-0.11.2-py3-none-any.whl", hash = "sha256:be6ecb39fadd986ef1701097771f87e4d2f821f27f6071c872143884d2950fbc", size = 84151 },
 ]
 
 [[package]]
@@ -2464,24 +2343,13 @@ name = "urllib3"
 version = "2.0.7"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
+    "python_full_version >= '3.12'",
     "python_full_version == '3.11.*'",
+    "python_full_version == '3.10.*'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/af/47/b215df9f71b4fdba1025fc05a77db2ad243fa0926755a52c5e71659f4e3c/urllib3-2.0.7.tar.gz", hash = "sha256:c97dfde1f7bd43a71c8d2a58e369e9b2bf692d1334ea9f9cae55add7d0dd0f84", size = 282546 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/b2/b157855192a68541a91ba7b2bbcb91f1b4faa51f8bae38d8005c034be524/urllib3-2.0.7-py3-none-any.whl", hash = "sha256:fdb6d215c776278489906c2f8916e6e7d4f5a9b602ccbcfdf7f016fc8da0596e", size = 124213 },
-]
-
-[[package]]
-name = "urllib3"
-version = "2.3.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.10.*'",
-]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/63/e53da845320b757bf29ef6a9062f5c669fe997973f966045cb019c3f4b66/urllib3-2.3.0.tar.gz", hash = "sha256:f8c5449b3cf0861679ce7e0503c7b44b5ec981bec0d1d3795a07f1ba96f0204d", size = 307268 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/19/4ec628951a74043532ca2cf5d97b7b14863931476d117c471e8e2b1eb39f/urllib3-2.3.0-py3-none-any.whl", hash = "sha256:1cee9ad369867bfdbbb48b7dd50374c0967a0bb7710050facf0dd6911440e3df", size = 128369 },
 ]
 
 [[package]]
