@@ -41,6 +41,10 @@ class LazyNWB:
         self._file = lazynwb.file_io.LazyFile(
             path=path, fsspec_storage_options=fsspec_storage_options
         )
+    
+    @property
+    def identifier(self) -> str:
+        return LazyComponent(self._file).identifier
 
     @property
     def subject(self) -> Subject:
