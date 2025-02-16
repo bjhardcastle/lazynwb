@@ -44,7 +44,7 @@ class LazyNWB:
 
     @property
     def subject(self) -> Subject:
-        return Subject(self._file, "general/subject")
+        return Subject(self._file, "/general/subject")
 
     @property
     def session_start_time(self) -> datetime.datetime:
@@ -52,7 +52,7 @@ class LazyNWB:
 
     @property
     def session_id(self) -> str:
-        return LazyComponent(self._file, "general").session_id
+        return LazyComponent(self._file, "/general").session_id
 
     @property
     def session_description(self) -> str:
@@ -74,7 +74,7 @@ class LazyNWB:
     def units(self) -> pd.DataFrame:
         return lazynwb.funcs.get_df(
             self._file,
-            table_path="units",
+            table_path="/units",
             exclude_column_names=(
                 "spike_times",
                 "waveform_mean",
@@ -85,27 +85,27 @@ class LazyNWB:
 
     @property
     def experiment_description(self) -> str:
-        return LazyComponent(self._file, "general").experiment_description
+        return LazyComponent(self._file, "/general").experiment_description
 
     @property
     def experimenter(self) -> str:
-        return LazyComponent(self._file, "general").experimenter
+        return LazyComponent(self._file, "/general").experimenter
 
     @property
     def lab(self) -> str:
-        return LazyComponent(self._file, "general").lab
+        return LazyComponent(self._file, "/general").lab
 
     @property
     def institution(self) -> str:
-        return LazyComponent(self._file, "general").institution
+        return LazyComponent(self._file, "/general").institution
 
     @property
     def related_publications(self) -> str:
-        return LazyComponent(self._file, "general").related_publications
+        return LazyComponent(self._file, "/general").related_publications
 
     @property
     def keywords(self) -> list[str]:
-        k: str | Iterable[str] | None = LazyComponent(self._file, "general").keywords
+        k: str | Iterable[str] | None = LazyComponent(self._file, "/general").keywords
         if k is None:
             return []
         if isinstance(k, str):
@@ -114,31 +114,31 @@ class LazyNWB:
 
     @property
     def notes(self) -> str:
-        return LazyComponent(self._file, "general").notes
+        return LazyComponent(self._file, "/general").notes
 
     @property
     def data_collection(self) -> str:
-        return LazyComponent(self._file, "general").data_collection
+        return LazyComponent(self._file, "/general").data_collection
 
     @property
     def surgery(self) -> str:
-        return LazyComponent(self._file, "general").surgery
+        return LazyComponent(self._file, "/general").surgery
 
     @property
     def pharmacology(self) -> str:
-        return LazyComponent(self._file, "general").pharmacology
+        return LazyComponent(self._file, "/general").pharmacology
 
     @property
     def virus(self) -> str:
-        return LazyComponent(self._file, "general").virus
+        return LazyComponent(self._file, "/general").virus
 
     @property
     def source_script(self) -> str:
-        return LazyComponent(self._file, "general").source_script
+        return LazyComponent(self._file, "/general").source_script
 
     @property
     def source_script_file_name(self) -> str:
-        return LazyComponent(self._file, "general").source_script_file_name
+        return LazyComponent(self._file, "/general").source_script_file_name
 
     def _to_dict(self) -> dict[str, str | list[str]]:
         def _get_attr_names(obj: Any) -> list[str]:
