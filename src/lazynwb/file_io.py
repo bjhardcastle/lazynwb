@@ -27,8 +27,6 @@ def open(
         >>> nwb = open('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/39490bff-87c9-4ef2-b408-36334e748ac6/nwb/ecephys_620264_2022-08-02_15-39-59_experiment1_recording1.nwb')
     """
     path = npc_io.from_pathlike(path)
-    if path.protocol == "s3":
-        fsspec_storage_options.setdefault("anon", True)
     path = upath.UPath(path, **fsspec_storage_options)
 
     # zarr ------------------------------------------------------------- #
