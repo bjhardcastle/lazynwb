@@ -13,8 +13,7 @@ dependencies = [
     "dandi>=0.59.1",
     "remfile>=0.1.10",
     "tqdm>=4.66.2",
-    "pandas>=2.2.3",
-    "numpy>=2.0.2",
+    "pandas>=2.0.0",
 ]
 version = "0.1.0"
 classifiers = [
