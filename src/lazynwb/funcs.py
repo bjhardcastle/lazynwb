@@ -15,7 +15,7 @@ import pandas as pd
 import tqdm
 import zarr
 
-from lazynwb.file_io import LazyFile
+from lazynwb.file_io import LazyFile, normalize_internal_file_path
 
 pd.options.mode.copy_on_write = True
 
@@ -197,7 +197,7 @@ def _get_df(
     # add identifiers to each row, so they can be linked back their source at a later time:
     identifier_column_data = {
         NWB_PATH_COLUMN_NAME: [file._path.as_posix()] * column_length,
-        TABLE_PATH_COLUMN_NAME: [table_path] * column_length,
+        TABLE_PATH_COLUMN_NAME: [normalize_internal_file_path(table_path)] * column_length,
         TABLE_INDEX_COLUMN_NAME: np.arange(column_length),
     }
     df = pd.DataFrame(data=column_data | identifier_column_data)
