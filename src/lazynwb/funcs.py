@@ -307,13 +307,9 @@ def _indexed_column_helper(
             data_column_accessor = file[table_path][column_name]
         except KeyError as exc:
             if exc.args[0] == column_name:
-                raise ColumnError(
-                    f"Column {column_name!r} not found in {file._path}/{table_path}"
-                )
+                raise ColumnError(column_name) from None
             elif exc.args[0] == table_path:
-                raise InternalPathError(
-                    f"Internal path {table_path!r} not found in {file._path}"
-                )
+                raise InternalPathError(table_path) from None
             else:
                 raise
         if data_column_accessor.ndim >= 2:
@@ -353,14 +349,14 @@ def merge_array_column(
     for future in concurrent.futures.as_completed(future_to_path):
         try:
             column_data.append(future.result())
-        except ColumnError:
+        except ColumnError as exc:
             if not missing_ok:
                 logger.error(
                     f"Error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
                 )
                 raise
             if not missing_column_already_warned:
-                logger.warning("Column not found: data will be missing from DataFrame", exc_info=True)
+                logger.warning(f"Column {exc.args[0]!r} not found: data will be missing from DataFrame")
                 missing_column_already_warned = True
             continue
         except:
