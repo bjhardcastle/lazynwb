@@ -159,7 +159,7 @@ def _get_df(
     # some columns have >2 dims but no index - they also need to be handled differently
     multi_dim_column_names = []
 
-    column_data: dict[str, npt.NDArray | list[list]] = {}
+    column_data: dict[str, npt.NDArray | list[npt.NDArray]] = {}
     logger.debug(
         f"materializing non-indexed columns for {file._path}/{table_path}: {non_indexed_column_names}"
     )
@@ -175,7 +175,7 @@ def _get_df(
         else:
             column_data[column_name] = column_accessors[column_name][:]
 
-    if indexed_column_names and not exclude_array_columns:
+    if not exclude_array_columns and indexed_column_names:
         data_column_names = {
             name for name in indexed_column_names if not name.endswith("_index")
         }
@@ -187,8 +187,12 @@ def _get_df(
                 data_column_accessor=column_accessors[column_name],
                 index_column_accessor=column_accessors[f"{column_name}_index"],
             )
+    if not exclude_array_columns and multi_dim_column_names:
+        logger.debug(
+            f"materializing multi-dimensional array columns for {file._path}/{table_path}: {multi_dim_column_names}"
+        )
         for column_name in multi_dim_column_names:
-            column_data[column_name] = column_accessors[column_name][:].tolist()
+            column_data[column_name] = column_accessors[column_name][:]
 
     column_length = len(next(iter(column_data.values())))
 
@@ -209,7 +213,7 @@ def get_indexed_column_data(
     data_column_accessor: zarr.Array | h5py.Dataset,
     index_column_accessor: zarr.Array | h5py.Dataset,
     table_row_indices: Sequence[int] | None = None,
-) -> list[list[np.float64 | list[np.float64]]]:
+) -> list[npt.NDArray[np.float64]]:
     """Get the data for an indexed column in a table, given the data and index array accessors.
 
     - default behavior is to return the data for all rows in the table
@@ -238,10 +242,10 @@ def get_indexed_column_data(
     assert len(data_indices) == np.sum(np.diff(index_array)[table_row_indices]), "length of data_indices is incorrect"
 
     # read actual data and split into sub-vectors for each row of the table:
-    data_array: list[np.float64 | list[np.float64]] = data_column_accessor[data_indices]
+    data_array: npt.NDArray[np.float64] = data_column_accessor[data_indices]
     column_data = []
     start_idx = 0
-    for run_length in np.diff(index_array)[table_row_indices]: 
+    for run_length in np.diff(index_array)[table_row_indices]:
         end_idx = start_idx + run_length
         column_data.append(data_array[start_idx:end_idx])
         start_idx = end_idx
