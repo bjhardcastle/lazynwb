@@ -59,7 +59,7 @@ def get_df(
     nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike | LazyFile] | LazyFile,
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
-    exclude_indexed_columns: bool = False,
+    exclude_array_columns: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
 ) -> pd.DataFrame:
@@ -77,12 +77,12 @@ def get_df(
             nwb_path=paths[0],
             table_path=table_path,
             exclude_column_names=exclude_column_names,
-            exclude_indexed_columns=exclude_indexed_columns,
+            exclude_array_columns=exclude_array_columns,
         )
 
-    if exclude_indexed_columns and use_process_pool:
+    if exclude_array_columns and use_process_pool:
         logger.warning(
-            "exclude_indexed_columns is True: setting use_process_pool=False for speed"
+            "exclude_array_columns is True: setting use_process_pool=False for speed"
         )
         use_process_pool = False
 
@@ -97,7 +97,7 @@ def get_df(
             nwb_path=path,
             table_path=table_path,
             exclude_column_names=exclude_column_names,
-            exclude_indexed_columns=exclude_indexed_columns,
+            exclude_array_columns=exclude_array_columns,
         )
         future_to_path[future] = path
     futures = concurrent.futures.as_completed(future_to_path)
@@ -128,7 +128,7 @@ def _get_df(
     file: LazyFile,
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
-    exclude_indexed_columns: bool = False,
+    exclude_array_columns: bool = True,
 ) -> pd.DataFrame:
     t0 = time.time()
     column_accessors: dict[str, zarr.Array | h5py.Dataset] = (
@@ -144,7 +144,7 @@ def _get_df(
     elif exclude_column_names is not None:
         exclude_column_names = tuple(exclude_column_names)
     for name in tuple(column_accessors.keys()):
-        is_indexed = exclude_indexed_columns and is_indexed_column(
+        is_indexed = exclude_array_columns and is_indexed_column(
             name, column_accessors.keys()
         )
         is_excluded = exclude_column_names is not None and name in exclude_column_names
@@ -175,7 +175,7 @@ def _get_df(
         else:
             column_data[column_name] = column_accessors[column_name][:]
 
-    if indexed_column_names and not exclude_indexed_columns:
+    if indexed_column_names and not exclude_array_columns:
         data_column_names = {
             name for name in indexed_column_names if not name.endswith("_index")
         }
