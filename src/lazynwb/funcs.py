@@ -165,7 +165,7 @@ def _get_df(
     )
     for column_name in non_indexed_column_names:
         if (ndim := column_accessors[column_name].ndim) >= 2:
-            logger.warning(
+            logger.debug(
                 f"non-indexed column {column_name!r} has {ndim=}: will be treated as an indexed column"
             )
             multi_dim_column_names.append(column_name)
