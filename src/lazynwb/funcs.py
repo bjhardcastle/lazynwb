@@ -5,7 +5,6 @@ import contextlib
 import logging
 import time
 from collections.abc import Iterable, Sequence
-from typing import Any
 
 import h5py
 import npc_io
@@ -47,7 +46,7 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> pd.DataFrame:
     if isinstance(nwb_path, LazyFile):
         context = contextlib.nullcontext(nwb_path)
     else:
-        context = LazyFile(nwb_path) # type: ignore[assignment]
+        context = LazyFile(nwb_path)  # type: ignore[assignment]
     with context as file:
         return _get_df(
             file=file,
@@ -101,7 +100,7 @@ def get_df(
         )
         future_to_path[future] = path
     futures = concurrent.futures.as_completed(future_to_path)
-    if not disable_progress:  
+    if not disable_progress:
         futures = tqdm.tqdm(
             futures,
             total=len(future_to_path),
@@ -199,7 +198,8 @@ def _get_df(
     # add identifiers to each row, so they can be linked back their source at a later time:
     identifier_column_data = {
         NWB_PATH_COLUMN_NAME: [file._path.as_posix()] * column_length,
-        TABLE_PATH_COLUMN_NAME: [normalize_internal_file_path(table_path)] * column_length,
+        TABLE_PATH_COLUMN_NAME: [normalize_internal_file_path(table_path)]
+        * column_length,
         TABLE_INDEX_COLUMN_NAME: np.arange(column_length),
     }
     df = pd.DataFrame(data=column_data | identifier_column_data)
@@ -233,13 +233,19 @@ def get_indexed_column_data(
         }
     """
     # get indices in the data array for all requested rows, so we can read from accessor in one go:
-    index_array: npt.NDArray[np.int32] = np.concatenate(([0], index_column_accessor[:]))  # small enough to read in one go
+    index_array: npt.NDArray[np.int32] = np.concatenate(
+        ([0], index_column_accessor[:])
+    )  # small enough to read in one go
     if table_row_indices is None:
-        table_row_indices = list(range(len(index_array) - 1)) # -1 because of the inserted 0 above
+        table_row_indices = list(
+            range(len(index_array) - 1)
+        )  # -1 because of the inserted 0 above
     data_indices: list[int] = []
     for i in table_row_indices:
         data_indices.extend(range(index_array[i], index_array[i + 1]))
-    assert len(data_indices) == np.sum(np.diff(index_array)[table_row_indices]), "length of data_indices is incorrect"
+    assert len(data_indices) == np.sum(
+        np.diff(index_array)[table_row_indices]
+    ), "length of data_indices is incorrect"
 
     # read actual data and split into sub-vectors for each row of the table:
     data_array: npt.NDArray[np.float64] = data_column_accessor[data_indices]
@@ -281,6 +287,15 @@ def get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
     """
     return {k for k in column_names if is_indexed_column(k, column_names)}
 
+
+class ColumnError(KeyError):
+    pass
+
+
+class InternalPathError(KeyError):
+    pass
+
+
 def _indexed_column_helper(
     nwb_path: npc_io.PathLike,
     table_path: str,
@@ -288,7 +303,19 @@ def _indexed_column_helper(
     table_row_indices: Sequence[int],
 ) -> pd.DataFrame:
     with LazyFile(nwb_path) as file:
-        data_column_accessor = file[table_path][column_name]
+        try:
+            data_column_accessor = file[table_path][column_name]
+        except KeyError as exc:
+            if exc.args[0] == column_name:
+                raise ColumnError(
+                    f"Column {column_name!r} not found in {file._path}/{table_path}"
+                )
+            elif exc.args[0] == table_path:
+                raise InternalPathError(
+                    f"Internal path {table_path!r} not found in {file._path}"
+                )
+            else:
+                raise
         if data_column_accessor.ndim >= 2:
             column_data = data_column_accessor[table_row_indices].tolist()
         else:
@@ -305,9 +332,11 @@ def _indexed_column_helper(
         },
     )
 
+
 def merge_array_column(
     df: pd.DataFrame,
     column_name: str,
+    missing_ok: bool = True,
 ) -> pd.DataFrame:
     column_data: list[pd.DataFrame] = []
     future_to_path = {}
@@ -320,16 +349,27 @@ def merge_array_column(
             table_row_indices=session_df[TABLE_INDEX_COLUMN_NAME].values,
         )
         future_to_path[future] = nwb_path
+    missing_column_already_warned = False
     for future in concurrent.futures.as_completed(future_to_path):
         try:
             column_data.append(future.result())
+        except ColumnError:
+            if not missing_ok:
+                logger.error(
+                    f"Error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
+                )
+                raise
+            if not missing_column_already_warned:
+                logger.warning("Column not found: data will be missing from DataFrame", exc_info=True)
+                missing_column_already_warned = True
+            continue
         except:
             logger.error(
                 f"Error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
             )
             raise
     return df.merge(
-        pd.concat(column_data), 
+        pd.concat(column_data),
         how="left",
         on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
     ).set_index(df[TABLE_INDEX_COLUMN_NAME].values)
