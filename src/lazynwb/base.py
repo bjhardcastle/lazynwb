@@ -80,13 +80,8 @@ class LazyNWB:
         return lazynwb.funcs.get_df(
             self._file,
             table_path="/units",
-            exclude_column_names=(
-                "spike_times",
-                "waveform_mean",
-                "waveform_sd",
-                "spike_amplitudes",
-            ),
-        )
+            exclude_array_columns=True,
+        ).pipe(lazynwb.funcs.merge_array_column, 'obs_intervals')
 
     @property
     def experiment_description(self) -> str:
