@@ -322,7 +322,7 @@ def _indexed_column_helper(
             )
     return pd.DataFrame(
         {
-            column_name: column_data,
+            column_name: list(column_data), # pd inists "Per-column arrays must each be 1-dimensional": this makes a list of arrays
             TABLE_INDEX_COLUMN_NAME: table_row_indices,
             NWB_PATH_COLUMN_NAME: [nwb_path] * len(table_row_indices),
         },
