@@ -191,7 +191,7 @@ def _get_df(
             f"materializing multi-dimensional array columns for {file._path}/{table_path}: {multi_dim_column_names}"
         )
         for column_name in multi_dim_column_names:
-            column_data[column_name] = column_accessors[column_name][:]
+            column_data[column_name] = _format_multi_dim_column(column_accessors[column_name][:])
 
     column_length = len(next(iter(column_data.values())))
 
@@ -295,7 +295,6 @@ class ColumnError(KeyError):
 class InternalPathError(KeyError):
     pass
 
-
 def _indexed_column_helper(
     nwb_path: npc_io.PathLike,
     table_path: str,
@@ -322,12 +321,20 @@ def _indexed_column_helper(
             )
     return pd.DataFrame(
         {
-            column_name: list(column_data), # pd inists "Per-column arrays must each be 1-dimensional": this makes a list of arrays
+            column_name: _format_multi_dim_column(column_data),
             TABLE_INDEX_COLUMN_NAME: table_row_indices,
             NWB_PATH_COLUMN_NAME: [nwb_path] * len(table_row_indices),
         },
     )
 
+def _format_multi_dim_column(
+    column_data: npt.NDArray | list[npt.NDArray],
+) -> list[npt.NDArray]:
+    """Pandas inists 'Per-column arrays must each be 1-dimensional': this converts to a list of
+    arrays, if not already"""
+    if isinstance(column_data, list):
+        return column_data
+    return list(column_data)
 
 def merge_array_column(
     df: pd.DataFrame,
