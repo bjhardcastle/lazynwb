@@ -313,7 +313,7 @@ def _indexed_column_helper(
             else:
                 raise
         if data_column_accessor.ndim >= 2:
-            column_data = data_column_accessor[table_row_indices].tolist()
+            column_data = data_column_accessor[table_row_indices][:]
         else:
             column_data = get_indexed_column_data(
                 data_column_accessor=data_column_accessor,
