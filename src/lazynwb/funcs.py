@@ -352,7 +352,7 @@ def merge_array_column(
         except ColumnError as exc:
             if not missing_ok:
                 logger.error(
-                    f"Error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
+                    f"error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
                 )
                 raise
             if not missing_column_already_warned:
@@ -361,9 +361,12 @@ def merge_array_column(
             continue
         except:
             logger.error(
-                f"Error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
+                f"error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
             )
             raise
+    if not column_data:
+        logger.debug(f"no {column_name!r} data found in any file")
+        return df
     return df.merge(
         pd.concat(column_data),
         how="left",
