@@ -44,7 +44,7 @@ class LazyNWB:
         )
 
     def __repr__(self) -> str:
-        return f"LazyNWB({self._file.path!r})"
+        return f"LazyNWB({self._file._path!r})"
 
     def _repr_html_(self) -> str:
         main_info = self._to_dict()
@@ -52,7 +52,7 @@ class LazyNWB:
         paths = self.describe().get("paths", [])
 
         html = f"""
-        <h3>NWB file: {self._file.path}</h3>
+        <h3>NWB file: {self._file._path}</h3>
         <ul>
         """
         for key, value in main_info.items():
