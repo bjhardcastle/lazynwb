@@ -533,16 +533,21 @@ class TimeSeries:
 
 
 def get_timeseries(
-    file: lazynwb.file_io.LazyFile,
+    path_or_file: npc_io.PathLike | lazynwb.file_io.LazyFile,
     search_term: str | None = None,
 ) -> dict[str, h5py.Dataset | zarr.Array]:
-    path_to_accessor = {
-        k: TimeSeries(file=file, path=k.removesuffix("/data"))
-        for k, v in _get_internal_file_paths(file._accessor).items()
-        if k.split("/")[-1] == "data" and (not search_term or search_term in k)
-        # each timeseries will be a dir with /data and optional /timestamps
-    }
-    return path_to_accessor
+    if isinstance(path_or_file, lazynwb.file_io.LazyFile):
+        context = contextlib.nullcontext(path_or_file)
+    else:
+        context = lazynwb.file_io.LazyFile(path_or_file)   # type: ignore[assignment]
+    with context as file:
+        path_to_accessor = {
+            k: TimeSeries(file=file, path=k.removesuffix("/data"))
+            for k, v in _get_internal_file_paths(file._accessor).items()
+            if k.split("/")[-1] == "data" and (not search_term or search_term in k)
+            # each timeseries will be a dir with /data and optional /timestamps
+        }
+        return path_to_accessor
 
 
 if __name__ == "__main__":
