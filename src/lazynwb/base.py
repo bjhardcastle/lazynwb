@@ -280,7 +280,11 @@ def get_metadata_df(
 
     def _get_metadata_df_helper(nwb_path: npc_io.PathLike) -> dict[str, Any]:
         nwb = LazyNWB(nwb_path)
-        return {**nwb._to_dict(), **nwb.subject._to_dict()}
+        return {
+            **nwb._to_dict(),
+            **nwb.subject._to_dict(),
+            lazynwb.funcs.NWB_PATH_COLUMN_NAME: nwb._file._path.as_posix(),
+        }
 
     future_to_path = {}
     for path in paths:
