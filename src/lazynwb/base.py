@@ -220,6 +220,8 @@ class Subject(LazyComponent):
     def _to_dict(self) -> dict[str, str | list[str]]:
         return {name: getattr(self, name) for name in self.__class__.__annotations__}
 
+    def get_timeseries(self, search_term: str | None = None) -> dict[str, lazynwb.funcs.TimeSeries]:
+        return lazynwb.funcs.get_timeseries(self._file, search_term=search_term)
 
 def get_metadata_df(
     nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
