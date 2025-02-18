@@ -155,6 +155,13 @@ class LazyNWB:
     def get_timeseries(self, search_term: str | None = None) -> dict[str, lazynwb.funcs.TimeSeries]:
         return lazynwb.funcs.get_timeseries(self._file, search_term=search_term)
 
+    def describe(self) -> dict[str, Any]:
+        return {
+            **self._to_dict(),
+            **self.subject._to_dict(),
+            "paths": list(lazynwb.funcs._get_internal_file_paths(self._file).keys()),
+        }
+
 
 class LazyComponent:
     def __init__(
