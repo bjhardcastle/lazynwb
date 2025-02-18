@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
+import dataclasses
 import logging
 import time
 from collections.abc import Iterable, Sequence
@@ -14,7 +15,7 @@ import pandas as pd
 import tqdm
 import zarr
 
-from lazynwb.file_io import LazyFile, normalize_internal_file_path
+import lazynwb.file_io
 
 pd.options.mode.copy_on_write = True
 
@@ -43,10 +44,10 @@ def get_processpool_executor() -> concurrent.futures.ProcessPoolExecutor:
 
 
 def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> pd.DataFrame:
-    if isinstance(nwb_path, LazyFile):
+    if isinstance(nwb_path, lazynwb.file_io.LazyFile):
         context = contextlib.nullcontext(nwb_path)
     else:
-        context = LazyFile(nwb_path)  # type: ignore[assignment]
+        context = lazynwb.file_io.LazyFile(nwb_path)  # type: ignore[assignment]
     with context as file:
         return _get_df(
             file=file,
@@ -55,7 +56,11 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> pd.DataFrame:
 
 
 def get_df(
-    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike | LazyFile] | LazyFile,
+    nwb_data_sources: (
+        npc_io.PathLike
+        | Iterable[npc_io.PathLike | lazynwb.file_io.LazyFile]
+        | lazynwb.file_io.LazyFile
+    ),
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -64,7 +69,7 @@ def get_df(
 ) -> pd.DataFrame:
     t0 = time.time()
 
-    if isinstance(nwb_data_sources, (str, LazyFile)) or not isinstance(
+    if isinstance(nwb_data_sources, (str, lazynwb.file_io.LazyFile)) or not isinstance(
         nwb_data_sources, Iterable
     ):
         paths = (nwb_data_sources,)
@@ -124,7 +129,7 @@ def get_df(
 
 
 def _get_df(
-    file: LazyFile,
+    file: lazynwb.file_io.LazyFile,
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -134,7 +139,9 @@ def _get_df(
         _get_table_column_accessors(
             file=file,
             table_path=table_path,
-            use_thread_pool=(file._hdmf_backend == LazyFile.HDMFBackend.ZARR),
+            use_thread_pool=(
+                file._hdmf_backend == lazynwb.file_io.LazyFile.HDMFBackend.ZARR
+            ),
         )
     )
 
@@ -191,14 +198,18 @@ def _get_df(
             f"materializing multi-dimensional array columns for {file._path}/{table_path}: {multi_dim_column_names}"
         )
         for column_name in multi_dim_column_names:
-            column_data[column_name] = _format_multi_dim_column(column_accessors[column_name][:])
+            column_data[column_name] = _format_multi_dim_column(
+                column_accessors[column_name][:]
+            )
 
     column_length = len(next(iter(column_data.values())))
 
     # add identifiers to each row, so they can be linked back their source at a later time:
     identifier_column_data = {
         NWB_PATH_COLUMN_NAME: [file._path.as_posix()] * column_length,
-        TABLE_PATH_COLUMN_NAME: [normalize_internal_file_path(table_path)]
+        TABLE_PATH_COLUMN_NAME: [
+            lazynwb.file_io.normalize_internal_file_path(table_path)
+        ]
         * column_length,
         TABLE_INDEX_COLUMN_NAME: np.arange(column_length),
     }
@@ -295,13 +306,14 @@ class ColumnError(KeyError):
 class InternalPathError(KeyError):
     pass
 
+
 def _indexed_column_helper(
     nwb_path: npc_io.PathLike,
     table_path: str,
     column_name: str,
     table_row_indices: Sequence[int],
 ) -> pd.DataFrame:
-    with LazyFile(nwb_path) as file:
+    with lazynwb.file_io.LazyFile(nwb_path) as file:
         try:
             data_column_accessor = file[table_path][column_name]
         except KeyError as exc:
@@ -327,6 +339,7 @@ def _indexed_column_helper(
         },
     )
 
+
 def _format_multi_dim_column(
     column_data: npt.NDArray | list[npt.NDArray],
 ) -> list[npt.NDArray]:
@@ -335,6 +348,7 @@ def _format_multi_dim_column(
     if isinstance(column_data, list):
         return column_data
     return list(column_data)
+
 
 def merge_array_column(
     df: pd.DataFrame,
@@ -363,7 +377,9 @@ def merge_array_column(
                 )
                 raise
             if not missing_column_already_warned:
-                logger.warning(f"Column {exc.args[0]!r} not found: data will be missing from DataFrame")
+                logger.warning(
+                    f"Column {exc.args[0]!r} not found: data will be missing from DataFrame"
+                )
                 missing_column_already_warned = True
             continue
         except:
@@ -382,7 +398,7 @@ def merge_array_column(
 
 
 def _get_table_column_accessors(
-    file: LazyFile,
+    file: lazynwb.file_io.LazyFile,
     table_path: str,
     use_thread_pool: bool = False,
 ) -> dict[str, zarr.Array | h5py.Dataset]:
