@@ -435,13 +435,13 @@ def _get_internal_file_paths(
     exclude_metadata: bool = True,
 ) -> dict[str, h5py.Dataset | zarr.Array]:
     results: dict[str, h5py.Dataset | zarr.Array] = {}
-    if exclude_specifications and group.path == "specifications":
+    if exclude_specifications and group.name == "/specifications":
         return results
     if not hasattr(group, "keys") or (
         exclude_table_columns and "colnames" in getattr(group, "attrs", {})
     ):
         if exclude_metadata and (
-            group.path.count("/") == 0 or group.path.startswith("general")
+            group.name.count("/") == 1 or group.name.startswith("/general")
         ):
             return {}
         else:
@@ -541,10 +541,12 @@ def get_timeseries(
     else:
         context = lazynwb.file_io.LazyFile(path_or_file)   # type: ignore[assignment]
     with context as file:
+        def _format(name: str) -> str:
+            return name.removesuffix("/data").removesuffix("/timestamps")
         path_to_accessor = {
-            k.removesuffix("/data"): TimeSeries(file=file, path=k.removesuffix("/data"))
+            _format(k): TimeSeries(file=file, path=_format(k))
             for k in _get_internal_file_paths(file._accessor)
-            if k.split("/")[-1] == "data" and (not search_term or search_term in k)
+            if k.split("/")[-1] in ("data" ,"timestamps") and (not search_term or search_term in k)
             # each timeseries will be a dir with /data and optional /timestamps
         }
         return path_to_accessor
