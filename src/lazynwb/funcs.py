@@ -542,8 +542,8 @@ def get_timeseries(
         context = lazynwb.file_io.LazyFile(path_or_file)   # type: ignore[assignment]
     with context as file:
         path_to_accessor = {
-            k: TimeSeries(file=file, path=k.removesuffix("/data"))
-            for k, v in _get_internal_file_paths(file._accessor).items()
+            k.removesuffix("/data"): TimeSeries(file=file, path=k.removesuffix("/data"))
+            for k in _get_internal_file_paths(file._accessor)
             if k.split("/")[-1] == "data" and (not search_term or search_term in k)
             # each timeseries will be a dir with /data and optional /timestamps
         }
