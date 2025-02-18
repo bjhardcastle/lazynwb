@@ -412,6 +412,123 @@ def _get_table_column_accessors(
     return names_to_columns
 
 
+def _get_internal_file_paths(
+    group: h5py.Group | zarr.Group | zarr.Array,
+    exclude_specifications: bool = True,
+    exclude_table_columns: bool = True,
+    exclude_metadata: bool = True,
+) -> dict[str, h5py.Dataset | zarr.Array]:
+    results: dict[str, h5py.Dataset | zarr.Array] = {}
+    if exclude_specifications and group.path == "specifications":
+        return results
+    if not hasattr(group, "keys") or (
+        exclude_table_columns and "colnames" in getattr(group, "attrs", {})
+    ):
+        if exclude_metadata and (
+            group.path.count("/") == 0 or group.path.startswith("general")
+        ):
+            return {}
+        else:
+            results[group.name] = group
+            return results
+    for subpath in group.keys():
+        try:
+            results = {
+                **results,
+                **_get_internal_file_paths(
+                    group[subpath],
+                    exclude_specifications=exclude_specifications,
+                    exclude_table_columns=exclude_table_columns,
+                    exclude_metadata=exclude_metadata,
+                ),
+            }
+        except (AttributeError, IndexError, TypeError):
+            results[group.name] = group
+    return results
+
+@dataclasses.dataclass
+class TimeSeries:
+    file: lazynwb.file_io.LazyFile
+    path: str
+
+    # TODO add generic getattr that defers to attrs
+
+    @property
+    def data(self) -> h5py.Dataset | zarr.Array:
+        return self.file[f"{self.path}/data"]
+
+    @property
+    def timestamps(self) -> npt.NDArray[np.float64]:
+        try:
+            return self.file[f"{self.path}/timestamps"]
+        except KeyError:
+            rate = self.rate
+            starting_time = self.starting_time
+            if rate is None or starting_time is None:
+                raise AssertionError(f"Not enough information to calculate timestamps for {self.path}: need rate and starting_time")
+            return (np.arange(len(self.data)) / rate) + starting_time
+
+    @property
+    def conversion(self) -> float | None:
+        return self.data.attrs.get("conversion", None)
+
+    @property
+    def description(self) -> str | None:
+        return self.file[f"{self.path}"].attrs.get("description", None)
+
+    @property
+    def offset(self) -> float | None:
+        return self.data.attrs.get("offset", None)
+
+    @property
+    def rate(self) -> float | None:
+        if (_starting_time := self._starting_time) is not None:
+            return _starting_time.attrs.get("rate", None)
+        return None
+    
+    @property
+    def resolution(self) -> float | None:
+        return self.data.attrs.get("resolution", None)
+
+    @property
+    def _starting_time(self) -> h5py.Dataset | zarr.Array | None:
+        try:
+            return self.file[f"{self.path}/starting_time"]
+        except KeyError:
+            return None
+
+    @property
+    def starting_time(self) -> float:
+        return self.timestamps[0]
+
+    @property
+    def starting_time_unit(self) -> str | None:
+        if (_starting_time := self._starting_time) is not None:
+            return _starting_time.attrs.get("unit", None)
+        return None
+
+    @property
+    def timestamps_unit(self) -> str | None:
+        return self.file[f"{self.path}"].attrs.get("timestamps_unit", None)
+
+    @property
+    def unit(self):
+        return self.data.attrs.get("unit", None)
+
+
+def get_timeseries(
+    file: lazynwb.file_io.LazyFile,
+    search_term: str | None = None,
+) -> dict[str, h5py.Dataset | zarr.Array]:
+    path_to_accessor = {
+        k: TimeSeries(file=file, path=k.removesuffix("/data"))
+        for k, v in _get_internal_file_paths(file._accessor).items()
+        if k.split("/")[-1] == "data" and (not search_term or search_term in k)
+        # each timeseries will be a dir with /data and optional /timestamps
+    }
+    return path_to_accessor
+
+
 if __name__ == "__main__":
     from npc_io import testmod
 
