@@ -98,22 +98,24 @@ class LazyNWB:
     @property
     def trials(self) -> pd.DataFrame:
         return lazynwb.funcs.get_df(self._file, table_path="/intervals/trials")
-    
+
     @property
     def epochs(self) -> pd.DataFrame:
         return lazynwb.funcs.get_df(self._file, table_path="/intervals/epochs")
-    
+
     @property
     def electrodes(self) -> pd.DataFrame:
-        return lazynwb.funcs.get_df(self._file, table_path="/general/extracellular_ephys/electrodes")
-    
+        return lazynwb.funcs.get_df(
+            self._file, table_path="/general/extracellular_ephys/electrodes"
+        )
+
     @property
     def units(self) -> pd.DataFrame:
         return lazynwb.funcs.get_df(
             self._file,
             table_path="/units",
             exclude_array_columns=True,
-        ).pipe(lazynwb.funcs.merge_array_column, 'obs_intervals')
+        ).pipe(lazynwb.funcs.merge_array_column, "obs_intervals")
 
     @property
     def experiment_description(self) -> str:
@@ -172,19 +174,21 @@ class LazyNWB:
     def source_script_file_name(self) -> str:
         return LazyComponent(self._file, "/general").source_script_file_name
 
-    def _to_dict(self) -> dict[str, str | list[str]]:
+    def _to_dict(self) -> dict[str, str | list[str] | datetime.datetime]:
         def _get_attr_names(obj: Any) -> list[str]:
             return [
                 name
                 for name, prop in obj.__class__.__dict__.items()
                 if isinstance(prop, property)
                 and inspect.signature(prop.fget).return_annotation
-                in ("str", "list[str]")
+                in ("str", "list[str]", "datetime.datetime")
             ]
 
         return {name: getattr(self, name) for name in _get_attr_names(self)}
 
-    def get_timeseries(self, search_term: str | None = None) -> dict[str, lazynwb.funcs.TimeSeries]:
+    def get_timeseries(
+        self, search_term: str | None = None
+    ) -> dict[str, lazynwb.funcs.TimeSeries]:
         return lazynwb.funcs.get_timeseries(self._file, search_term=search_term)
 
     def describe(self) -> dict[str, Any]:
@@ -211,7 +215,7 @@ class LazyComponent:
         v = self._file.get(path, None)
         if v is None:
             return None
-        if not getattr(v, 'shape', True):
+        if not getattr(v, "shape", True):
             v = [v[()]]
         if isinstance(v[0], bytes):
             s = v[0].decode()
@@ -261,6 +265,7 @@ class Subject(LazyComponent):
 
     def _to_dict(self) -> dict[str, str | list[str]]:
         return {name: getattr(self, name) for name in self.__class__.__annotations__}
+
 
 def get_metadata_df(
     nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
