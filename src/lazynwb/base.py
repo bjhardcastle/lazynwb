@@ -42,7 +42,39 @@ class LazyNWB:
         self._file = lazynwb.file_io.LazyFile(
             path=path, fsspec_storage_options=fsspec_storage_options
         )
-    
+
+    def __repr__(self) -> str:
+        return f"LazyNWB({self._file.path!r})"
+
+    def _repr_html_(self) -> str:
+        main_info = self._to_dict()
+        subject_info = self.subject._to_dict()
+        paths = self.describe().get("paths", [])
+
+        html = f"""
+        <h3>NWB file: {self._file.path}</h3>
+        <ul>
+        """
+        for key, value in main_info.items():
+            if isinstance(value, list):
+                value = ", ".join(map(str, value))
+            html += f"<li><strong>{key}:</strong> {value}</li>"
+        html += "</ul>"
+
+        html += "<h4>Subject</h4><ul>"
+        for key, value in subject_info.items():
+            if isinstance(value, list):
+                value = ", ".join(map(str, value))
+            html += f"<li><strong>{key}:</strong> {value}</li>"
+        html += "</ul>"
+
+        html += "<h4>Paths</h4><details><summary>Click to expand</summary><ul>"
+        for path in paths:
+            html += f"<li>{path}</li>"
+        html += "</ul></details>"
+
+        return html
+
     @property
     def identifier(self) -> str:
         return LazyComponent(self._file).identifier
