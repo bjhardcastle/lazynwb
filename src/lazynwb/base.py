@@ -57,7 +57,7 @@ class LazyNWB:
         """
         for key, value in main_info.items():
             if isinstance(value, list):
-                value = ", ".join(map(str, value))
+                value = ", ".join(map(str, value)) or "[]"
             html += f"<li><strong>{key}:</strong> {value}</li>"
         html += "</ul>"
 
