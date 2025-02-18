@@ -550,7 +550,8 @@ def get_timeseries(
             _format(k): TimeSeries(file=file, path=_format(k))
             for k in _get_internal_file_paths(file._accessor)
             if k.split("/")[-1] in ("data" ,"timestamps") and (not search_term or search_term in k)
-            # each timeseries will be a dir with /data and optional /timestamps
+            # regular timeseries will be a dir with /data and optional /timestamps
+            # eventseries will be a dir with /timestamps only
         }
         return path_to_accessor
 
