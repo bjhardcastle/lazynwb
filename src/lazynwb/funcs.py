@@ -135,14 +135,14 @@ def _get_df(
     exclude_array_columns: bool = True,
 ) -> pd.DataFrame:
     t0 = time.time()
-    column_accessors: dict[str, zarr.Array | h5py.Dataset] = (
-        _get_table_column_accessors(
-            file=file,
-            table_path=table_path,
-            use_thread_pool=(
-                file._hdmf_backend == lazynwb.file_io.LazyFile.HDMFBackend.ZARR
-            ),
-        )
+    column_accessors: dict[
+        str, zarr.Array | h5py.Dataset
+    ] = _get_table_column_accessors(
+        file=file,
+        table_path=table_path,
+        use_thread_pool=(
+            file._hdmf_backend == lazynwb.file_io.LazyFile.HDMFBackend.ZARR
+        ),
     )
 
     if isinstance(exclude_column_names, str):
@@ -462,6 +462,7 @@ def _get_internal_file_paths(
             results[group.name] = group
     return results
 
+
 @dataclasses.dataclass
 class TimeSeries:
     file: lazynwb.file_io.LazyFile
@@ -484,7 +485,9 @@ class TimeSeries:
             rate = self.rate
             starting_time = self.starting_time
             if rate is None or starting_time is None:
-                raise AssertionError(f"Not enough information to calculate timestamps for {self.path}: need rate and starting_time")
+                raise AssertionError(
+                    f"Not enough information to calculate timestamps for {self.path}: need rate and starting_time"
+                )
             return (np.arange(len(self.data)) / rate) + starting_time
 
     @property
@@ -504,7 +507,7 @@ class TimeSeries:
         if (_starting_time := self._starting_time) is not None:
             return _starting_time.attrs.get("rate", None)
         return None
-    
+
     @property
     def resolution(self) -> float | None:
         return self.data.attrs.get("resolution", None)
@@ -542,14 +545,17 @@ def get_timeseries(
     if isinstance(path_or_file, lazynwb.file_io.LazyFile):
         context = contextlib.nullcontext(path_or_file)
     else:
-        context = lazynwb.file_io.LazyFile(path_or_file)   # type: ignore[assignment]
+        context = lazynwb.file_io.LazyFile(path_or_file)  # type: ignore[assignment]
     with context as file:
+
         def _format(name: str) -> str:
             return name.removesuffix("/data").removesuffix("/timestamps")
+
         path_to_accessor = {
             _format(k): TimeSeries(file=file, path=_format(k))
             for k in _get_internal_file_paths(file._accessor)
-            if k.split("/")[-1] in ("data" ,"timestamps") and (not search_term or search_term in k)
+            if k.split("/")[-1] in ("data", "timestamps")
+            and (not search_term or search_term in k)
             # regular timeseries will be a dir with /data and optional /timestamps
             # eventseries will be a dir with /timestamps only
         }

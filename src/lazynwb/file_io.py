@@ -43,14 +43,16 @@ def open(
         else:
             return h5py.File(path.as_posix(), mode="r")
     else:
+
         def s3_to_http(url: str) -> str:
-            if url.startswith('s3://'):
+            if url.startswith("s3://"):
                 s3_path = url
-                bucket = s3_path[5:].split('/')[0]
-                object_name = '/'.join(s3_path[5:].split('/')[1:])
-                return 'https://s3.amazonaws.com/{0}/{1}'.format(bucket, object_name)
+                bucket = s3_path[5:].split("/")[0]
+                object_name = "/".join(s3_path[5:].split("/")[1:])
+                return f"https://s3.amazonaws.com/{bucket}/{object_name}"
             else:
                 return url
+
         # but using remfile is slightly faster in practice, at least for the initial opening:
         file = remfile.File(url=s3_to_http(path.as_posix()))
     return h5py.File(file, mode="r")
@@ -154,6 +156,7 @@ class LazyFile:
             elif isinstance(self._accessor, zarr.Group):
                 self._accessor.store.close()
 
+
 def normalize_internal_file_path(path: str) -> str:
     """
     Normalize the internal file path for an NWB file.
@@ -161,6 +164,7 @@ def normalize_internal_file_path(path: str) -> str:
     - add leading '/' if not present
     """
     return path if path.startswith("/") else f"/{path}"
+
 
 if __name__ == "__main__":
     from npc_io import testmod

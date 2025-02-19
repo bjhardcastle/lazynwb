@@ -15,9 +15,9 @@ dependencies = [
     "tqdm>=4.66.2",
     "pandas>=2.0.0",
 ]
-version = "0.1.0"
+version = "0.1.1"
 classifiers = [
-    "Development Status :: 3 - Alpha", # https://pypi.org/classifiers/
+    "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -52,24 +52,23 @@ lazynwb = [
 ]
 
 [tool.black]
-# line-length = 100
 target-version = [
-    "py39", 
-    "py310", 
+    "py39",
+    "py310",
     "py311",
 ]
 
 [tool.ruff]
 line-length = 100
 select = [
-    "B",    # flake8-bugbear
-    "C4",   # flake8-comprehensions
-    "E",    # pycodestyle
-    "F",    # pyflakes
-    "PGH",  # pygrep-hooks
-    "RUF",  # ruff
-    "W",    # pycodestyle
-    "YTT",  # flake8-2020
+    "B",
+    "C4",
+    "E",
+    "F",
+    "PGH",
+    "RUF",
+    "W",
+    "YTT",
     "ANN",
     "C",
     "I",
@@ -77,7 +76,6 @@ select = [
     "N",
     "UP",
 ]
-# extend-ignore = ["B018", "B019"]
 src = [
     "src",
 ]
@@ -91,10 +89,6 @@ ban-relative-imports = "all"
 
 [tool.ruff.mccabe]
 max-complexity = 10
-
-# [tool.ruff.isort]
-# known-first-party = ["lazynwb"]
-
 
 [tool.coverage.paths]
 source = [
@@ -129,7 +123,6 @@ addopts = [
     "--cov-config=pyproject.toml",
     "--doctest-glob=*README.md",
     "-x",
-    # "-n=auto", for use with pytest-xdist
 ]
 doctest_optionflags = [
     "NORMALIZE_WHITESPACE",
