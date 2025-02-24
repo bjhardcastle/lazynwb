@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import datetime
 import inspect
 import logging
@@ -211,25 +212,30 @@ class LazyComponent:
         self._path = path.strip().strip("/")
 
     def __getattr__(self, name: str) -> Any:
-        path = f"{self._path}/{name}" if self._path else name
-        v = self._file.get(path, None)
-        if v is None:
-            return None
-        if not getattr(v, "shape", True):
-            v = [v[()]]
-        if isinstance(v[0], bytes):
-            s = v[0].decode()
-            try:
-                return datetime.datetime.fromisoformat(s)
-            except ValueError:
-                return s
-        if len(v) > 1:
-            return v
-        return v[0]
+        return interpret(self._file, f"{self._path}/{name}")
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self._file}, {self._path!r})"
 
+def interpret(file: lazynwb.file_io.FileAccessor, path: str) -> Any:
+    """Read attribute from NWB file and interpret it as the appropriate Python object."""
+    path = lazynwb.file_io.normalize_internal_file_path(path)
+    v = file.get(path, None)
+    if v is None:
+        return None
+    if not getattr(v, "shape", True):
+        v = [v[()]]
+    if isinstance(v[0], bytes):
+        s: str = v[0].decode()
+        with contextlib.suppress(ValueError):
+            return datetime.datetime.fromisoformat(s)
+        if s.startswith('[') and s.endswith(']') and s.count('[') == s.count(']') == 1:
+            with contextlib.suppress(Exception):
+                return eval(s)
+        return s
+    if len(v) > 1:
+        return v
+    return v[0]
 
 class Subject(LazyComponent):
     age: str | None
