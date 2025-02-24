@@ -6,7 +6,7 @@ import datetime
 import inspect
 import logging
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Protocol
 
 import npc_io
 import pandas as pd
@@ -17,6 +17,26 @@ import lazynwb.funcs
 
 logger = logging.getLogger(__name__)
 
+
+def interpret(file: lazynwb.file_io.FileAccessor, path: str) -> Any:
+    """Read attribute from NWB file and interpret it as the appropriate Python object."""
+    path = lazynwb.file_io.normalize_internal_file_path(path)
+    v = file.get(path, None)
+    if v is None:
+        return None
+    if not getattr(v, "shape", True):
+        v = [v[()]]
+    if isinstance(v[0], bytes):
+        s: str = v[0].decode()
+        with contextlib.suppress(ValueError):
+            return datetime.datetime.fromisoformat(s)
+        if s.startswith('[') and s.endswith(']') and s.count('[') == s.count(']') == 1:
+            with contextlib.suppress(Exception):
+                return eval(s)
+        return s
+    if len(v) > 1:
+        return v
+    return v[0]
 
 class LazyNWB:
     """
@@ -42,12 +62,15 @@ class LazyNWB:
 
     def __init__(
         self,
-        path: npc_io.PathLike,
+        path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
         fsspec_storage_options: dict[str, Any] | None = None,
     ) -> None:
-        self._file = lazynwb.file_io.FileAccessor(
-            path=path, fsspec_storage_options=fsspec_storage_options
-        )
+        if isinstance(path_or_accessor, lazynwb.file_io.FileAccessor):
+            self._file = path_or_accessor
+        else:
+            self._file = lazynwb.file_io.FileAccessor(
+                path=path_or_accessor, fsspec_storage_options=fsspec_storage_options
+            )
 
     def __repr__(self) -> str:
         return f"LazyNWB({self._file._path!r})"
@@ -83,23 +106,23 @@ class LazyNWB:
 
     @property
     def identifier(self) -> str:
-        return LazyComponent(self._file).identifier
+        return interpret(self._file, 'identifier')
 
     @property
     def subject(self) -> Subject:
-        return Subject(self._file, "/general/subject")
+        return Subject(self._file)
 
     @property
     def session_start_time(self) -> datetime.datetime:
-        return LazyComponent(self._file).session_start_time
+        return interpret(self._file, 'session_start_time')
 
     @property
     def session_id(self) -> str:
-        return LazyComponent(self._file, "/general").session_id
+        return interpret(self._file, "/general/session_id")
 
     @property
     def session_description(self) -> str:
-        return LazyComponent(self._file).session_description
+        return interpret(self._file, 'session_description')
 
     @property
     def trials(self) -> pd.DataFrame:
@@ -125,27 +148,27 @@ class LazyNWB:
 
     @property
     def experiment_description(self) -> str:
-        return LazyComponent(self._file, "/general").experiment_description
+        return interpret(self._file, "/general/experiment_description")
 
     @property
     def experimenter(self) -> str:
-        return LazyComponent(self._file, "/general").experimenter
+        return interpret(self._file, "/general/experimenter")
 
     @property
     def lab(self) -> str:
-        return LazyComponent(self._file, "/general").lab
+        return interpret(self._file, "/general/lab")
 
     @property
     def institution(self) -> str:
-        return LazyComponent(self._file, "/general").institution
+        return interpret(self._file, "/general/institution")
 
     @property
     def related_publications(self) -> str:
-        return LazyComponent(self._file, "/general").related_publications
+        return interpret(self._file, "/general/related_publications")
 
     @property
     def keywords(self) -> list[str]:
-        k: str | Iterable[str] | None = LazyComponent(self._file, "/general").keywords
+        k: str | Iterable[str] | None = interpret(self._file, "/general/keywords")
         if k is None:
             return []
         if isinstance(k, str):
@@ -154,44 +177,35 @@ class LazyNWB:
 
     @property
     def notes(self) -> str:
-        return LazyComponent(self._file, "/general").notes
+        return interpret(self._file, "/general/notes")
 
     @property
     def data_collection(self) -> str:
-        return LazyComponent(self._file, "/general").data_collection
+        return interpret(self._file, "/general/data_collection")
 
     @property
     def surgery(self) -> str:
-        return LazyComponent(self._file, "/general").surgery
+        return interpret(self._file, "/general/surgery")
 
     @property
     def pharmacology(self) -> str:
-        return LazyComponent(self._file, "/general").pharmacology
+        return interpret(self._file, "/general/pharmacology")
 
     @property
     def virus(self) -> str:
-        return LazyComponent(self._file, "/general").virus
+        return interpret(self._file, "/general/virus")
 
     @property
     def source_script(self) -> str:
-        return LazyComponent(self._file, "/general").source_script
+        return interpret(self._file, "/general/source_script")
 
     @property
     def source_script_file_name(self) -> str:
-        return LazyComponent(self._file, "/general").source_script_file_name
+        return interpret(self._file, "/general/source_script_file_name")
 
-    def _to_dict(self) -> dict[str, str | list[str] | datetime.datetime]:
-        def _get_attr_names(obj: Any) -> list[str]:
-            return [
-                name
-                for name, prop in obj.__class__.__dict__.items()
-                if isinstance(prop, property)
-                and inspect.signature(prop.fget).return_annotation
-                in ("str", "list[str]", "datetime.datetime")
-            ]
-
-        return {name: getattr(self, name) for name in _get_attr_names(self)}
-
+    def _to_dict(self) -> dict[str, Any]:
+        return to_dict(self)
+    
     def get_timeseries(
         self, search_term: str | None = None
     ) -> dict[str, lazynwb.funcs.TimeSeries]:
@@ -204,78 +218,101 @@ class LazyNWB:
             "paths": list(lazynwb.funcs._get_internal_file_paths(self._file).keys()),
         }
 
+class NWBComponent(Protocol):
+    @property
+    def _file(self) -> lazynwb.file_io.FileAccessor:
+        ...
 
-class LazyComponent:
+def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]:
+    def _get_attr_names(obj: Any) -> list[str]:
+        return [
+            name
+            for name, prop in obj.__class__.__dict__.items()
+            if isinstance(prop, property)
+            and inspect.signature(prop.fget).return_annotation
+            in ("str", "list[str]", "datetime.datetime")
+        ]
+    results = {}
+    future_to_attr = {}
+    for name in _get_attr_names(obj):
+        future = lazynwb.funcs.get_threadpool_executor().submit(getattr, obj, name)
+        future_to_attr[future] = name
+    for future in concurrent.futures.as_completed(future_to_attr):
+        name = future_to_attr[future]
+        results[name]= future.result()
+    return results
+        
+class Subject:
+
+    _file: lazynwb.file_io.FileAccessor
+
     def __init__(
         self,
-        file: lazynwb.file_io.FileAccessor,
-        path: str | None = None,
+        path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
+        fsspec_storage_options: dict[str, Any] | None = None,
     ) -> None:
-        self._file = file
-        if path is None:
-            path = ""
-        self._path = path.strip().strip("/")
-
-    def __getattr__(self, name: str) -> Any:
-        return interpret(self._file, f"{self._path}/{name}")
-
+        if isinstance(path_or_accessor, lazynwb.file_io.FileAccessor):
+            self._file = path_or_accessor
+        else:
+            self._file = lazynwb.file_io.FileAccessor(
+                path=path_or_accessor, fsspec_storage_options=fsspec_storage_options
+            )
+        
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self._file}, {self._path!r})"
+        return f"Subject({self._file._path!r})"
+    
+    @property
+    def age(self) -> str | None:
+        """The age of the subject. The ISO 8601 Duration format is recommended, e.g., “P90D” for 90 days old."""
+        return interpret(self._file, f"/general/subject/age")
 
-def interpret(file: lazynwb.file_io.FileAccessor, path: str) -> Any:
-    """Read attribute from NWB file and interpret it as the appropriate Python object."""
-    path = lazynwb.file_io.normalize_internal_file_path(path)
-    v = file.get(path, None)
-    if v is None:
-        return None
-    if not getattr(v, "shape", True):
-        v = [v[()]]
-    if isinstance(v[0], bytes):
-        s: str = v[0].decode()
-        with contextlib.suppress(ValueError):
-            return datetime.datetime.fromisoformat(s)
-        if s.startswith('[') and s.endswith(']') and s.count('[') == s.count(']') == 1:
-            with contextlib.suppress(Exception):
-                return eval(s)
-        return s
-    if len(v) > 1:
-        return v
-    return v[0]
+    @property
+    def age__reference(self) -> str | None:
+        """Age is with reference to this event. Can be `birth` or `gestational`. If reference is omitted, then `birth` is implied. Value can be None when read from an NWB file with schema version 2.0 to 2.5 where age__reference is missing."""
+        return interpret(self._file, f"/general/subject/age__reference")
 
-class Subject(LazyComponent):
-    age: str | None
-    """The age of the subject. The ISO 8601 Duration format is recommended, e.g., “P90D” for 90 days old."""
+    @property
+    def description(self) -> str | None:
+        """A description of the subject, e.g., “mouse A10”."""
+        return interpret(self._file, f"/general/subject/description")
 
-    age__reference: str | None
-    """Age is with reference to this event. Can be `birth` or `gestational`. If reference is omitted, then `birth` is implied. Value can be None when read from an NWB file with schema version 2.0 to 2.5 where age__reference is missing."""
+    @property
+    def genotype(self) -> str | None:
+        """The genotype of the subject, e.g., “Sst-IRES-Cre/wt;Ai32(RCL-ChR2(H134R)_EYFP"""
+        return interpret(self._file, f"/general/subject/genotype")
 
-    description: str | None
-    """A description of the subject, e.g., “mouse A10”."""
+    @property
+    def sex(self) -> str | None:
+        """The sex of the subject. Using “F” (female), “M” (male), “U” (unknown), or “O” (other) is recommended."""
+        return interpret(self._file, f"/general/subject/sex")
 
-    genotype: str | None
-    """The genotype of the subject, e.g., “Sst-IRES-Cre/wt;Ai32(RCL-ChR2(H134R)_EYFP"""
+    @property
+    def species(self) -> str | None:
+        """The species of the subject. The formal latin binomal name is recommended, e.g., “Mus musculus”."""
+        return interpret(self._file, f"/general/subject/species")
 
-    sex: str | None
-    """The sex of the subject. Using “F” (female), “M” (male), “U” (unknown), or
-    “O” (other) is recommended."""
+    @property
+    def subject_id(self) -> str | None:
+        """A unique identifier for the subject, e.g., “A10”."""
+        return interpret(self._file, f"/general/subject/subject_id")
 
-    species: str | None
-    """The species of the subject. The formal latin binomal name is recommended, e.g., “Mus musculus”."""
+    @property
+    def weight(self) -> str | None:
+        """The weight of the subject, including units. Using kilograms is recommended. e.g., “0.02 kg”. If a float is provided, then the weight will be stored as “[value] kg”."""
+        return interpret(self._file, f"/general/subject/weight")
 
-    subject_id: str | None
-    """A unique identifier for the subject, e.g., “A10”."""
+    @property
+    def strain(self) -> str | None:
+        """The strain of the subject, e.g., “C57BL/6J”."""
+        return interpret(self._file, f"/general/subject/strain")
 
-    weight: str | None
-    """The weight of the subject, including units. Using kilograms is recommended. e.g., “0.02 kg”. If a float is provided, then the weight will be stored as “[value] kg”."""
+    @property
+    def date_of_birth(self) -> datetime.datetime | None:
+        """The datetime of the date of birth. May be supplied instead of age."""
+        return interpret(self._file, f"/general/subject/date_of_birth")
 
-    strain: str | None
-    """The strain of the subject, e.g., “C57BL/6J”."""
-
-    date_of_birth: datetime.datetime | None
-    """The datetime of the date of birth. May be supplied instead of age."""
-
-    def _to_dict(self) -> dict[str, str | list[str]]:
-        return {name: getattr(self, name) for name in self.__class__.__annotations__}
+    def _to_dict(self) -> dict[str, Any]:
+        return to_dict(self)
 
 
 def get_metadata_df(
