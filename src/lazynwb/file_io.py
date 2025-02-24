@@ -121,8 +121,8 @@ class FileAccessor:
     def __getattr__(self, name) -> Any:
         return getattr(self._accessor, name)
 
-    def get(self, name: str, default: Any = None, getclass: bool = False, getlink: bool = False) -> Any:
-        return self._accessor.get(name, default, getclass, getlink)
+    def get(self, name: str, default: Any = None) -> Any:
+        return self._accessor.get(name, default)
     
     def __getitem__(self, name) -> Any:
         return self._accessor[name]
