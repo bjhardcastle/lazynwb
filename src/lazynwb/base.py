@@ -20,10 +20,15 @@ logger = logging.getLogger(__name__)
 
 class LazyNWB:
     """
-    High-level interface for accessing components of an NWB file.
+    PyNWB-like interface for accessing components of an NWB file.
 
     - initialize with a path to an NWB file or an open h5py.File, h5py.Group, or
     zarr.Group object
+    
+    - forwards attributes to the underlying NWB file accessor (h5py.File, h5py.Group), with
+      intermediate objects used for convenient dot attr access. Will be slightly slower than
+      accessing components directly with the NWB file accessor due to the overhead of creating
+      python objects.
 
     Examples:
         >>> nwb = LazyNWB('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/39490bff-87c9-4ef2-b408-36334e748ac6/nwb/ecephys_620264_2022-08-02_15-39-59_experiment1_recording1.nwb')
@@ -33,14 +38,14 @@ class LazyNWB:
         datetime.datetime(2022, 8, 2, 15, 39, 59, tzinfo=datetime.timezone.utc)
     """
 
-    _file: lazynwb.file_io.LazyFile
+    _file: lazynwb.file_io.FileAccessor
 
     def __init__(
         self,
         path: npc_io.PathLike,
         fsspec_storage_options: dict[str, Any] | None = None,
     ) -> None:
-        self._file = lazynwb.file_io.LazyFile(
+        self._file = lazynwb.file_io.FileAccessor(
             path=path, fsspec_storage_options=fsspec_storage_options
         )
 
@@ -203,7 +208,7 @@ class LazyNWB:
 class LazyComponent:
     def __init__(
         self,
-        file: lazynwb.file_io.LazyFile,
+        file: lazynwb.file_io.FileAccessor,
         path: str | None = None,
     ) -> None:
         self._file = file

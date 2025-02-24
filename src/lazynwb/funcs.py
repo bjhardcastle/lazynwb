@@ -44,10 +44,10 @@ def get_processpool_executor() -> concurrent.futures.ProcessPoolExecutor:
 
 
 def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> pd.DataFrame:
-    if isinstance(nwb_path, lazynwb.file_io.LazyFile):
+    if isinstance(nwb_path, lazynwb.file_io.FileAccessor):
         context = contextlib.nullcontext(nwb_path)
     else:
-        context = lazynwb.file_io.LazyFile(nwb_path)  # type: ignore[assignment]
+        context = lazynwb.file_io.FileAccessor(nwb_path)  # type: ignore[assignment]
     with context as file:
         return _get_df(
             file=file,
@@ -58,8 +58,8 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> pd.DataFrame:
 def get_df(
     nwb_data_sources: (
         npc_io.PathLike
-        | Iterable[npc_io.PathLike | lazynwb.file_io.LazyFile]
-        | lazynwb.file_io.LazyFile
+        | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor]
+        | lazynwb.file_io.FileAccessor
     ),
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
@@ -69,9 +69,9 @@ def get_df(
 ) -> pd.DataFrame:
     t0 = time.time()
 
-    if isinstance(nwb_data_sources, (str, lazynwb.file_io.LazyFile)) or not isinstance(
-        nwb_data_sources, Iterable
-    ):
+    if isinstance(
+        nwb_data_sources, (str, lazynwb.file_io.FileAccessor)
+    ) or not isinstance(nwb_data_sources, Iterable):
         paths = (nwb_data_sources,)
     else:
         paths = tuple(nwb_data_sources)
@@ -129,7 +129,7 @@ def get_df(
 
 
 def _get_df(
-    file: lazynwb.file_io.LazyFile,
+    file: lazynwb.file_io.FileAccessor,
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -140,7 +140,7 @@ def _get_df(
             file=file,
             table_path=table_path,
             use_thread_pool=(
-                file._hdmf_backend == lazynwb.file_io.LazyFile.HDMFBackend.ZARR
+                file._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.ZARR
             ),
         )
     )
@@ -313,7 +313,7 @@ def _indexed_column_helper(
     column_name: str,
     table_row_indices: Sequence[int],
 ) -> pd.DataFrame:
-    with lazynwb.file_io.LazyFile(nwb_path) as file:
+    with lazynwb.file_io.FileAccessor(nwb_path) as file:
         try:
             data_column_accessor = file[table_path][column_name]
         except KeyError as exc:
@@ -398,7 +398,7 @@ def merge_array_column(
 
 
 def _get_table_column_accessors(
-    file: lazynwb.file_io.LazyFile,
+    file: lazynwb.file_io.FileAccessor,
     table_path: str,
     use_thread_pool: bool = False,
 ) -> dict[str, zarr.Array | h5py.Dataset]:
@@ -462,9 +462,10 @@ def _get_internal_file_paths(
             results[group.name] = group
     return results
 
+
 @dataclasses.dataclass
 class TimeSeries:
-    file: lazynwb.file_io.LazyFile
+    file: lazynwb.file_io.FileAccessor
     path: str
 
     # TODO add generic getattr that defers to attrs
@@ -484,7 +485,9 @@ class TimeSeries:
             rate = self.rate
             starting_time = self.starting_time
             if rate is None or starting_time is None:
-                raise AssertionError(f"Not enough information to calculate timestamps for {self.path}: need rate and starting_time")
+                raise AssertionError(
+                    f"Not enough information to calculate timestamps for {self.path}: need rate and starting_time"
+                )
             return (np.arange(len(self.data)) / rate) + starting_time
 
     @property
@@ -504,7 +507,7 @@ class TimeSeries:
         if (_starting_time := self._starting_time) is not None:
             return _starting_time.attrs.get("rate", None)
         return None
-    
+
     @property
     def resolution(self) -> float | None:
         return self.data.attrs.get("resolution", None)
@@ -536,20 +539,23 @@ class TimeSeries:
 
 
 def get_timeseries(
-    path_or_file: npc_io.PathLike | lazynwb.file_io.LazyFile,
+    path_or_file: npc_io.PathLike | lazynwb.file_io.FileAccessor,
     search_term: str | None = None,
 ) -> dict[str, h5py.Dataset | zarr.Array]:
-    if isinstance(path_or_file, lazynwb.file_io.LazyFile):
+    if isinstance(path_or_file, lazynwb.file_io.FileAccessor):
         context = contextlib.nullcontext(path_or_file)
     else:
-        context = lazynwb.file_io.LazyFile(path_or_file)   # type: ignore[assignment]
+        context = lazynwb.file_io.FileAccessor(path_or_file)  # type: ignore[assignment]
     with context as file:
+
         def _format(name: str) -> str:
             return name.removesuffix("/data").removesuffix("/timestamps")
+
         path_to_accessor = {
             _format(k): TimeSeries(file=file, path=_format(k))
             for k in _get_internal_file_paths(file._accessor)
-            if k.split("/")[-1] in ("data" ,"timestamps") and (not search_term or search_term in k)
+            if k.split("/")[-1] in ("data", "timestamps")
+            and (not search_term or search_term in k)
             # regular timeseries will be a dir with /data and optional /timestamps
             # eventseries will be a dir with /timestamps only
         }

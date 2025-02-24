@@ -43,26 +43,31 @@ def open(
         else:
             return h5py.File(path.as_posix(), mode="r")
     else:
+
         def s3_to_http(url: str) -> str:
-            if url.startswith('s3://'):
+            if url.startswith("s3://"):
                 s3_path = url
-                bucket = s3_path[5:].split('/')[0]
-                object_name = '/'.join(s3_path[5:].split('/')[1:])
-                return 'https://s3.amazonaws.com/{0}/{1}'.format(bucket, object_name)
+                bucket = s3_path[5:].split("/")[0]
+                object_name = "/".join(s3_path[5:].split("/")[1:])
+                return f"https://s3.amazonaws.com/{bucket}/{object_name}"
             else:
                 return url
+
         # but using remfile is slightly faster in practice, at least for the initial opening:
         file = remfile.File(url=s3_to_http(path.as_posix()))
     return h5py.File(file, mode="r")
 
 
-class LazyFile:
+class FileAccessor:
     """
-    A lazy file object (h5py.File, h5py.Group, or zarr.Group) that can be used to
-    access components via their standard dict-like interface or as instance attributes.
+    A wrapper that abstracts the storage backend (h5py.File, h5py.Group, or zarr.Group), forwarding
+    all getattr/get item calls to the underlying object. Also stores the path to the file, and the
+    type of backend as a string for convenience.
 
     - instantiate with a path to an NWB file or an open h5py.File, h5py.Group, or
     zarr.Group object
+    - access components via the mapping interface
+    - file accessor remains open in read-only mode unless used as a context manager
 
     Examples:
         >>> file = LazyFile('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/39490bff-87c9-4ef2-b408-36334e748ac6/nwb/ecephys_620264_2022-08-02_15-39-59_experiment1_recording1.nwb')
@@ -70,17 +75,15 @@ class LazyFile:
         <zarr.hierarchy.Group '/units' read-only>
         >>> file['units']
         <zarr.hierarchy.Group '/units' read-only>
-        >>> file.units.spike_times
+        >>> file['units/spike_times']
         <zarr.core.Array '/units/spike_times' (18185563,) float64 read-only>
-        >>> file.units.spike_times_index[0]
+        >>> file['units/spike_times/index'][0]
         6966
-        >>> file.units.id[0]
-        0
-        >>> 'spike_times' in file.units
+        >>> 'spike_times' in file['units']
         True
         >>> next(iter(file))
         'acquisition'
-        >>> next(iter(file.units))
+        >>> next(iter(file['units']))
         'amplitude'
     """
 
@@ -113,23 +116,14 @@ class LazyFile:
             return self.HDMFBackend.HDF5
         elif isinstance(self._accessor, zarr.Group):
             return self.HDMFBackend.ZARR
-        raise ValueError(f"Unknown backend for {self._accessor!r}")
+        raise NotImplementedError(f"Unknown backend for {self._accessor!r}")
 
     def __getattr__(self, name) -> Any:
-        # for built-in properties/methods of the underlying h5py/zarr object:
-        with contextlib.suppress(AttributeError):
-            return getattr(self._accessor, name)
+        return getattr(self._accessor, name)
 
-        # for components of the NWB file:
-        with contextlib.suppress(KeyError):
-            component = self._accessor[name]
-            # provide a new instance of the class for conveninet access to components:
-            #! this is now slower than using __getitem__ directly
-            if isinstance(component, (h5py.Group, zarr.Group)):
-                return LazyFile(component)
-            return component
-        raise AttributeError(f"No attribute named {name!r} in NWB file")
-
+    def get(self, name: str, default: Any = None, getclass: bool = False, getlink: bool = False) -> Any:
+        return self._accessor.get(name, default, getclass, getlink)
+    
     def __getitem__(self, name) -> Any:
         return self._accessor[name]
 
@@ -144,7 +138,7 @@ class LazyFile:
             return f"{self.__class__.__name__}({self._path.as_posix()!r})"
         return repr(self._accessor)
 
-    def __enter__(self) -> LazyFile:
+    def __enter__(self) -> FileAccessor:
         return self
 
     def __exit__(self, *args, **kwargs) -> None:
@@ -154,6 +148,7 @@ class LazyFile:
             elif isinstance(self._accessor, zarr.Group):
                 self._accessor.store.close()
 
+
 def normalize_internal_file_path(path: str) -> str:
     """
     Normalize the internal file path for an NWB file.
@@ -161,6 +156,7 @@ def normalize_internal_file_path(path: str) -> str:
     - add leading '/' if not present
     """
     return path if path.startswith("/") else f"/{path}"
+
 
 if __name__ == "__main__":
     from npc_io import testmod
