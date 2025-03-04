@@ -36,9 +36,17 @@ def test_open_time(url: str) -> None:
     t0 = time.time()
     nwb = lazynwb.FileAccessor(url)
     t = time.time() - t0
-    logger.info(f'Opened {url} with {nwb.__class__.__name__} in {t} seconds')
+    logger.info(f'Opened {url} with {nwb.__class__.__name__} in {t:.2f} seconds')
     assert t < MIN_OPEN_TIME_SECONDS, f'Opening {url} with {nwb.__class__.__name__} took too long: {t:.1f} seconds (expected < {MIN_OPEN_TIME_SECONDS})'
 
+@pytest.mark.parametrize('url', ['large_hdf5', 'small_zarr'], indirect=True)
+def test_metadata_df(url: str) -> None:
+    t0 = time.time()
+    df = lazynwb.get_metadata_df(url, disable_progress=True)
+    t    = time.time() - t0
+    assert t < MIN_OPEN_TIME_SECONDS, f'Fetching summary dataframe took too long: {t:.1f} seconds (expected < {MIN_OPEN_TIME_SECONDS})'
+    logger.info(f'Fetched summary dataframe for {url} in {t:.2f} seconds')
+    
 @pytest.mark.parametrize('url', ['large_hdf5'], indirect=True)
 def test_remfile_vs_h5py(url: str) -> None:
     times = []
@@ -46,9 +54,9 @@ def test_remfile_vs_h5py(url: str) -> None:
         t0 = time.time()
         _ = lazynwb.open(url, use_remfile=use_remfile)
         times.append( t:= time.time() - t0)
-        logger.info(f'Opened {url} with {use_remfile=} in {t} seconds')
+        logger.info(f'Opened {url} with {use_remfile=} in {t:.2f} seconds')
     assert times[0] < times[1], f'Opening {url} with remfile {times[0]=} was not faster than h5py {times[1]=}: default to remfile=False in open()'
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO) 
     pytest.main([__file__])
