@@ -18,7 +18,7 @@ import lazynwb.funcs
 logger = logging.getLogger(__name__)
 
 
-def interpret(file: lazynwb.file_io.FileAccessor, path: str) -> Any:
+def _cast(file: lazynwb.file_io.FileAccessor, path: str) -> Any:
     """Read attribute from NWB file and interpret it as the appropriate Python object."""
     path = lazynwb.file_io.normalize_internal_file_path(path)
     v = file.get(path, None)
@@ -106,7 +106,7 @@ class LazyNWB:
 
     @property
     def identifier(self) -> str:
-        return interpret(self._file, 'identifier')
+        return _cast(self._file, 'identifier')
 
     @property
     def subject(self) -> Subject:
@@ -114,15 +114,15 @@ class LazyNWB:
 
     @property
     def session_start_time(self) -> datetime.datetime:
-        return interpret(self._file, 'session_start_time')
+        return _cast(self._file, 'session_start_time')
 
     @property
     def session_id(self) -> str:
-        return interpret(self._file, "/general/session_id")
+        return _cast(self._file, "/general/session_id")
 
     @property
     def session_description(self) -> str:
-        return interpret(self._file, 'session_description')
+        return _cast(self._file, 'session_description')
 
     @property
     def trials(self) -> pd.DataFrame:
@@ -148,27 +148,27 @@ class LazyNWB:
 
     @property
     def experiment_description(self) -> str:
-        return interpret(self._file, "/general/experiment_description")
+        return _cast(self._file, "/general/experiment_description")
 
     @property
     def experimenter(self) -> str:
-        return interpret(self._file, "/general/experimenter")
+        return _cast(self._file, "/general/experimenter")
 
     @property
     def lab(self) -> str:
-        return interpret(self._file, "/general/lab")
+        return _cast(self._file, "/general/lab")
 
     @property
     def institution(self) -> str:
-        return interpret(self._file, "/general/institution")
+        return _cast(self._file, "/general/institution")
 
     @property
     def related_publications(self) -> str:
-        return interpret(self._file, "/general/related_publications")
+        return _cast(self._file, "/general/related_publications")
 
     @property
     def keywords(self) -> list[str]:
-        k: str | Iterable[str] | None = interpret(self._file, "/general/keywords")
+        k: str | Iterable[str] | None = _cast(self._file, "/general/keywords")
         if k is None:
             return []
         if isinstance(k, str):
@@ -177,31 +177,31 @@ class LazyNWB:
 
     @property
     def notes(self) -> str:
-        return interpret(self._file, "/general/notes")
+        return _cast(self._file, "/general/notes")
 
     @property
     def data_collection(self) -> str:
-        return interpret(self._file, "/general/data_collection")
+        return _cast(self._file, "/general/data_collection")
 
     @property
     def surgery(self) -> str:
-        return interpret(self._file, "/general/surgery")
+        return _cast(self._file, "/general/surgery")
 
     @property
     def pharmacology(self) -> str:
-        return interpret(self._file, "/general/pharmacology")
+        return _cast(self._file, "/general/pharmacology")
 
     @property
     def virus(self) -> str:
-        return interpret(self._file, "/general/virus")
+        return _cast(self._file, "/general/virus")
 
     @property
     def source_script(self) -> str:
-        return interpret(self._file, "/general/source_script")
+        return _cast(self._file, "/general/source_script")
 
     @property
     def source_script_file_name(self) -> str:
-        return interpret(self._file, "/general/source_script_file_name")
+        return _cast(self._file, "/general/source_script_file_name")
 
     def _to_dict(self) -> dict[str, Any]:
         return to_dict(self)
@@ -264,52 +264,52 @@ class Subject:
     @property
     def age(self) -> str | None:
         """The age of the subject. The ISO 8601 Duration format is recommended, e.g., “P90D” for 90 days old."""
-        return interpret(self._file, f"/general/subject/age")
+        return _cast(self._file, f"/general/subject/age")
 
     @property
     def age__reference(self) -> str | None:
         """Age is with reference to this event. Can be `birth` or `gestational`. If reference is omitted, then `birth` is implied. Value can be None when read from an NWB file with schema version 2.0 to 2.5 where age__reference is missing."""
-        return interpret(self._file, f"/general/subject/age__reference")
+        return _cast(self._file, f"/general/subject/age__reference")
 
     @property
     def description(self) -> str | None:
         """A description of the subject, e.g., “mouse A10”."""
-        return interpret(self._file, f"/general/subject/description")
+        return _cast(self._file, f"/general/subject/description")
 
     @property
     def genotype(self) -> str | None:
         """The genotype of the subject, e.g., “Sst-IRES-Cre/wt;Ai32(RCL-ChR2(H134R)_EYFP"""
-        return interpret(self._file, f"/general/subject/genotype")
+        return _cast(self._file, f"/general/subject/genotype")
 
     @property
     def sex(self) -> str | None:
         """The sex of the subject. Using “F” (female), “M” (male), “U” (unknown), or “O” (other) is recommended."""
-        return interpret(self._file, f"/general/subject/sex")
+        return _cast(self._file, f"/general/subject/sex")
 
     @property
     def species(self) -> str | None:
         """The species of the subject. The formal latin binomal name is recommended, e.g., “Mus musculus”."""
-        return interpret(self._file, f"/general/subject/species")
+        return _cast(self._file, f"/general/subject/species")
 
     @property
     def subject_id(self) -> str | None:
         """A unique identifier for the subject, e.g., “A10”."""
-        return interpret(self._file, f"/general/subject/subject_id")
+        return _cast(self._file, f"/general/subject/subject_id")
 
     @property
     def weight(self) -> str | None:
         """The weight of the subject, including units. Using kilograms is recommended. e.g., “0.02 kg”. If a float is provided, then the weight will be stored as “[value] kg”."""
-        return interpret(self._file, f"/general/subject/weight")
+        return _cast(self._file, f"/general/subject/weight")
 
     @property
     def strain(self) -> str | None:
         """The strain of the subject, e.g., “C57BL/6J”."""
-        return interpret(self._file, f"/general/subject/strain")
+        return _cast(self._file, f"/general/subject/strain")
 
     @property
     def date_of_birth(self) -> datetime.datetime | None:
         """The datetime of the date of birth. May be supplied instead of age."""
-        return interpret(self._file, f"/general/subject/date_of_birth")
+        return _cast(self._file, f"/general/subject/date_of_birth")
 
     def _to_dict(self) -> dict[str, Any]:
         return to_dict(self)
