@@ -247,3 +247,15 @@ composite = [
     "pdm run tag",
     "pdm run log",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0",
+    "ruff>=0.0.282",
+    "mypy>=1.4.1",
+    "pytest-cov>=4.1.0",
+    "black>=23.7.0",
+    "git-changelog>=2.3",
+    "parver>=0.3",
+    "psutil>=5.9.8",
+]
