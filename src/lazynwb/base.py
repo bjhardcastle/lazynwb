@@ -233,13 +233,8 @@ def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]
             in ("str", "list[str]", "datetime.datetime")
         ]
     results = {}
-    future_to_attr = {}
     for name in _get_attr_names(obj):
-        future = lazynwb.funcs.get_threadpool_executor().submit(getattr, obj, name)
-        future_to_attr[future] = name
-    for future in concurrent.futures.as_completed(future_to_attr):
-        name = future_to_attr[future]
-        results[name]= future.result()
+        results[name]= getattr(obj, name)
     return results
         
 class Subject:
