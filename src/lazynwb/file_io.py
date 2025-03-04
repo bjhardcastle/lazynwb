@@ -12,7 +12,7 @@ import zarr
 
 
 def open(
-    path: npc_io.PathLike, use_remfile: bool = True, **fsspec_storage_options: Any
+    path: npc_io.PathLike, use_remfile: bool = True, anon_s3: bool = True, **fsspec_storage_options: Any
 ) -> h5py.File | zarr.Group:
     """
     Open a file that meets the NWB spec, minimizing the amount of data/metadata read.
@@ -27,6 +27,8 @@ def open(
         >>> nwb = open('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/39490bff-87c9-4ef2-b408-36334e748ac6/nwb/ecephys_620264_2022-08-02_15-39-59_experiment1_recording1.nwb')
     """
     path = npc_io.from_pathlike(path)
+    if anon_s3 and path.protocol == "s3":
+        fsspec_storage_options.setdefault("anon", True)
     path = upath.UPath(path, **fsspec_storage_options)
 
     # zarr ------------------------------------------------------------- #
