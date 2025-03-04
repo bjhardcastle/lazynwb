@@ -12,7 +12,7 @@ import zarr
 
 
 def open(
-    path: npc_io.PathLike, use_remfile: bool = False, **fsspec_storage_options: Any
+    path: npc_io.PathLike, use_remfile: bool = True, **fsspec_storage_options: Any
 ) -> h5py.File | zarr.Group:
     """
     Open a file that meets the NWB spec, minimizing the amount of data/metadata read.
