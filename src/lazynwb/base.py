@@ -229,7 +229,7 @@ def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]
             name
             for name, prop in obj.__class__.__dict__.items()
             if isinstance(prop, property)
-            and inspect.signature(prop.fget).return_annotation
+            and inspect.signature(prop.fget).return_annotation # type: ignore[arg-type]
             in ("str", "list[str]", "datetime.datetime")
         ]
     results = {}
@@ -319,7 +319,7 @@ def get_metadata_df(
     ):
         paths = (nwb_path_or_paths,)
     else:
-        paths = tuple(nwb_path_or_paths)
+        paths = tuple(nwb_path_or_paths) # type: ignore[assignment]
 
     def _get_metadata_df_helper(nwb_path: npc_io.PathLike) -> dict[str, Any]:
         nwb = LazyNWB(nwb_path)

@@ -72,9 +72,9 @@ def get_df(
     if isinstance(
         nwb_data_sources, (str, lazynwb.file_io.FileAccessor)
     ) or not isinstance(nwb_data_sources, Iterable):
-        paths = (nwb_data_sources,)
+        paths= (nwb_data_sources,)
     else:
-        paths = tuple(nwb_data_sources)
+        paths = tuple(nwb_data_sources) # type: ignore[assignment]
 
     if len(paths) == 1:  # don't use a pool for a single file
         return _get_df_helper(
@@ -363,7 +363,7 @@ def merge_array_column(
             nwb_path=nwb_path,
             table_path=session_df[TABLE_PATH_COLUMN_NAME].iloc[0],
             column_name=column_name,
-            table_row_indices=session_df[TABLE_INDEX_COLUMN_NAME].values,
+            table_row_indices=session_df[TABLE_INDEX_COLUMN_NAME].values.tolist(),
         )
         future_to_path[future] = nwb_path
     missing_column_already_warned = False
