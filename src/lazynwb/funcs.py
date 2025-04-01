@@ -50,7 +50,7 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]
     else:
         context = lazynwb.file_io.FileAccessor(nwb_path)  # type: ignore[assignment]
     with context as file:
-        return _get_df(
+        return _get_table_data(
             file=file,
             **get_df_kwargs,
         )
@@ -124,15 +124,18 @@ def get_df(
                 f"Error getting DataFrame for {npc_io.from_pathlike(future_to_path[future])}:"
             )
             raise
-    
-    df = pd.DataFrame(results)
+    concat_results = {}
+    for result in results:
+        for key, value in result.items():
+            concat_results.setdefault(key, []).extend(value)
+    df = pd.DataFrame(concat_results)
     logger.debug(
         f"created {table_path!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
     )
     return df
 
 
-def _get_df(
+def _get_table_data(
     file: lazynwb.file_io.FileAccessor,
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
