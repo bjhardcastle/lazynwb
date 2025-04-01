@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import logging
 from typing import Any
 
 import h5py
@@ -10,9 +11,10 @@ import remfile
 import upath
 import zarr
 
+logger = logging.getLogger(__name__)
 
 def open(
-    path: npc_io.PathLike, use_remfile: bool = True, anon_s3: bool = True, **fsspec_storage_options: Any
+    path: npc_io.PathLike, is_zarr: bool = False, use_remfile: bool = True, anon_s3: bool = False, **fsspec_storage_options: Any
 ) -> h5py.File | zarr.Group:
     """
     Open a file that meets the NWB spec, minimizing the amount of data/metadata read.
@@ -31,34 +33,42 @@ def open(
         fsspec_storage_options.setdefault("anon", True)
     path = upath.UPath(path, **fsspec_storage_options)
 
+    if 'zarr' in path.as_posix():
+        is_zarr = True
+        
     # zarr ------------------------------------------------------------- #
     # there's no file-name convention for what is a zarr file, so we have to try opening it and see if it works
     # - zarr.open() is fast regardless of size
+    if not is_zarr:
+        with contextlib.suppress(Exception):
+            return _open_hdf5(path, use_remfile=use_remfile)
+
     with contextlib.suppress(Exception):
         return zarr.open(store=path, mode="r")
-
-    # hdf5 ------------------------------------------------------------- #
-    if not use_remfile:
-        if path.protocol:
-            # cloud path: open the file with fsspec and then pass the file handle to h5py
-            file = path.open(mode="rb", cache_type="first")
-        else:
-            return h5py.File(path.as_posix(), mode="r")
+    
+    
+def _s3_to_http(url: str) -> str:
+    if url.startswith("s3://"):
+        s3_path = url
+        bucket = s3_path[5:].split("/")[0]
+        object_name = "/".join(s3_path[5:].split("/")[1:])
+        return f"https://{bucket}.s3.amazonaws.com/{object_name}"
     else:
-
-        def s3_to_http(url: str) -> str:
-            if url.startswith("s3://"):
-                s3_path = url
-                bucket = s3_path[5:].split("/")[0]
-                object_name = "/".join(s3_path[5:].split("/")[1:])
-                return f"https://s3.amazonaws.com/{bucket}/{object_name}"
-            else:
-                return url
-
-        # but using remfile is slightly faster in practice, at least for the initial opening:
-        file = remfile.File(url=s3_to_http(path.as_posix()))
+        return url
+    
+def _open_hdf5(path: upath.UPath, use_remfile: bool = True) -> h5py.File:
+    if not path.protocol:
+        # local path: open the file with h5py directly
+        return h5py.File(path.as_posix(), mode="r")
+    file = None
+    if use_remfile:
+        try:
+            file = remfile.File(url=_s3_to_http(path.as_posix()))
+        except Exception as exc: # remfile raises base Exception for many reasons
+            logger.warning(f"remfile failed to open {path}, falling back to fsspec: {exc!r}")
+    if file is None:
+        file = path.open(mode="rb", cache_type="first")
     return h5py.File(file, mode="r")
-
 
 class FileAccessor:
     """
