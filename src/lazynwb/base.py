@@ -33,6 +33,8 @@ def _cast(file: lazynwb.file_io.FileAccessor, path: str) -> Any:
         if s.startswith('[') and s.endswith(']') and s.count('[') == s.count(']') == 1:
             with contextlib.suppress(Exception):
                 return eval(s)
+        if len(v) > 1:
+            return v.asstr()[:].tolist()
         return s
     if len(v) > 1:
         return v
@@ -210,6 +212,18 @@ class LazyNWB:
         self, search_term: str | None = None
     ) -> dict[str, lazynwb.funcs.TimeSeries]:
         return lazynwb.funcs.get_timeseries(self._file, search_term=search_term)
+
+    def get_df(self, search_term: str) -> pd.DataFrame:
+        if search_term == 'units':
+            return self.units
+        if '/' not in search_term:
+            search_term = f"/intervals/{search_term}"
+        try:
+            return lazynwb.funcs.get_df(self._file, table_path=search_term)
+        except KeyError:
+            raise ValueError(
+                f"{search_term!r} not found in NWB file: try using full path to table"
+            )
 
     def describe(self) -> dict[str, Any]:
         return {
