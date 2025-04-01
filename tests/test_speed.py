@@ -19,7 +19,7 @@ def get_large_hdf5_url() -> str:
         return asset.get_content_url(follow_redirects=1, strip_query=True)
 
 def get_small_zarr_url() -> str:
-    return 's3://codeocean-s3datasetsbucket-1u41qdg42ur9/39490bff-87c9-4ef2-b408-36334e748ac6/nwb/ecephys_620264_2022-08-02_15-39-59_experiment1_recording1.nwb'
+    return 's3://codeocean-s3datasetsbucket-1u41qdg42ur9/00865745-db58-495d-9c5e-e28424bb4b97/nwb/ecephys_721536_2024-05-16_12-32-31_experiment1_recording1.nwb'
 
 @pytest.fixture
 def url(request: pytest.FixtureRequest) -> str:
