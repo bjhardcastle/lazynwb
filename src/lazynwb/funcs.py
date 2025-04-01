@@ -6,6 +6,7 @@ import dataclasses
 import logging
 import time
 from collections.abc import Iterable, Sequence
+from typing import Any
 
 import h5py
 import npc_io
@@ -43,7 +44,7 @@ def get_processpool_executor() -> concurrent.futures.ProcessPoolExecutor:
     return process_pool_executor
 
 
-def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> pd.DataFrame:
+def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]:
     if isinstance(nwb_path, lazynwb.file_io.FileAccessor):
         context = contextlib.nullcontext(nwb_path)
     else:
@@ -77,11 +78,13 @@ def get_df(
         paths = tuple(nwb_data_sources)
 
     if len(paths) == 1:  # don't use a pool for a single file
-        return _get_df_helper(
-            nwb_path=paths[0],
-            table_path=table_path,
-            exclude_column_names=exclude_column_names,
-            exclude_array_columns=exclude_array_columns,
+        return pd.DataFrame(
+            _get_df_helper(
+                nwb_path=paths[0],
+                table_path=table_path,
+                exclude_column_names=exclude_column_names,
+                exclude_array_columns=exclude_array_columns,
+            )
         )
 
     if exclude_array_columns and use_process_pool:
@@ -94,7 +97,7 @@ def get_df(
         get_processpool_executor() if use_process_pool else get_threadpool_executor()
     )
     future_to_path = {}
-    results: list[pd.DataFrame] = []
+    results: list[dict] = []
     for path in paths:
         future = executor.submit(
             _get_df_helper,
@@ -121,7 +124,8 @@ def get_df(
                 f"Error getting DataFrame for {npc_io.from_pathlike(future_to_path[future])}:"
             )
             raise
-    df = pd.concat(results)
+    
+    df = pd.DataFrame(results)
     logger.debug(
         f"created {table_path!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
     )
@@ -133,7 +137,7 @@ def _get_df(
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
-) -> pd.DataFrame:
+) -> dict[str, Any]:
     t0 = time.time()
     column_accessors: dict[str, zarr.Array | h5py.Dataset] = (
         _get_table_column_accessors(
@@ -213,11 +217,10 @@ def _get_df(
         * column_length,
         TABLE_INDEX_COLUMN_NAME: np.arange(column_length),
     }
-    df = pd.DataFrame(data=column_data | identifier_column_data)
     logger.debug(
-        f"initialized DataFrame for {file._path}/{table_path} in {time.time() - t0:.2f} s"
+        f"fetched data for {file._path}/{table_path} in {time.time() - t0:.2f} s"
     )
-    return df
+    return column_data | identifier_column_data
 
 
 def get_indexed_column_data(
