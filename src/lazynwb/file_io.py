@@ -45,7 +45,9 @@ def open(
 
     with contextlib.suppress(Exception):
         return zarr.open(store=path, mode="r")
-    
+    raise ValueError(
+        f"Failed to open {path} as hdf5 or zarr. Is this the correct path to an NWB file?"
+    )
     
 def _s3_to_http(url: str) -> str:
     if url.startswith("s3://"):
