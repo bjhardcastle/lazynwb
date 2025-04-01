@@ -319,7 +319,7 @@ def get_metadata_df(
     ):
         paths = (nwb_path_or_paths,)
     else:
-        paths = tuple(nwb_path_or_paths) # type: ignore[assignment]
+        paths = tuple(nwb_path_or_paths)
 
     def _get_metadata_df_helper(nwb_path: npc_io.PathLike) -> dict[str, Any]:
         nwb = LazyNWB(nwb_path)

@@ -74,7 +74,7 @@ def get_df(
     ) or not isinstance(nwb_data_sources, Iterable):
         paths= (nwb_data_sources,)
     else:
-        paths = tuple(nwb_data_sources) # type: ignore[assignment]
+        paths = tuple(nwb_data_sources)
 
     if len(paths) == 1:  # don't use a pool for a single file
         return _get_df_helper(
