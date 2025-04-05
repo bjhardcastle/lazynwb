@@ -124,11 +124,7 @@ def get_df(
                 f"Error getting DataFrame for {npc_io.from_pathlike(future_to_path[future])}:"
             )
             raise
-    concat_results = {}
-    for result in results:
-        for key, value in result.items():
-            concat_results.setdefault(key, []).extend(value)
-    df = pd.DataFrame(concat_results)
+    df = pd.concat((pd.DataFrame(r) for r in results), ignore_index=True)
     logger.debug(
         f"created {table_path!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
     )
