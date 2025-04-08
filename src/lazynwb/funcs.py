@@ -68,6 +68,8 @@ def get_df(
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
+    raise_on_missing: bool = False,
+    suppress_errors: bool = False,
 ) -> pd.DataFrame:
     t0 = time.time()
 
@@ -120,11 +122,22 @@ def get_df(
     for future in futures:
         try:
             results.append(future.result())
-        except:
-            logger.exception(
-                f"Error getting DataFrame for {npc_io.from_pathlike(future_to_path[future])}:"
-            )
-            raise
+        except InternalPathError:
+            if raise_on_missing:
+                raise
+            else:
+                logger.warning(
+                    f"Table {table_path!r} not found in {npc_io.from_pathlike(future_to_path[future])}"
+                )
+                continue
+        except Exception:
+            if not suppress_errors:
+                raise
+            else:
+                logger.exception(
+                    f"Error getting DataFrame for {npc_io.from_pathlike(future_to_path[future])}:"
+                )
+                continue
     df = pd.concat((pd.DataFrame(r) for r in results), ignore_index=True)
     logger.debug(
         f"created {table_path!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
