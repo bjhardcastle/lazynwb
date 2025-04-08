@@ -496,7 +496,7 @@ class TimeSeries:
             raise AttributeError(f"{self.path} has no data: use event timestamps alone")
 
     @property
-    def timestamps(self) -> npt.NDArray[np.float64]:
+    def timestamps(self) -> h5py.Dataset | zarr.Array:
         try:
             return self.file[f"{self.path}/timestamps"]
         except KeyError:
@@ -553,7 +553,10 @@ class TimeSeries:
 
     @property
     def timestamps_unit(self) -> str | None:
-        return self.file[self.path].attrs.get("timestamps_unit", None)
+        try:
+            return self.file[self.path].attrs["timestamps_unit"]
+        except KeyError:
+            return self.timestamps.attrs.get("unit", None)
 
     @property
     def unit(self):
