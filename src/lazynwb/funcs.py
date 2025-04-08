@@ -563,7 +563,7 @@ class TimeSeries:
 def get_timeseries(
     nwb_path_or_accessor: npc_io.PathLike,
     search_term: str | None = None,
-    match_any: Literal[True] = True,
+    match_all: Literal[True] = True,
 ) -> dict[str, TimeSeries]:
     ...
     
@@ -571,28 +571,30 @@ def get_timeseries(
 def get_timeseries(
     nwb_path_or_accessor: npc_io.PathLike,
     search_term: str,
-    match_any: Literal[False] = False,
+    match_all: Literal[False] = False,
 ) -> TimeSeries:
     ...
     
 def get_timeseries(
     nwb_path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
     search_term: str | None = None,
-    match_any: bool = False,
+    match_all: bool = False,
 ) -> dict[str, TimeSeries] | TimeSeries:
-    if not (search_term or match_any):
+    if not (search_term or match_all):
         raise ValueError(
-            "Either search_term or match_any must be specified"
+            "Either `search_term` must be specified or `match_all` must be set to True"
         )
     if isinstance(nwb_path_or_accessor, lazynwb.file_io.FileAccessor):
         file = nwb_path_or_accessor
     else:
-        file = lazynwb.file_io.FileAccessor(nwb_path_or_accessor)  # type: ignore[assignment]
+        file = lazynwb.file_io.FileAccessor(nwb_path_or_accessor)
     
     def _format(name: str) -> str:
         return name.removesuffix("/data").removesuffix("/timestamps")
     
-    if match_any:
+    if not match_all and search_term and search_term in file:
+        return TimeSeries(file=file, path=_format(search_term))
+    else:
         path_to_accessor = {
             _format(k): TimeSeries(file=file, path=_format(k))
             for k in _get_internal_file_paths(file._accessor)
@@ -601,10 +603,13 @@ def get_timeseries(
             # regular timeseries will be a dir with /data and optional /timestamps
             # eventseries will be a dir with /timestamps only
         }
-        return path_to_accessor
-    else:
-        assert search_term is not None # for mypy
-        return TimeSeries(file=file, path=_format(search_term))
+        if match_all:
+            return path_to_accessor
+        if len(path_to_accessor) > 1:
+            logger.warning(
+                f"Found multiple timeseries matching {search_term!r}: {list(path_to_accessor.keys())} - returning first"
+            )
+        return next(iter(path_to_accessor.values()))
 
 if __name__ == "__main__":
     from npc_io import testmod
