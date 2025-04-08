@@ -585,29 +585,26 @@ def get_timeseries(
             "Either search_term or match_any must be specified"
         )
     if isinstance(nwb_path_or_accessor, lazynwb.file_io.FileAccessor):
-        context = contextlib.nullcontext(nwb_path_or_accessor)
+        file = nwb_path_or_accessor
     else:
-        context = lazynwb.file_io.FileAccessor(nwb_path_or_accessor)  # type: ignore[assignment]
+        file = lazynwb.file_io.FileAccessor(nwb_path_or_accessor)  # type: ignore[assignment]
     
     def _format(name: str) -> str:
         return name.removesuffix("/data").removesuffix("/timestamps")
     
     if match_any:
-        with context as file:
-            path_to_accessor = {
-                _format(k): TimeSeries(file=file, path=_format(k))
-                for k in _get_internal_file_paths(file._accessor)
-                if k.split("/")[-1] in ("data", "timestamps")
-                and (not search_term or search_term in k)
-                # regular timeseries will be a dir with /data and optional /timestamps
-                # eventseries will be a dir with /timestamps only
-            }
-            return path_to_accessor
+        path_to_accessor = {
+            _format(k): TimeSeries(file=file, path=_format(k))
+            for k in _get_internal_file_paths(file._accessor)
+            if k.split("/")[-1] in ("data", "timestamps")
+            and (not search_term or search_term in k)
+            # regular timeseries will be a dir with /data and optional /timestamps
+            # eventseries will be a dir with /timestamps only
+        }
+        return path_to_accessor
     else:
         assert search_term is not None # for mypy
-
-        with context as file:
-            return TimeSeries(file=file, path=_format(search_term))
+        return TimeSeries(file=file, path=_format(search_term))
 
 if __name__ == "__main__":
     from npc_io import testmod
