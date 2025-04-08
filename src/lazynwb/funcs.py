@@ -122,7 +122,7 @@ def get_df(
     for future in futures:
         try:
             results.append(future.result())
-        except InternalPathError:
+        except KeyError:
             if raise_on_missing:
                 raise
             else:
@@ -140,7 +140,7 @@ def get_df(
                 continue
     df = pd.concat((pd.DataFrame(r) for r in results), ignore_index=True)
     logger.debug(
-        f"created {table_path!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
+        f"Created {table_path!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
     )
     return df
 
