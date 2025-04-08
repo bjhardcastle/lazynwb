@@ -6,7 +6,8 @@ import dataclasses
 import logging
 import time
 from collections.abc import Iterable, Sequence
-from typing import Any
+from typing import Any, Literal
+import typing
 
 import h5py
 import npc_io
@@ -477,6 +478,8 @@ class TimeSeries:
         try:
             return self.file[f"{self.path}/data"]
         except KeyError:
+            if self.path not in self.file:
+                raise InternalPathError(f"{self.path} not found in file") from None
             raise AttributeError(f"{self.path} has no data: use event timestamps alone")
 
     @property
@@ -484,6 +487,8 @@ class TimeSeries:
         try:
             return self.file[f"{self.path}/timestamps"]
         except KeyError:
+            if self.path not in self.file:
+                raise InternalPathError(f"{self.path} not found in file") from None
             rate = self.rate
             starting_time = self.starting_time
             if rate is None or starting_time is None:
@@ -519,6 +524,8 @@ class TimeSeries:
         try:
             return self.file[f"{self.path}/starting_time"]
         except KeyError:
+            if self.path not in self.file:
+                raise InternalPathError(f"{self.path} not found in file") from None
             return None
 
     @property
@@ -533,36 +540,61 @@ class TimeSeries:
 
     @property
     def timestamps_unit(self) -> str | None:
-        return self.file[f"{self.path}"].attrs.get("timestamps_unit", None)
+        return self.file[self.path].attrs.get("timestamps_unit", None)
 
     @property
     def unit(self):
         return self.data.attrs.get("unit", None)
 
-
+@typing.overload
 def get_timeseries(
-    path_or_file: npc_io.PathLike | lazynwb.file_io.FileAccessor,
+    nwb_path_or_accessor: npc_io.PathLike,
     search_term: str | None = None,
-) -> dict[str, h5py.Dataset | zarr.Array]:
-    if isinstance(path_or_file, lazynwb.file_io.FileAccessor):
-        context = contextlib.nullcontext(path_or_file)
+    match_any: Literal[True] = True,
+) -> dict[str, TimeSeries]:
+    ...
+    
+@typing.overload
+def get_timeseries(
+    nwb_path_or_accessor: npc_io.PathLike,
+    search_term: str,
+    match_any: Literal[False] = False,
+) -> TimeSeries:
+    ...
+    
+def get_timeseries(
+    nwb_path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
+    search_term: str | None = None,
+    match_any: bool = False,
+) -> dict[str, TimeSeries] | TimeSeries:
+    if not (search_term or match_any):
+        raise ValueError(
+            "Either search_term or match_any must be specified"
+        )
+    if isinstance(nwb_path_or_accessor, lazynwb.file_io.FileAccessor):
+        context = contextlib.nullcontext(nwb_path_or_accessor)
     else:
-        context = lazynwb.file_io.FileAccessor(path_or_file)  # type: ignore[assignment]
-    with context as file:
+        context = lazynwb.file_io.FileAccessor(nwb_path_or_accessor)  # type: ignore[assignment]
+    
+    def _format(name: str) -> str:
+        return name.removesuffix("/data").removesuffix("/timestamps")
+    
+    if match_any:
+        with context as file:
+            path_to_accessor = {
+                _format(k): TimeSeries(file=file, path=_format(k))
+                for k in _get_internal_file_paths(file._accessor)
+                if k.split("/")[-1] in ("data", "timestamps")
+                and (not search_term or search_term in k)
+                # regular timeseries will be a dir with /data and optional /timestamps
+                # eventseries will be a dir with /timestamps only
+            }
+            return path_to_accessor
+    else:
+        assert search_term is not None # for mypy
 
-        def _format(name: str) -> str:
-            return name.removesuffix("/data").removesuffix("/timestamps")
-
-        path_to_accessor = {
-            _format(k): TimeSeries(file=file, path=_format(k))
-            for k in _get_internal_file_paths(file._accessor)
-            if k.split("/")[-1] in ("data", "timestamps")
-            and (not search_term or search_term in k)
-            # regular timeseries will be a dir with /data and optional /timestamps
-            # eventseries will be a dir with /timestamps only
-        }
-        return path_to_accessor
-
+        with context as file:
+            return TimeSeries(file=file, path=_format(search_term))
 
 if __name__ == "__main__":
     from npc_io import testmod
