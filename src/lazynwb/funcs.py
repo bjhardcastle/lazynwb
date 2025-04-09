@@ -190,8 +190,12 @@ def _get_table_data(
         matches = difflib.get_close_matches(table_path, path_to_accessor.keys(), n=1, cutoff=0.3)
         if not matches:
             raise KeyError(f"Table {table_path!r} not found in {file._path}")
-        logger.warning(f"Using {matches[0]!r} instead of {table_path!r}")
-        table_path = matches[0]
+        match_ = matches[0]
+        if table_path not in match_ or len([k for k in path_to_accessor if match_ in k]) > 1:
+            # only warn if there are multiple matches or if user-provided search term is not a
+            # substring of the match
+            logger.warning(f"Using {match_!r} instead of {table_path!r}")
+        table_path = match_
     column_accessors: dict[str, zarr.Array | h5py.Dataset] = (
         _get_table_column_accessors(
             file=file,
