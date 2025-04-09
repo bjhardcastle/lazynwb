@@ -66,7 +66,7 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]
 @typing.overload
 def get_df(
     nwb_data_sources: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
-    table_path: str,
+    search_term: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
@@ -79,7 +79,7 @@ def get_df(
 @typing.overload
 def get_df(
     nwb_data_sources: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
-    table_path: str,
+    search_term: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
@@ -91,7 +91,7 @@ def get_df(
 
 def get_df(
     nwb_data_sources: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
-    table_path: str,
+    search_term: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
@@ -114,7 +114,7 @@ def get_df(
         return frame_cls(
             _get_df_helper(
                 nwb_path=paths[0],
-                table_path=table_path,
+                search_term=search_term,
                 exclude_column_names=exclude_column_names,
                 exclude_array_columns=exclude_array_columns,
             )
@@ -135,7 +135,7 @@ def get_df(
         future = executor.submit(
             _get_df_helper,
             nwb_path=path,
-            table_path=table_path,
+            search_term=search_term,
             exclude_column_names=exclude_column_names,
             exclude_array_columns=exclude_array_columns,
         )
@@ -145,7 +145,7 @@ def get_df(
         futures = tqdm.tqdm(
             futures,
             total=len(future_to_path),
-            desc=f"Getting multi-NWB {table_path} table",
+            desc=f"Getting multi-NWB {search_term} table",
             unit="NWB",
             ncols=120,
         )
@@ -157,7 +157,7 @@ def get_df(
                 raise
             else:
                 logger.warning(
-                    f"Table {table_path!r} not found in {npc_io.from_pathlike(future_to_path[future])}"
+                    f"Table {search_term!r} not found in {npc_io.from_pathlike(future_to_path[future])}"
                 )
                 continue
         except Exception:
@@ -173,33 +173,33 @@ def get_df(
     else:
         df = pl.concat((pl.DataFrame(r) for r in results), how='diagonal_relaxed', rechunk=True)
     logger.debug(
-        f"Created {table_path!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
+        f"Created {search_term!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
     )
     return df
 
 
 def _get_table_data(
     file: lazynwb.file_io.FileAccessor,
-    table_path: str,
+    search_term: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
 ) -> dict[str, Any]:
     t0 = time.time()
-    if lazynwb.file_io.normalize_internal_file_path(table_path) not in file:
+    if lazynwb.file_io.normalize_internal_file_path(search_term) not in file:
         path_to_accessor = _get_internal_file_paths(file._accessor)
-        matches = difflib.get_close_matches(table_path, path_to_accessor.keys(), n=1, cutoff=0.3)
+        matches = difflib.get_close_matches(search_term, path_to_accessor.keys(), n=1, cutoff=0.3)
         if not matches:
-            raise KeyError(f"Table {table_path!r} not found in {file._path}")
+            raise KeyError(f"Table {search_term!r} not found in {file._path}")
         match_ = matches[0]
-        if table_path not in match_ or len([k for k in path_to_accessor if match_ in k]) > 1:
+        if search_term not in match_ or len([k for k in path_to_accessor if match_ in k]) > 1:
             # only warn if there are multiple matches or if user-provided search term is not a
             # substring of the match
-            logger.warning(f"Using {match_!r} instead of {table_path!r}")
-        table_path = match_
+            logger.warning(f"Using {match_!r} instead of {search_term!r}")
+        search_term = match_
     column_accessors: dict[str, zarr.Array | h5py.Dataset] = (
         _get_table_column_accessors(
             file=file,
-            table_path=table_path,
+            table_path=search_term,
             use_thread_pool=(
                 file._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.ZARR
             ),
@@ -228,7 +228,7 @@ def _get_table_data(
 
     column_data: dict[str, npt.NDArray | list[npt.NDArray]] = {}
     logger.debug(
-        f"materializing non-indexed columns for {file._path}/{table_path}: {non_indexed_column_names}"
+        f"materializing non-indexed columns for {file._path}/{search_term}: {non_indexed_column_names}"
     )
     for column_name in non_indexed_column_names:
         if (ndim := column_accessors[column_name].ndim) >= 2:
@@ -247,7 +247,7 @@ def _get_table_data(
             name for name in indexed_column_names if not name.endswith("_index")
         }
         logger.debug(
-            f"materializing indexed columns for {file._path}/{table_path}: {data_column_names}"
+            f"materializing indexed columns for {file._path}/{search_term}: {data_column_names}"
         )
         for column_name in data_column_names:
             column_data[column_name] = get_indexed_column_data(
@@ -256,7 +256,7 @@ def _get_table_data(
             )
     if not exclude_array_columns and multi_dim_column_names:
         logger.debug(
-            f"materializing multi-dimensional array columns for {file._path}/{table_path}: {multi_dim_column_names}"
+            f"materializing multi-dimensional array columns for {file._path}/{search_term}: {multi_dim_column_names}"
         )
         for column_name in multi_dim_column_names:
             column_data[column_name] = _format_multi_dim_column(
@@ -269,13 +269,13 @@ def _get_table_data(
     identifier_column_data = {
         NWB_PATH_COLUMN_NAME: [file._path.as_posix()] * column_length,
         TABLE_PATH_COLUMN_NAME: [
-            lazynwb.file_io.normalize_internal_file_path(table_path)
+            lazynwb.file_io.normalize_internal_file_path(search_term)
         ]
         * column_length,
         TABLE_INDEX_COLUMN_NAME: np.arange(column_length),
     }
     logger.debug(
-        f"fetched data for {file._path}/{table_path} in {time.time() - t0:.2f} s"
+        f"fetched data for {file._path}/{search_term} in {time.time() - t0:.2f} s"
     )
     return column_data | identifier_column_data
 
@@ -639,7 +639,7 @@ class TimeSeries:
 
 @typing.overload
 def get_timeseries(
-    nwb_path_or_accessor: npc_io.PathLike,
+    nwb_path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
     search_term: str | None = None,
     match_all: Literal[True] = True,
 ) -> dict[str, TimeSeries]:
@@ -647,7 +647,7 @@ def get_timeseries(
     
 @typing.overload
 def get_timeseries(
-    nwb_path_or_accessor: npc_io.PathLike,
+    nwb_path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
     search_term: str,
     match_all: Literal[False] = False,
 ) -> TimeSeries:
