@@ -864,6 +864,7 @@ def get_spike_times_in_intervals(
     keep_only_necessary_cols: bool = False,
     use_process_pool: bool = True,
     disable_progress: bool = False,
+    as_polars: bool = False,
 ) -> pl.DataFrame:
     """"""
     if isinstance(filtered_units_df, pl.LazyFrame):
@@ -941,9 +942,9 @@ def get_spike_times_in_intervals(
             else:
                 _handle_result(result)
     if keep_only_necessary_cols:
-        return pl.concat(results, how='diagonal_relaxed').drop(pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME), strict=False) # table paths is ambiguous now we've joined rows from units and trials
+        df = pl.concat(results, how='diagonal_relaxed').drop(pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME), strict=False) # table paths is ambiguous now we've joined rows from units and trials
     else:
-        return (
+        df = (
             pl.concat(results, how='diagonal_relaxed')
             .join(
                 pl.DataFrame(filtered_units_df),
@@ -953,6 +954,10 @@ def get_spike_times_in_intervals(
             )
             .drop(pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME), strict=False) # table paths is ambiguous now we've joined rows from units and trials
         )    
+    if as_polars:
+        return df
+    else:
+        return df.to_pandas()
 
 if __name__ == "__main__":
     from npc_io import testmod
