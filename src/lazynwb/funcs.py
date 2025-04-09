@@ -924,7 +924,7 @@ def get_spike_times_in_intervals(
                 keep_only_necessary_cols=keep_only_necessary_cols,
             )
             future_to_nwb_path[future] = nwb_path
-        iterable = concurrent.futures.as_completed(future_to_nwb_path)
+        iterable = tuple(concurrent.futures.as_completed(future_to_nwb_path))
         if not disable_progress:
             iterable = tqdm.tqdm(
                 iterable,
