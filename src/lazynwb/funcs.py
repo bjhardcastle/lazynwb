@@ -4,9 +4,11 @@ import concurrent.futures
 import contextlib
 import dataclasses
 import logging
+import multiprocessing
+import os
 import time
 from collections.abc import Iterable, Sequence
-from typing import Any, Literal
+from typing import Any, Generator, Literal, TypeVar
 import typing
 
 import h5py
@@ -14,12 +16,16 @@ import npc_io
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+import polars as pl
+import polars._typing
 import tqdm
 import zarr
 
 import lazynwb.file_io
 
 pd.options.mode.copy_on_write = True
+
+FrameType = TypeVar("FrameType", pl.DataFrame, pl.LazyFrame, pd.DataFrame)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +47,7 @@ def get_threadpool_executor() -> concurrent.futures.ThreadPoolExecutor:
 def get_processpool_executor() -> concurrent.futures.ProcessPoolExecutor:
     global process_pool_executor
     if process_pool_executor is None:
-        process_pool_executor = concurrent.futures.ProcessPoolExecutor()
+        process_pool_executor = concurrent.futures.ProcessPoolExecutor(mp_context=multiprocessing.get_context('spawn') if os.name == 'posix' else None)
     return process_pool_executor
 
 
@@ -56,13 +62,9 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]
             **get_df_kwargs,
         )
 
-
+@typing.overload
 def get_df(
-    nwb_data_sources: (
-        npc_io.PathLike
-        | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor]
-        | lazynwb.file_io.FileAccessor
-    ),
+    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor] | lazynwb.file_io.FileAccessor,
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -70,7 +72,33 @@ def get_df(
     disable_progress: bool = False,
     raise_on_missing: bool = False,
     suppress_errors: bool = False,
-) -> pd.DataFrame:
+    as_polars: Literal[True] = True,
+) -> pl.DataFrame: ...
+
+@typing.overload
+def get_df(
+    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor] | lazynwb.file_io.FileAccessor,
+    table_path: str,
+    exclude_column_names: str | Iterable[str] | None = None,
+    exclude_array_columns: bool = True,
+    use_process_pool: bool = False,
+    disable_progress: bool = False,
+    raise_on_missing: bool = False,
+    suppress_errors: bool = False,
+    as_polars: Literal[False] = False,
+) -> pd.DataFrame: ...
+
+def get_df(
+    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor] | lazynwb.file_io.FileAccessor,
+    table_path: str,
+    exclude_column_names: str | Iterable[str] | None = None,
+    exclude_array_columns: bool = True,
+    use_process_pool: bool = False,
+    disable_progress: bool = False,
+    raise_on_missing: bool = False,
+    suppress_errors: bool = False,
+    as_polars: bool = False,
+) -> pd.DataFrame | pl.DataFrame:
     t0 = time.time()
 
     if isinstance(
@@ -81,7 +109,8 @@ def get_df(
         paths = tuple(nwb_data_sources)
 
     if len(paths) == 1:  # don't use a pool for a single file
-        return pd.DataFrame(
+        frame_cls = pl.DataFrame if as_polars else pd.DataFrame
+        return frame_cls(
             _get_df_helper(
                 nwb_path=paths[0],
                 table_path=table_path,
@@ -117,7 +146,7 @@ def get_df(
             total=len(future_to_path),
             desc=f"Getting multi-NWB {table_path} table",
             unit="NWB",
-            ncols=80,
+            ncols=120,
         )
     for future in futures:
         try:
@@ -138,7 +167,10 @@ def get_df(
                     f"Error getting DataFrame for {npc_io.from_pathlike(future_to_path[future])}:"
                 )
                 continue
-    df = pd.concat((pd.DataFrame(r) for r in results), ignore_index=True)
+    if not as_polars:
+        df = pd.concat((pd.DataFrame(r) for r in results), ignore_index=True)
+    else:
+        df = pl.concat((pl.DataFrame(r) for r in results), how='diagonal_relaxed', rechunk=True)
     logger.debug(
         f"Created {table_path!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
     )
@@ -365,21 +397,46 @@ def _format_multi_dim_column(
         return column_data
     return list(column_data)
 
+def get_table_path(df: FrameType, assert_unique: bool = True) -> str:
+    if isinstance(df, pl.LazyFrame):
+        df = df.select(TABLE_PATH_COLUMN_NAME).collect() # type: ignore[assignment]
+    assert not isinstance(df, pl.LazyFrame)
+    series = df[TABLE_PATH_COLUMN_NAME]
+    if assert_unique:
+        assert len(set(series)) == 1, f"multiple table paths found: {series.unique()}"
+    return series[0]
 
+def get_table_column(df: FrameType, column_name: str) -> list[Any]:
+    if isinstance(df, pl.LazyFrame):
+        df = df.select(column_name).collect() # type: ignore[assignment]
+    assert not isinstance(df, pl.LazyFrame)
+    if column_name not in df.columns:
+        raise KeyError(f"Column {column_name!r} not found in DataFrame")
+    if isinstance(df, pd.DataFrame):
+        return df[column_name].values.tolist()
+    else:
+        return df[column_name].to_list()
+    
 def merge_array_column(
-    df: pd.DataFrame,
+    df: FrameType,
     column_name: str,
     missing_ok: bool = True,
-) -> pd.DataFrame:
+) -> FrameType:
     column_data: list[pd.DataFrame] = []
+    if isinstance(df, pl.LazyFrame):
+        df = df.select(column_name).collect() # type: ignore[assignment]
+    assert not isinstance(df, pl.LazyFrame)
     future_to_path = {}
-    for nwb_path, session_df in df.groupby(NWB_PATH_COLUMN_NAME):
+    for nwb_path, session_df in (df.groupby(NWB_PATH_COLUMN_NAME) if isinstance(df, pd.DataFrame) else df.group_by(NWB_PATH_COLUMN_NAME)):
+        if isinstance(nwb_path, tuple):
+            nwb_path = nwb_path[0]
+        assert isinstance(nwb_path, str)
         future = get_threadpool_executor().submit(
             _indexed_column_helper,
             nwb_path=nwb_path,
-            table_path=session_df[TABLE_PATH_COLUMN_NAME].iloc[0],
+            table_path=get_table_path(session_df, assert_unique=True),
             column_name=column_name,
-            table_row_indices=session_df[TABLE_INDEX_COLUMN_NAME].values.tolist(),
+            table_row_indices=get_table_column(session_df, TABLE_INDEX_COLUMN_NAME),
         )
         future_to_path[future] = nwb_path
     missing_column_already_warned = False
@@ -406,12 +463,18 @@ def merge_array_column(
     if not column_data:
         logger.debug(f"no {column_name!r} data found in any file")
         return df
-    return df.merge(
-        pd.concat(column_data),
-        how="left",
-        on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
-    ).set_index(df[TABLE_INDEX_COLUMN_NAME].values)
-
+    if isinstance(df, pd.DataFrame):
+        return df.merge(
+            pd.concat(column_data),
+            how="left",
+            on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
+        ).set_index(df[TABLE_INDEX_COLUMN_NAME].values)
+    else:
+        return df.join(
+            pl.concat((pl.from_pandas(d) for d in column_data), how='diagonal_relaxed'),
+            on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
+            how="left",
+        )
 
 def _get_table_column_accessors(
     file: lazynwb.file_io.FileAccessor,
@@ -613,6 +676,270 @@ def get_timeseries(
                 f"Found multiple timeseries matching {search_term!r}: {list(path_to_accessor.keys())} - returning first"
             )
         return next(iter(path_to_accessor.values()))
+
+
+def insert_is_observed(
+    intervals_frame: polars._typing.FrameType,
+    units_frame: polars._typing.FrameType,
+    col_name: str = "is_observed",
+    unit_id_col: str = "unit_id",
+) -> polars._typing.FrameType:
+
+    if isinstance(intervals_frame, pl.LazyFrame):
+        intervals_lf = intervals_frame
+    elif isinstance(intervals_frame, pd.DataFrame):
+        intervals_lf = pl.from_pandas(intervals_frame).lazy()
+    else:
+        intervals_lf = intervals_frame.lazy()
+
+    if isinstance(units_frame, pl.LazyFrame):
+        units_lf = units_frame
+    elif isinstance(units_frame, pd.DataFrame):
+        units_lf = pl.from_pandas(units_frame).lazy()
+    else:
+        units_lf = units_frame.lazy()
+
+    units_schema = units_lf.collect_schema()
+    if unit_id_col not in units_schema:
+        raise ValueError(
+            f"units_frame does not contain {unit_id_col!r} column: can be customized by passing unit_id_col"
+        )
+    if "obs_intervals" not in units_schema:
+        raise ValueError("units_frame must contain 'obs_intervals' column")
+
+    unit_ids = units_lf.select(unit_id_col).collect().get_column(unit_id_col).unique()
+    intervals_schema = intervals_lf.collect_schema()
+    if unit_id_col not in intervals_schema:
+        if len(unit_ids) > 1:
+            raise ValueError(
+                f"units_frame contains multiple units, but intervals_frame does not contain {unit_id_col!r} column to perform join"
+            )
+        elif len(unit_ids) == 0:
+            raise ValueError(
+                f"units_frame contains no unit ids in {unit_id_col=} column"
+            )
+        else:
+            intervals_lf = intervals_lf.with_columns(
+                pl.lit(unit_ids[0]).alias(unit_id_col)
+            )
+    if not all(c in intervals_schema for c in ("start_time", "stop_time")):
+        raise ValueError(
+            "intervals_frame must contain 'start_time' and 'stop_time' columns"
+        )
+
+    if units_schema["obs_intervals"] in (
+        pl.List(pl.List(pl.Float64())),
+        pl.List(pl.List(pl.Int64())),
+        pl.List(pl.List(pl.Null())),
+    ):
+        logger.info("Converting 'obs_intervals' column to list of lists")
+        units_lf = units_lf.explode("obs_intervals")
+    assert (type_ := units_lf.collect_schema()["obs_intervals"]) == pl.List(
+        pl.Float64
+    ), f"Expected exploded obs_intervals to be pl.List(f64), got {type_}"
+    intervals_lf = (
+        intervals_lf.join(
+            units_lf.select(unit_id_col, "obs_intervals"), on=unit_id_col, how="left"
+        )
+        .with_columns(
+            pl.when(
+                pl.col("obs_intervals").list.get(0).gt(pl.col("start_time"))
+                | pl.col("obs_intervals").list.get(1).lt(pl.col("stop_time")),
+            )
+            .then(pl.lit(False))
+            .otherwise(pl.lit(True))
+            .alias(col_name),
+        )
+        .group_by("unit_id", "start_time")
+        .agg(
+            pl.all().exclude("obs_intervals", col_name).first(),
+            pl.col(col_name).any(),
+        )
+    )
+    if isinstance(intervals_frame, pl.LazyFrame):
+        return intervals_lf
+    return intervals_lf.collect()
+
+def _spikes_times_in_intervals_helper(
+    nwb_path: str,
+    col_name_to_intervals: dict[str, tuple[pl.Expr, pl.Expr]],
+    trials_table_path: str,
+    units_table_indices: Sequence[int],
+    apply_obs_intervals: bool,
+    as_counts: bool,
+    keep_only_necessary_cols: bool,
+) -> dict[str, list[int | list[float]]]:
+    units_df = (
+        get_df(nwb_path, table_path='units', as_polars=True)
+        #TODO speedup by only getting rows in initial get_df for units requested 
+        .filter(pl.col(TABLE_INDEX_COLUMN_NAME).is_in(units_table_indices))
+        .pipe(merge_array_column, column_name='spike_times')
+    )
+
+    trials_df = get_df(nwb_path, table_path=trials_table_path, as_polars=True)
+    temp_col_prefix = "__temp_interval"
+    for col_name, (start, end) in col_name_to_intervals.items():
+        trials_df = (
+            trials_df
+            .with_columns(
+                pl.concat_list(start, end).alias(f"{temp_col_prefix}_{col_name}"),
+            )
+        )
+    trials_id_col = f"{TABLE_INDEX_COLUMN_NAME}_trials"
+    units_id_col = f"{TABLE_INDEX_COLUMN_NAME}_units"
+    results = {
+        units_id_col: [],
+        trials_id_col: [],
+    }
+    for col_name in col_name_to_intervals.keys():
+        results[col_name] = []
+    results[trials_id_col].extend(trials_df[TABLE_INDEX_COLUMN_NAME].to_list() * len(units_df))
+    
+    for row in units_df.iter_rows(named=True):
+        results[units_id_col].extend([row[TABLE_INDEX_COLUMN_NAME]] * len(trials_df))
+        
+        for col_name, (start, end) in col_name_to_intervals.items():
+            # get spike times with start:end interval for each row of the trials table
+            spike_times = row['spike_times']
+            spikes_in_intervals: list[float | list[float]] = []
+            for a, b in np.searchsorted(spike_times, trials_df[f"{temp_col_prefix}_{col_name}"].to_list()):
+                spike_times_in_interval = spike_times[a:b]
+                #! spikes coincident with end of interval are not included
+                if as_counts:
+                    spikes_in_intervals.append(len(spike_times_in_interval))
+                else:
+                    spikes_in_intervals.append(spike_times_in_interval)
+            results[col_name].extend(spikes_in_intervals)
+    
+    if keep_only_necessary_cols and not apply_obs_intervals:
+        return results
+        
+    results_df = (
+        pl.DataFrame(results)
+        .join(
+            other=trials_df.drop(pl.selectors.starts_with(temp_col_prefix)),
+            left_on=trials_id_col,
+            right_on=TABLE_INDEX_COLUMN_NAME,
+            how='inner',
+        )
+    )
+    
+    if apply_obs_intervals:
+        results_df = (
+            insert_is_observed(
+                intervals_frame=results_df,
+                units_frame=units_df.drop('spike_times').pipe(merge_array_column, column_name='obs_intervals'),
+            )
+            .with_columns(
+                *[
+                    pl.when(pl.col('is_observed').not_()).then(pl.lit(None)).otherwise(pl.col(col_name)).alias(col_name)
+                    for col_name in col_name_to_intervals
+                ]
+            )
+        )
+        if keep_only_necessary_cols:
+            results_df = results_df.drop(pl.all().exclude(units_id_col, trials_id_col, *col_name_to_intervals.keys()))
+
+    return results_df.to_dict(as_series=False)
+    
+def get_spike_times_in_intervals(
+    filtered_units_df: FrameType,
+    intervals: dict[str, tuple[pl.Expr, pl.Expr]],
+    trials_frame: str | polars._typing.FrameType | pd.DataFrame = '/intervals/trials',
+    apply_obs_intervals: bool = True,
+    as_counts: bool = False,
+    keep_only_necessary_cols: bool = False,
+    use_process_pool: bool = True,
+    disable_progress: bool = False,
+) -> pl.DataFrame:
+    """"""
+    if isinstance(filtered_units_df, pl.LazyFrame):
+        units_df = filtered_units_df.collect()
+    elif isinstance(filtered_units_df, pd.DataFrame):
+        units_df = pl.from_pandas(filtered_units_df)
+    else:
+        units_df = filtered_units_df
+    n_sessions = units_df[NWB_PATH_COLUMN_NAME].n_unique()
+    
+    if not isinstance(trials_frame, str):
+        trials_frame = pl.DataFrame(trials_frame)
+    
+    def _get_trials_table_path(nwb_path, trials_frame) -> str:
+        if isinstance(trials_frame, str):
+            return trials_frame
+        return get_table_path(trials_frame.filter(pl.col(NWB_PATH_COLUMN_NAME) == nwb_path))
+    
+    results: list[pl.DataFrame] = []
+    
+    def _handle_result(result):
+        if not all(len(v) == len(result[f"{TABLE_INDEX_COLUMN_NAME}_trials"]) for v in result.values()):
+            return
+        results.append(pl.DataFrame(result))    
+        
+    if n_sessions == 1 or not use_process_pool:
+        iterable = units_df.group_by(NWB_PATH_COLUMN_NAME)
+        if not disable_progress:
+            iterable = tqdm.tqdm(
+                iterable,
+                desc="Getting spike times in intervals",
+                unit="NWB",
+                ncols=120,
+            )
+        for (nwb_path, *_), df in iterable:
+            result = _spikes_times_in_intervals_helper(
+                nwb_path=str(nwb_path),
+                col_name_to_intervals=intervals,
+                trials_table_path=_get_trials_table_path(nwb_path, trials_frame),
+                units_table_indices=df[TABLE_INDEX_COLUMN_NAME].to_list(),
+                apply_obs_intervals=apply_obs_intervals,
+                as_counts=as_counts,
+                keep_only_necessary_cols=keep_only_necessary_cols,
+            )
+            _handle_result(result)
+    else:
+        future_to_nwb_path = {}
+        for (nwb_path, *_), df in units_df.group_by(NWB_PATH_COLUMN_NAME):
+            future = get_processpool_executor().submit(
+                _spikes_times_in_intervals_helper,
+                nwb_path=nwb_path,
+                col_name_to_intervals=intervals,
+                trials_table_path=_get_trials_table_path(nwb_path, trials_frame),
+                units_table_indices=df[TABLE_INDEX_COLUMN_NAME].to_list(),
+                apply_obs_intervals=apply_obs_intervals,
+                as_counts=as_counts,
+                keep_only_necessary_cols=keep_only_necessary_cols,
+            )
+            future_to_nwb_path[future] = nwb_path
+        iterable = concurrent.futures.as_completed(future_to_nwb_path)
+        if not disable_progress:
+            iterable = tqdm.tqdm(
+                iterable,
+                desc="Getting spike times in intervals",
+                unit="NWB",
+                ncols=120,
+            )
+        for future in iterable:
+            try:
+                result = future.result()
+            except Exception as exc:
+                logger.error(
+                    f"error getting spike times for {npc_io.from_pathlike(future_to_nwb_path[future])}: {exc!r}"
+                )
+            else:
+                _handle_result(result)
+    if keep_only_necessary_cols:
+        return pl.concat(results, how='diagonal_relaxed').drop(pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME), strict=False) # table paths is ambiguous now we've joined rows from units and trials
+    else:
+        return (
+            pl.concat(results, how='diagonal_relaxed')
+            .join(
+                pl.DataFrame(filtered_units_df),
+                left_on=[f"{TABLE_INDEX_COLUMN_NAME}_units", NWB_PATH_COLUMN_NAME],
+                right_on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
+                how='inner',
+            )
+            .drop(pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME), strict=False) # table paths is ambiguous now we've joined rows from units and trials
+        )    
 
 if __name__ == "__main__":
     from npc_io import testmod
