@@ -721,10 +721,10 @@ def insert_is_observed(
             .lazy()
         )
         
+    units_lf = units_lf.rename({TABLE_INDEX_COLUMN_NAME: f"{TABLE_INDEX_COLUMN_NAME}_units"}, strict=False)
     units_schema = units_lf.collect_schema()
     if "obs_intervals" not in units_schema:
         raise ColumnError("units frame does not contain 'obs_intervals' column")
-    units_lf = units_lf.rename({TABLE_INDEX_COLUMN_NAME: f"{TABLE_INDEX_COLUMN_NAME}_units"}, strict=False)
     unit_table_index_col = f"{TABLE_INDEX_COLUMN_NAME}_units"
     if unit_table_index_col not in units_schema:
         raise ColumnError(f"units frame does not contain a row index column to link rows to original table position (e.g {TABLE_INDEX_COLUMN_NAME!r})")
@@ -759,7 +759,7 @@ def insert_is_observed(
             .otherwise(pl.lit(True))
             .alias(col_name),
         )
-        .group_by("unit_id", "start_time")
+        .group_by(unit_table_index_col, NWB_PATH_COLUMN_NAME, "start_time")
         .agg(
             pl.all().exclude("obs_intervals", col_name).first(),
             pl.col(col_name).any(),
