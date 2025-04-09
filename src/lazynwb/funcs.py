@@ -64,7 +64,7 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]
 
 @typing.overload
 def get_df(
-    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor] | lazynwb.file_io.FileAccessor,
+    nwb_data_sources: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -77,7 +77,7 @@ def get_df(
 
 @typing.overload
 def get_df(
-    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor] | lazynwb.file_io.FileAccessor,
+    nwb_data_sources: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -89,7 +89,7 @@ def get_df(
 ) -> pd.DataFrame: ...
 
 def get_df(
-    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor] | lazynwb.file_io.FileAccessor,
+    nwb_data_sources: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
     table_path: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -680,9 +680,8 @@ def get_timeseries(
 
 def insert_is_observed(
     intervals_frame: polars._typing.FrameType,
-    units_frame: polars._typing.FrameType,
+    units_frame: polars._typing.FrameType | None = None,
     col_name: str = "is_observed",
-    unit_id_col: str = "unit_id",
 ) -> polars._typing.FrameType:
 
     if isinstance(intervals_frame, pl.LazyFrame):
@@ -691,40 +690,42 @@ def insert_is_observed(
         intervals_lf = pl.from_pandas(intervals_frame).lazy()
     else:
         intervals_lf = intervals_frame.lazy()
+    intervals_schema = intervals_lf.collect_schema()
+    if not all(c in intervals_schema for c in ("start_time", "stop_time")):
+        raise ColumnError(
+            "intervals_frame must contain 'start_time' and 'stop_time' columns"
+        )
 
     if isinstance(units_frame, pl.LazyFrame):
         units_lf = units_frame
     elif isinstance(units_frame, pd.DataFrame):
         units_lf = pl.from_pandas(units_frame).lazy()
-    else:
+    elif isinstance(units_frame, pl.DataFrame):
         units_lf = units_frame.lazy()
-
-    units_schema = units_lf.collect_schema()
-    if unit_id_col not in units_schema:
-        raise ValueError(
-            f"units_frame does not contain {unit_id_col!r} column: can be customized by passing unit_id_col"
+    else:
+        units_lf = (
+            get_df(
+                nwb_data_sources=intervals_lf.select(NWB_PATH_COLUMN_NAME).collect()[NWB_PATH_COLUMN_NAME].unique(),
+                table_path='units',
+                as_polars=True,
+            )
+            .pipe(merge_array_column, column_name='obs_intervals')
+            .lazy()
         )
+        
+    units_schema = units_lf.collect_schema()
     if "obs_intervals" not in units_schema:
-        raise ValueError("units_frame must contain 'obs_intervals' column")
-
-    unit_ids = units_lf.select(unit_id_col).collect().get_column(unit_id_col).unique()
+        raise ColumnError("units frame does not contain 'obs_intervals' column")
+    units_lf = units_lf.rename({TABLE_INDEX_COLUMN_NAME: f"{TABLE_INDEX_COLUMN_NAME}_units"}, strict=False)
+    unit_table_index_col = f"{TABLE_INDEX_COLUMN_NAME}_units"
+    if unit_table_index_col not in units_schema:
+        raise ColumnError(f"units frame does not contain a row index column to link rows to original table position (e.g {TABLE_INDEX_COLUMN_NAME!r})")
+    unique_units = units_lf.select(unit_table_index_col, NWB_PATH_COLUMN_NAME).collect().unique()
     intervals_schema = intervals_lf.collect_schema()
-    if unit_id_col not in intervals_schema:
-        if len(unit_ids) > 1:
-            raise ValueError(
-                f"units_frame contains multiple units, but intervals_frame does not contain {unit_id_col!r} column to perform join"
-            )
-        elif len(unit_ids) == 0:
-            raise ValueError(
-                f"units_frame contains no unit ids in {unit_id_col=} column"
-            )
-        else:
-            intervals_lf = intervals_lf.with_columns(
-                pl.lit(unit_ids[0]).alias(unit_id_col)
-            )
-    if not all(c in intervals_schema for c in ("start_time", "stop_time")):
+    unique_intervals = intervals_lf.select(unit_table_index_col, NWB_PATH_COLUMN_NAME).collect().unique()
+    if not all(d in unique_units.to_dicts() for d in unique_intervals.to_dicts()):
         raise ValueError(
-            "intervals_frame must contain 'start_time' and 'stop_time' columns"
+            f"units frame does not contain all unique units in intervals frame"
         )
 
     if units_schema["obs_intervals"] in (
@@ -739,7 +740,7 @@ def insert_is_observed(
     ), f"Expected exploded obs_intervals to be pl.List(f64), got {type_}"
     intervals_lf = (
         intervals_lf.join(
-            units_lf.select(unit_id_col, "obs_intervals"), on=unit_id_col, how="left"
+            units_lf.select(unit_table_index_col, "obs_intervals"), on=unit_table_index_col, how="left"
         )
         .with_columns(
             pl.when(
@@ -787,7 +788,7 @@ def _spikes_times_in_intervals_helper(
         )
     trials_id_col = f"{TABLE_INDEX_COLUMN_NAME}_trials"
     units_id_col = f"{TABLE_INDEX_COLUMN_NAME}_units"
-    results = {
+    results: dict[str, list] = {
         units_id_col: [],
         trials_id_col: [],
     }
