@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import dataclasses
+import difflib
 import logging
 import multiprocessing
 import os
@@ -184,6 +185,13 @@ def _get_table_data(
     exclude_array_columns: bool = True,
 ) -> dict[str, Any]:
     t0 = time.time()
+    if lazynwb.file_io.normalize_internal_file_path(table_path) not in file:
+        path_to_accessor = _get_internal_file_paths(file._accessor)
+        matches = difflib.get_close_matches(table_path, path_to_accessor.keys(), n=1, cutoff=0.3)
+        if not matches:
+            raise KeyError(f"Table {table_path!r} not found in {file._path}")
+        logger.warning(f"Using {matches[0]!r} instead of {table_path!r}")
+        table_path = matches[0]
     column_accessors: dict[str, zarr.Array | h5py.Dataset] = (
         _get_table_column_accessors(
             file=file,
