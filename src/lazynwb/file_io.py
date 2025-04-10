@@ -163,15 +163,6 @@ class FileAccessor:
                 self._accessor.store.close()
 
 
-def normalize_internal_file_path(path: str) -> str:
-    """
-    Normalize the internal file path for an NWB file.
-
-    - add leading '/' if not present
-    """
-    return path if path.startswith("/") else f"/{path}"
-
-
 if __name__ == "__main__":
     from npc_io import testmod
 
