@@ -673,7 +673,9 @@ def insert_is_observed(
 def _spikes_times_in_intervals_helper(
     nwb_path: str,
     col_name_to_intervals: dict[str, tuple[pl.Expr, pl.Expr]],
-    trials_table_path: str,
+    intervals_table_path: str,
+    intervals_table_filter: str | pl.Expr | None,
+    intervals_table_row_indices: Sequence[int] | None,
     units_table_indices: Sequence[int],
     apply_obs_intervals: bool,
     as_counts: bool,
@@ -686,11 +688,30 @@ def _spikes_times_in_intervals_helper(
             merge_array_column, column_name="spike_times"
         )
     )
-
-    trials_df = get_df(nwb_path, search_term=trials_table_path, as_polars=True)
+    if isinstance(intervals_table_filter, str):
+        # pandas:
+        intervals_df = pl.from_pandas(
+            get_df(nwb_path, search_term=intervals_table_path, as_polars=False)
+            .query(intervals_table_filter)
+        )
+    elif isinstance(intervals_table_filter, pl.Expr):
+        intervals_df = (
+            get_df(nwb_path, search_term=intervals_table_path, as_polars=True)
+            .filter(intervals_table_filter)
+        )
+    elif intervals_table_row_indices is None:
+        intervals_df = get_df(
+            nwb_path, search_term=intervals_table_path, as_polars=True
+        )
+    else:
+        raise ValueError(f"`intervals_table_filter` must be str or pl.Expr or None, got {type(intervals_table_filter)}")
+        
+    if intervals_table_row_indices is not None:
+        intervals_df = intervals_df.filter(pl.col(TABLE_INDEX_COLUMN_NAME).is_in(intervals_table_row_indices))
+        
     temp_col_prefix = "__temp_interval"
     for col_name, (start, end) in col_name_to_intervals.items():
-        trials_df = trials_df.with_columns(
+        intervals_df = intervals_df.with_columns(
             pl.concat_list(start, end).alias(f"{temp_col_prefix}_{col_name}"),
         )
     trials_id_col = f"{TABLE_INDEX_COLUMN_NAME}_trials"
@@ -702,18 +723,18 @@ def _spikes_times_in_intervals_helper(
     for col_name in col_name_to_intervals.keys():
         results[col_name] = []
     results[trials_id_col].extend(
-        trials_df[TABLE_INDEX_COLUMN_NAME].to_list() * len(units_df)
+        intervals_df[TABLE_INDEX_COLUMN_NAME].to_list() * len(units_df)
     )
 
     for row in units_df.iter_rows(named=True):
-        results[units_id_col].extend([row[TABLE_INDEX_COLUMN_NAME]] * len(trials_df))
+        results[units_id_col].extend([row[TABLE_INDEX_COLUMN_NAME]] * len(intervals_df))
 
         for col_name, (start, end) in col_name_to_intervals.items():
             # get spike times with start:end interval for each row of the trials table
             spike_times = row["spike_times"]
             spikes_in_intervals: list[float | list[float]] = []
             for a, b in np.searchsorted(
-                spike_times, trials_df[f"{temp_col_prefix}_{col_name}"].to_list()
+                spike_times, intervals_df[f"{temp_col_prefix}_{col_name}"].to_list()
             ):
                 spike_times_in_interval = spike_times[a:b]
                 #! spikes coincident with end of interval are not included
@@ -727,7 +748,7 @@ def _spikes_times_in_intervals_helper(
         return results
 
     results_df = pl.DataFrame(results).join(
-        other=trials_df.drop(pl.selectors.starts_with(temp_col_prefix)),
+        other=intervals_df.drop(pl.selectors.starts_with(temp_col_prefix)),
         left_on=trials_id_col,
         right_on=TABLE_INDEX_COLUMN_NAME,
         how="inner",
@@ -755,9 +776,10 @@ def _spikes_times_in_intervals_helper(
 
 
 def get_spike_times_in_intervals(
-    filtered_units_df: FrameType,
+    units_df: FrameType,
     intervals: dict[str, tuple[pl.Expr, pl.Expr]],
-    trials_frame: str | polars._typing.FrameType | pd.DataFrame = "/intervals/trials",
+    intervals_df: str | polars._typing.FrameType | pd.DataFrame = "/intervals/trials",
+    intervals_df_filter: str | pl.Expr | None = None,
     apply_obs_intervals: bool = True,
     as_counts: bool = False,
     keep_only_necessary_cols: bool = False,
@@ -766,18 +788,22 @@ def get_spike_times_in_intervals(
     as_polars: bool = False,
 ) -> pl.DataFrame:
     """"""
-    if isinstance(filtered_units_df, pl.LazyFrame):
-        units_df = filtered_units_df.collect()
-    elif isinstance(filtered_units_df, pd.DataFrame):
-        units_df = pl.from_pandas(filtered_units_df)
+    if isinstance(units_df, pl.LazyFrame):
+        units_df = units_df.collect()
+    elif isinstance(units_df, pd.DataFrame):
+        units_df = pl.from_pandas(units_df)
     else:
-        units_df = filtered_units_df
+        units_df = units_df
+    assert not isinstance(units_df, pl.LazyFrame)
     n_sessions = units_df[NWB_PATH_COLUMN_NAME].n_unique()
 
-    if not isinstance(trials_frame, str):
-        trials_frame = pl.DataFrame(trials_frame)
+    if not isinstance(intervals_df, str):
+        intervals_df = pl.DataFrame(intervals_df)
+        intervals_df_row_indices = intervals_df[TABLE_INDEX_COLUMN_NAME].to_list()
+    else:
+        intervals_df_row_indices = None # all rows will be used when table fetched from NWB, but `filter` can be applied
 
-    def _get_trials_table_path(nwb_path, trials_frame) -> str:
+    def _get_intervals_table_path(nwb_path, trials_frame) -> str:
         if isinstance(trials_frame, str):
             return trials_frame
         assert isinstance(trials_frame, pl.DataFrame)
@@ -808,7 +834,9 @@ def get_spike_times_in_intervals(
             result = _spikes_times_in_intervals_helper(
                 nwb_path=str(nwb_path),
                 col_name_to_intervals=intervals,
-                trials_table_path=_get_trials_table_path(nwb_path, trials_frame),
+                intervals_table_path=_get_intervals_table_path(nwb_path, intervals_df),
+                intervals_table_filter=intervals_df_filter,
+                intervals_table_row_indices=intervals_df_row_indices,
                 units_table_indices=df[TABLE_INDEX_COLUMN_NAME].to_list(),
                 apply_obs_intervals=apply_obs_intervals,
                 as_counts=as_counts,
@@ -822,7 +850,9 @@ def get_spike_times_in_intervals(
                 _spikes_times_in_intervals_helper,
                 nwb_path=str(nwb_path),
                 col_name_to_intervals=intervals,
-                trials_table_path=_get_trials_table_path(nwb_path, trials_frame),
+                intervals_table_path=_get_intervals_table_path(nwb_path, intervals_df),
+                intervals_table_filter=intervals_df_filter,
+                intervals_table_row_indices=intervals_df_row_indices,
                 units_table_indices=df[TABLE_INDEX_COLUMN_NAME].to_list(),
                 apply_obs_intervals=apply_obs_intervals,
                 as_counts=as_counts,
@@ -854,7 +884,7 @@ def get_spike_times_in_intervals(
         df = (
             pl.concat(results, how="diagonal_relaxed")
             .join(
-                pl.DataFrame(filtered_units_df),
+                pl.DataFrame(units_df),
                 left_on=[f"{TABLE_INDEX_COLUMN_NAME}_units", NWB_PATH_COLUMN_NAME],
                 right_on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
                 how="inner",
