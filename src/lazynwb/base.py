@@ -133,23 +133,23 @@ class LazyNWB:
 
     @property
     def trials(self) -> pd.DataFrame:
-        return lazynwb.tables.get_df(self._file, table_path="/intervals/trials")
+        return lazynwb.tables.get_df(self._file, search_term="/intervals/trials")
 
     @property
     def epochs(self) -> pd.DataFrame:
-        return lazynwb.tables.get_df(self._file, table_path="/intervals/epochs")
+        return lazynwb.tables.get_df(self._file, search_term="/intervals/epochs")
 
     @property
     def electrodes(self) -> pd.DataFrame:
         return lazynwb.tables.get_df(
-            self._file, table_path="/general/extracellular_ephys/electrodes"
+            self._file, search_term="/general/extracellular_ephys/electrodes"
         )
 
     @property
     def units(self) -> pd.DataFrame:
         return lazynwb.tables.get_df(
             self._file,
-            table_path="/units",
+            search_term="/units",
             exclude_array_columns=True,
         ).pipe(lazynwb.tables.merge_array_column, "obs_intervals")
 

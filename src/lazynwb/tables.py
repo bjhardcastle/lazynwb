@@ -596,9 +596,9 @@ def insert_is_observed(
                 nwb_data_sources=intervals_lf.select(NWB_PATH_COLUMN_NAME)
                 .collect()[NWB_PATH_COLUMN_NAME]
                 .unique(),
-                table_path="units",
+                search_term="units",
                 as_polars=True,
-            )  # type: ignore[call-overload]
+            )
             .pipe(merge_array_column, column_name="obs_intervals")
             .lazy()
         )
@@ -676,14 +676,14 @@ def _spikes_times_in_intervals_helper(
     keep_only_necessary_cols: bool,
 ) -> dict[str, list[int | list[float]]]:
     units_df: pl.DataFrame = (
-        get_df(nwb_path, table_path="units", as_polars=True)  # type: ignore[call-overload]
+        get_df(nwb_path, search_term="units", as_polars=True)
         # TODO speedup by only getting rows in initial get_df for units requested
         .filter(pl.col(TABLE_INDEX_COLUMN_NAME).is_in(units_table_indices)).pipe(
             merge_array_column, column_name="spike_times"
         )
     )
 
-    trials_df = get_df(nwb_path, table_path=trials_table_path, as_polars=True)  # type: ignore[call-overload]
+    trials_df = get_df(nwb_path, search_term=trials_table_path, as_polars=True)
     temp_col_prefix = "__temp_interval"
     for col_name, (start, end) in col_name_to_intervals.items():
         trials_df = trials_df.with_columns(
