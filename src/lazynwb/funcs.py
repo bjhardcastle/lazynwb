@@ -65,20 +65,7 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]
 
 @typing.overload
 def get_df(
-    nwb_data_sources: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
-    search_term: str,
-    exclude_column_names: str | Iterable[str] | None = None,
-    exclude_array_columns: bool = True,
-    use_process_pool: bool = False,
-    disable_progress: bool = False,
-    raise_on_missing: bool = False,
-    suppress_errors: bool = False,
-    as_polars: Literal[True] = True,
-) -> pl.DataFrame: ...
-
-@typing.overload
-def get_df(
-    nwb_data_sources: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
+    nwb_data_sources: str | npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor],
     search_term: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -89,8 +76,21 @@ def get_df(
     as_polars: Literal[False] = False,
 ) -> pd.DataFrame: ...
 
+@typing.overload
 def get_df(
-    nwb_data_sources: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
+    nwb_data_sources: str | npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor],
+    search_term: str,
+    exclude_column_names: str | Iterable[str] | None = None,
+    exclude_array_columns: bool = True,
+    use_process_pool: bool = False,
+    disable_progress: bool = False,
+    raise_on_missing: bool = False,
+    suppress_errors: bool = False,
+    as_polars: Literal[True] = True,
+) -> pl.DataFrame: ...
+
+def get_df(
+    nwb_data_sources: str | npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor],
     search_term: str,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
