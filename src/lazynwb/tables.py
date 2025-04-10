@@ -130,7 +130,7 @@ def get_df(
         use_process_pool = False
 
     executor = (
-        get_processpool_executor() if use_process_pool else get_threadpool_executor()
+        lazynwb.utils.get_processpool_executor() if use_process_pool else lazynwb.utils.get_threadpool_executor()
     )
     future_to_path = {}
     results: list[dict] = []
@@ -454,7 +454,7 @@ def merge_array_column(
         if isinstance(nwb_path, tuple):
             nwb_path = nwb_path[0]
         assert isinstance(nwb_path, str)
-        future = get_threadpool_executor().submit(
+        future = lazynwb.utils.get_threadpool_executor().submit(
             _indexed_column_helper,
             nwb_path=nwb_path,
             table_path=get_table_path(session_df, assert_unique=True),
@@ -514,7 +514,7 @@ def _get_table_column_accessors(
     t0 = time.time()
     if use_thread_pool:
         future_to_column = {
-            get_threadpool_executor().submit(
+            lazynwb.utils.get_threadpool_executor().submit(
                 file[table_path].get, column_name
             ): column_name
             for column_name in file[table_path].keys()
@@ -814,7 +814,7 @@ def get_spike_times_in_intervals(
     else:
         future_to_nwb_path = {}
         for (nwb_path, *_), df in units_df.group_by(NWB_PATH_COLUMN_NAME):
-            future = get_processpool_executor().submit(
+            future = lazynwb.utils.get_processpool_executor().submit(
                 _spikes_times_in_intervals_helper,
                 nwb_path=str(nwb_path),
                 col_name_to_intervals=intervals,
