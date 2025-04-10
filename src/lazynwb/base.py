@@ -210,20 +210,59 @@ class LazyNWB:
     
     def get_timeseries(
         self, search_term: str | None = None
-    ) -> dict[str, lazynwb.funcs.TimeSeries]:
-        return lazynwb.funcs.get_timeseries(self._file, search_term=search_term)
+    ) -> lazynwb.funcs.TimeSeries:
+        return lazynwb.funcs.get_timeseries(
+            self._file, search_term=search_term, match_all=False
+        )
 
-    def get_df(self, search_term: str) -> pd.DataFrame:
-        if search_term == 'units':
-            return self.units
-        if '/' not in search_term:
-            search_term = f"/intervals/{search_term}"
-        try:
-            return lazynwb.funcs.get_df(self._file, table_path=search_term)
-        except KeyError:
-            raise ValueError(
-                f"{search_term!r} not found in NWB file: try using full path to table"
-            )
+    @typing.overload
+    def get_df(
+        self,
+        search_term: str,
+        exclude_column_names: str | Iterable[str] | None = None,
+        exclude_array_columns: bool = True,
+        use_process_pool: bool = False,
+        disable_progress: bool = True,
+        raise_on_missing: bool = True,
+        suppress_errors: bool = False,
+        as_polars: Literal[False] = False,
+    ) -> pd.DataFrame: ...
+
+    @typing.overload
+    def get_df(
+        self,
+        search_term: str,
+        exclude_column_names: str | Iterable[str] | None = None,
+        exclude_array_columns: bool = True,
+        use_process_pool: bool = False,
+        disable_progress: bool = True,
+        raise_on_missing: bool = True,
+        suppress_errors: bool = False,
+        as_polars: Literal[True] = True,
+    ) -> pl.DataFrame: ...
+    
+    def get_df(
+        self,
+        search_term: str,
+        exclude_column_names: str | Iterable[str] | None = None,
+        exclude_array_columns: bool = True,
+        use_process_pool: bool = False,
+        disable_progress: bool = True,
+        raise_on_missing: bool = True,
+        suppress_errors: bool = False,
+        as_polars: bool = False,
+    ) -> pd.DataFrame | pl.DataFrame:
+        return lazynwb.funcs.get_df(
+            nwb_data_sources=self._file,
+            search_term=search_term,
+            exclude_column_names=exclude_column_names,
+            exclude_array_columns=exclude_array_columns,
+            use_process_pool=use_process_pool,
+            disable_progress=disable_progress,
+            raise_on_missing=raise_on_missing,
+            suppress_errors=suppress_errors,
+            as_polars=as_polars,
+        ) # type: ignore[call-overload]
 
     def describe(self) -> dict[str, Any]:
         return {
