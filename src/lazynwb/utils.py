@@ -41,7 +41,7 @@ def normalize_internal_file_path(path: str) -> str:
     return path if path.startswith("/") else f"/{path}"
 
 
-def _get_internal_file_paths(
+def get_internal_file_paths(
     group: h5py.Group | zarr.Group | zarr.Array,
     exclude_specifications: bool = True,
     exclude_table_columns: bool = True,
@@ -64,7 +64,7 @@ def _get_internal_file_paths(
         try:
             results = {
                 **results,
-                **_get_internal_file_paths(
+                **get_internal_file_paths(
                     group[subpath],
                     exclude_specifications=exclude_specifications,
                     exclude_table_columns=exclude_table_columns,
