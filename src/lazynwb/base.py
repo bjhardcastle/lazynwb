@@ -5,11 +5,13 @@ import contextlib
 import datetime
 import inspect
 import logging
+import typing
 from collections.abc import Iterable
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import npc_io
 import pandas as pd
+import polars as pl
 import tqdm
 
 import lazynwb.file_io
@@ -366,6 +368,7 @@ class Subject:
 def get_metadata_df(
     nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
     disable_progress: bool = False,
+    as_polars: bool = False,
 ) -> pd.DataFrame:
     if isinstance(nwb_path_or_paths, str) or not isinstance(
         nwb_path_or_paths, Iterable
@@ -406,7 +409,10 @@ def get_metadata_df(
         except:
             logger.error(f"Error processing {path}:")
             raise
-    return pd.DataFrame.from_records(records)
+    if not as_polars:
+        return pd.DataFrame.from_records(records)
+    else:
+        return pl.DataFrame(records)
 
 
 if __name__ == "__main__":
