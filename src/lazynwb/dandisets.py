@@ -5,8 +5,7 @@ from collections.abc import Generator
 
 import dandi.dandiapi
 
-from lazynwb.file_io import FileAccessor
-
+import lazynwb.file_io
 
 def get_dandi_client(token: str | None = None) -> dandi.dandiapi.DandiAPIClient:
     if token is None:
@@ -16,7 +15,7 @@ def get_dandi_client(token: str | None = None) -> dandi.dandiapi.DandiAPIClient:
 
 def get_dandiset_nwbs(
     dandiset_id: str, version_id: str | None = None
-) -> Generator[FileAccessor, None, None]:
+) -> Generator[lazynwb.file_io.FileAccessor, None, None]:
     """Get a LazyFile object for each file in the specified Dandiset.
 
     >>> next(get_dandiset_nwbs('000363'))           # ephys dataset from the Svoboda Lab
@@ -38,8 +37,8 @@ def get_dandiset_nwbs(
 
 def get_lazynwb_from_dandiset_asset(
     asset: dandi.dandiapi.BaseRemoteAsset,
-) -> FileAccessor:
-    return FileAccessor(asset.get_content_url(follow_redirects=1, strip_query=False))
+) -> lazynwb.file_io.FileAccessor:
+    return lazynwb.file_io.FileAccessor(asset.get_content_url(follow_redirects=1, strip_query=False))
 
 
 def get_dandiset_assets(
