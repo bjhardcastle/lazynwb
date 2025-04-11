@@ -52,15 +52,13 @@ jobs:
         # use PAT, or push comes from `github-actions` bot, which can't trigger
         # other workflows   
     
-    - uses: pdm-project/setup-pdm@v4
+    - uses: astral-sh/setup-uv@v5.4.1
       with:
         python-version: ${{ matrix.python-version }}
-        update-python: true
-        cache: true # speeds-up setup by caching downloaded packages 
         
     - name: Install dependencies
       run: |
-        pdm install -G dev
+        uv sync
         
     - name: Test, format, lint
       env:
@@ -72,7 +70,7 @@ jobs:
         CODE_OCEAN_DOMAIN: ${{ secrets.CODE_OCEAN_DOMAIN }}
       run: |
         mkdir .mypy_cache   
-        pdm run test
+        uv test
     
   publish:
     needs: test
@@ -86,20 +84,14 @@ jobs:
         fetch-depth: 0    # get all commits (on default branch)
         fetch-tags: true  
 
-    - uses: pdm-project/setup-pdm@v4
+    - uses: astral-sh/setup-uv@v5.4.1
       with:
         python-version: '3.11'
-        cache: true # speeds-up setup by caching downloaded packages 
 
     - name: Publish with bump & tag
       # actions/checkout 
       run: |
-        pdm install -G dev
-        git config --global user.email "${{ github.actor }}@users.noreply.github.com"
-        git config --global user.name "${{ github.actor }}"
-        pdm publish
-        git push
-        git push --tags
+        uv run task release
       env:
         GITHUB_TOKEN: ${{ secrets.PAT }}
         # use PAT, or push comes from `github-actions` bot, which can't trigger

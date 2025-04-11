@@ -16,7 +16,7 @@ dependencies = [
     "pandas>=2.0.0",
     "polars[pandas]>=1.26.0",
 ]
-version = "0.1.0"
+version = "0.2.0"
 classifiers = [
     "Development Status :: 3 - Alpha", # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",
@@ -41,6 +41,51 @@ requires = [
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
+
+[project.scripts]
+task = "poethepoet:main"
+
+[dependency-groups]
+task_runner = ["poethepoet>=0.33.1"]
+linting = ["black>=25.1.0", "isort>=6.0.1", "ruff>=0.11.2"]
+testing = [
+    "pytest>=7.4.0",
+    "mypy>=1.4.1",
+    "pytest-cov>=4.1.0",
+]
+bump = [
+    "bump-my-version>=1.1.1",
+    "git-changelog>=2.5.3",
+]
+
+[tool.uv]
+package = true
+default-groups = "all"
+
+[tool.bumpversion]
+tag = true
+allow_dirty = true
+commit = true
+commit_args = "-a"
+message = "Bump version: {current_version} → {new_version} [skip actions]"
+pre_commit_hooks = [
+    "uv run task update_lock",
+    "uv run task log",
+    "uv build",
+    "uv publish",
+]
+
+[tool.poe.tasks]
+mypy = "mypy src --install-types --non-interactive"
+pytest = "pytest --cov-report term-missing:skip-covered --cov-report=html"
+test = ["mypy", "pytest"]
+ruff = "ruff check src --fix-only"
+black = "black src"
+format = ["ruff", "black"]
+update_lock = "uv lock --upgrade-package lazynwb"
+log = "git-changelog -o CHANGELOG.md"
+bump_pub_tag = "bump-my-version bump patch"
+release = ["format", "bump_pub_tag"]
 
 [tool.setuptools.packages.find]
 where = [
@@ -167,96 +212,4 @@ skip_glob = [
 filter_files = true
 known_first_party = [
     "lazynwb",
-]
-
-[tool.pdm]
-plugins = [
-    "pdm-bump",
-    "copier",
-]
-
-[tool.pdm.build]
-package-dir = "src"
-
-[tool.pdm.dev-dependencies]
-dev = [
-    "pytest>=7.4.0",
-    "ruff>=0.0.282",
-    "mypy>=1.4.1",
-    "pytest-cov>=4.1.0",
-    "black>=23.7.0",
-    "git-changelog>=2.3",
-    "parver>=0.3",
-    "psutil>=5.9.8",
-]
-docs = [
-    "markdown-callouts>=0.3",
-    "markdown-exec>=1.7",
-    "mkdocs>=1.5",
-    "mkdocs-coverage>=1.0",
-    "mkdocs-gen-files>=0.5",
-    "mkdocs-git-committers-plugin-2>=1.2",
-    "mkdocs-git-revision-date-localized-plugin>=1.2",
-    "mkdocs-literate-nav>=0.6",
-    "mkdocs-material>=9.4",
-    "mkdocs-minify-plugin>=0.7",
-    "mkdocstrings[python]>=0.23",
-    "tomli>=2.0; python_version < '3.11'",
-]
-
-[tool.pdm.scripts]
-ruff = "ruff check src --fix-only"
-black = "black src"
-pytest = "pytest --cov-report term-missing:skip-covered --cov-report=html"
-mypy = "mypy src --install-types --non-interactive"
-log = "git-changelog -o CHANGELOG.md"
-dryrun = "pdm publish --repository testpypi --dry-run"
-post_init = "pdm install --plugins"
-
-[tool.pdm.scripts.test]
-composite = [
-    "pdm run mypy",
-    "pdm run pytest",
-]
-
-[tool.pdm.scripts.docs]
-shell = "cd docs && mkdocs serve"
-help = "Start the dev server for doc preview"
-
-[tool.pdm.scripts.bumpver]
-composite = [
-    "pdm self add pdm-bump",
-    "pdm bump micro",
-]
-
-[tool.pdm.scripts.tag]
-composite = [
-    "pdm self add pdm-bump",
-    "pdm bump tag",
-]
-
-[tool.pdm.scripts.pre_build]
-composite = [
-    "pdm run black",
-    "pdm run ruff",
-    "pdm run bumpver",
-]
-
-[tool.pdm.scripts.post_build]
-composite = [
-    "git commit -am 'Bump'",
-    "pdm run tag",
-    "pdm run log",
-]
-
-[dependency-groups]
-dev = [
-    "pytest>=7.4.0",
-    "ruff>=0.0.282",
-    "mypy>=1.4.1",
-    "pytest-cov>=4.1.0",
-    "black>=23.7.0",
-    "git-changelog>=2.3",
-    "parver>=0.3",
-    "psutil>=5.9.8",
 ]
