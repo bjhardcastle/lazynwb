@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
-import dataclasses
 import difflib
 import logging
-import multiprocessing
-import os
 import time
 import typing
 from collections.abc import Iterable, Sequence
@@ -134,7 +131,9 @@ def get_df(
         use_process_pool = False
 
     executor = (
-        lazynwb.utils.get_processpool_executor() if use_process_pool else lazynwb.utils.get_threadpool_executor()
+        lazynwb.utils.get_processpool_executor()
+        if use_process_pool
+        else lazynwb.utils.get_threadpool_executor()
     )
     future_to_path = {}
     results: list[dict] = []
@@ -231,19 +230,21 @@ def _get_table_data(
     elif include_column_names is not None:
         include_column_names = tuple(include_column_names)
     if include_column_names and exclude_column_names:
-        ambiguous_column_names = set(include_column_names).intersection(exclude_column_names)
+        ambiguous_column_names = set(include_column_names).intersection(
+            exclude_column_names
+        )
         if ambiguous_column_names:
             raise ValueError(
                 f"Column names {ambiguous_column_names} are both included and excluded: unclear how to proceed"
             )
     # get filtered set of column names:
     for name in tuple(column_accessors.keys()):
-        is_indexed = is_indexed_column(
-            name, column_accessors.keys()
-        )
+        is_indexed = is_indexed_column(name, column_accessors.keys())
         is_excluded = exclude_column_names is not None and name in exclude_column_names
         is_included = include_column_names is not None and name in include_column_names
-        is_not_included = include_column_names is not None and name not in include_column_names
+        is_not_included = (
+            include_column_names is not None and name not in include_column_names
+        )
         if (
             is_not_included
             or is_excluded
@@ -714,24 +715,28 @@ def _spikes_times_in_intervals_helper(
     if isinstance(intervals_table_filter, str):
         # pandas:
         intervals_df = pl.from_pandas(
-            get_df(nwb_path, search_term=intervals_table_path, as_polars=False)
-            .query(intervals_table_filter)
+            get_df(nwb_path, search_term=intervals_table_path, as_polars=False).query(
+                intervals_table_filter
+            )
         )
     elif isinstance(intervals_table_filter, pl.Expr):
-        intervals_df = (
-            get_df(nwb_path, search_term=intervals_table_path, as_polars=True)
-            .filter(intervals_table_filter)
-        )
+        intervals_df = get_df(
+            nwb_path, search_term=intervals_table_path, as_polars=True
+        ).filter(intervals_table_filter)
     elif intervals_table_filter is None:
         intervals_df = get_df(
             nwb_path, search_term=intervals_table_path, as_polars=True
         )
     else:
-        raise ValueError(f"`intervals_table_filter` must be str or pl.Expr or None, got {type(intervals_table_filter)}")
-        
+        raise ValueError(
+            f"`intervals_table_filter` must be str or pl.Expr or None, got {type(intervals_table_filter)}"
+        )
+
     if intervals_table_row_indices is not None:
-        intervals_df = intervals_df.filter(pl.col(TABLE_INDEX_COLUMN_NAME).is_in(intervals_table_row_indices))
-        
+        intervals_df = intervals_df.filter(
+            pl.col(TABLE_INDEX_COLUMN_NAME).is_in(intervals_table_row_indices)
+        )
+
     temp_col_prefix = "__temp_interval"
     for col_name, (start, end) in col_name_to_intervals.items():
         intervals_df = intervals_df.with_columns(
@@ -797,14 +802,17 @@ def _spikes_times_in_intervals_helper(
 
     return results_df.to_dict(as_series=False)
 
+
 def _get_pl_df(df: FrameType) -> pl.DataFrame:
     if isinstance(df, pl.LazyFrame):
         return df.collect()
     elif isinstance(df, pd.DataFrame):
         return pl.from_pandas(df)
-    assert isinstance(df, pl.DataFrame), f"Expected pandas or polars dataframe, got {type(df)}"
+    assert isinstance(
+        df, pl.DataFrame
+    ), f"Expected pandas or polars dataframe, got {type(df)}"
     return df
-    
+
 
 def get_spike_times_in_intervals(
     filtered_units_df: FrameType,
@@ -824,11 +832,16 @@ def get_spike_times_in_intervals(
     n_sessions = units_df[NWB_PATH_COLUMN_NAME].n_unique()
 
     if not isinstance(intervals_df, str):
-        intervals_df_row_indices = _get_pl_df(intervals_df)[TABLE_INDEX_COLUMN_NAME].to_list()
+        intervals_df_row_indices = _get_pl_df(intervals_df)[
+            TABLE_INDEX_COLUMN_NAME
+        ].to_list()
     else:
-        intervals_df_row_indices = None # all rows will be used when table fetched from NWB, but `filter` can be applied
+        intervals_df_row_indices = None  # all rows will be used when table fetched from NWB, but `filter` can be applied
 
-    def _get_intervals_table_path(nwb_path: str | npc_io.PathLike | lazynwb.file_io.FileAccessor, intervals_df: str | FrameType) -> str:
+    def _get_intervals_table_path(
+        nwb_path: str | npc_io.PathLike | lazynwb.file_io.FileAccessor,
+        intervals_df: str | FrameType,
+    ) -> str:
         if isinstance(intervals_df, str):
             return intervals_df
         return get_table_path(

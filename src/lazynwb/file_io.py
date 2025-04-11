@@ -13,8 +13,13 @@ import zarr
 
 logger = logging.getLogger(__name__)
 
+
 def open(
-    path: npc_io.PathLike, is_zarr: bool = False, use_remfile: bool = True, anon_s3: bool = False, **fsspec_storage_options: Any
+    path: npc_io.PathLike,
+    is_zarr: bool = False,
+    use_remfile: bool = True,
+    anon_s3: bool = False,
+    **fsspec_storage_options: Any,
 ) -> h5py.File | zarr.Group:
     """
     Open a file that meets the NWB spec, minimizing the amount of data/metadata read.
@@ -33,9 +38,9 @@ def open(
         fsspec_storage_options.setdefault("anon", True)
     path = upath.UPath(path, **fsspec_storage_options)
 
-    if 'zarr' in path.as_posix():
+    if "zarr" in path.as_posix():
         is_zarr = True
-        
+
     # zarr ------------------------------------------------------------- #
     # there's no file-name convention for what is a zarr file, so we have to try opening it and see if it works
     # - zarr.open() is fast regardless of size
@@ -48,7 +53,8 @@ def open(
     raise ValueError(
         f"Failed to open {path} as hdf5 or zarr. Is this the correct path to an NWB file?"
     )
-    
+
+
 def _s3_to_http(url: str) -> str:
     if url.startswith("s3://"):
         s3_path = url
@@ -57,7 +63,8 @@ def _s3_to_http(url: str) -> str:
         return f"https://{bucket}.s3.amazonaws.com/{object_name}"
     else:
         return url
-    
+
+
 def _open_hdf5(path: upath.UPath, use_remfile: bool = True) -> h5py.File:
     if not path.protocol:
         # local path: open the file with h5py directly
@@ -66,11 +73,14 @@ def _open_hdf5(path: upath.UPath, use_remfile: bool = True) -> h5py.File:
     if use_remfile:
         try:
             file = remfile.File(url=_s3_to_http(path.as_posix()))
-        except Exception as exc: # remfile raises base Exception for many reasons
-            logger.warning(f"remfile failed to open {path}, falling back to fsspec: {exc!r}")
+        except Exception as exc:  # remfile raises base Exception for many reasons
+            logger.warning(
+                f"remfile failed to open {path}, falling back to fsspec: {exc!r}"
+            )
     if file is None:
         file = path.open(mode="rb", cache_type="first")
     return h5py.File(file, mode="r")
+
 
 class FileAccessor:
     """
@@ -137,7 +147,7 @@ class FileAccessor:
 
     def get(self, name: str, default: Any = None) -> Any:
         return self._accessor.get(name, default)
-    
+
     def __getitem__(self, name) -> Any:
         return self._accessor[name]
 

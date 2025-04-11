@@ -15,9 +15,9 @@ import polars as pl
 import tqdm
 
 import lazynwb.file_io
-import lazynwb.utils
 import lazynwb.tables
 import lazynwb.timeseries
+import lazynwb.utils
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +292,7 @@ def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]
             name
             for name, prop in obj.__class__.__dict__.items()
             if isinstance(prop, property)
-            and any(t in inspect.signature(prop.fget).return_annotation  for t in ("str", "list[str]", "datetime.datetime")) # type: ignore[arg-type]
+            and any(t in inspect.signature(prop.fget).return_annotation for t in ("str", "list[str]", "datetime.datetime"))  # type: ignore[arg-type]
         ]
 
     results = {}
