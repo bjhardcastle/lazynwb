@@ -70,7 +70,7 @@ jobs:
         CODE_OCEAN_DOMAIN: ${{ secrets.CODE_OCEAN_DOMAIN }}
       run: |
         mkdir .mypy_cache   
-        uv test
+        uv run task test
     
   publish:
     needs: test
