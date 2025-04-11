@@ -242,7 +242,7 @@ def _get_table_data(
             name, column_accessors.keys()
         )
         is_excluded = exclude_column_names is not None and name in exclude_column_names
-        is_included = include_column_names is None or name in include_column_names
+        is_included = include_column_names is not None and name in include_column_names
         is_not_included = include_column_names is not None and name not in include_column_names
         if (
             is_not_included
