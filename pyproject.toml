@@ -16,7 +16,7 @@ dependencies = [
     "pandas>=2.0.0",
     "polars[pandas]>=1.26.0",
 ]
-version = "0.1.1"
+version = "0.1.4"
 classifiers = [
     "Development Status :: 3 - Alpha", # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",
@@ -237,7 +237,7 @@ pytest = "pytest --cov-report term-missing:skip-covered --cov-report=html"
 mypy = "mypy src --install-types --non-interactive"
 log = "git-changelog -o CHANGELOG.md"
 bump = "bump-my-version bump patch --no-tag --no-commit"
-tag = "bump-my-version --tag --commit"
+tag = "bump-my-version bump patch --no-configured-files --tag --commit --commit-args -a"
 update_lock = "uv lock --upgrade-package lazynwb"
 format = ["ruff", "black"]
 test = ["mypy", "pytest"]
