@@ -801,7 +801,7 @@ def _spikes_times_in_intervals_helper(
 def get_spike_times_in_intervals(
     units_df: FrameType,
     intervals: dict[str, tuple[pl.Expr, pl.Expr]],
-    intervals_df: str | polars._typing.FrameType | pd.DataFrame = "/intervals/trials",
+    intervals_df: str | FrameType = "/intervals/trials",
     intervals_df_filter: str | pl.Expr | None = None,
     apply_obs_intervals: bool = True,
     as_counts: bool = False,
