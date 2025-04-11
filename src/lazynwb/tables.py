@@ -722,7 +722,7 @@ def _spikes_times_in_intervals_helper(
             get_df(nwb_path, search_term=intervals_table_path, as_polars=True)
             .filter(intervals_table_filter)
         )
-    elif intervals_table_row_indices is None:
+    elif intervals_table_filter is None:
         intervals_df = get_df(
             nwb_path, search_term=intervals_table_path, as_polars=True
         )
