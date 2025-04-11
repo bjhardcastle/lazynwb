@@ -16,7 +16,7 @@ dependencies = [
     "pandas>=2.0.0",
     "polars[pandas]>=1.26.0",
 ]
-version = "0.1.0"
+version = "0.1.1"
 classifiers = [
     "Development Status :: 3 - Alpha", # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",
@@ -204,36 +204,44 @@ docs = [
     "tomli>=2.0; python_version < '3.11'",
 ]
 
-[tool.pdm.scripts]
+[project.scripts]
+task = "poethepoet:main"
+
+[dependency-groups]
+task_runner = ["poethepoet>=0.33.1"]
+linting = ["black>=25.1.0", "isort>=6.0.1", "ruff>=0.11.2"]
+testing = [
+    "pytest>=7.4.0",
+    "mypy>=1.4.1",
+    "pytest-cov>=4.1.0",
+]
+bump = [
+    "bump-my-version>=1.1.1",
+    "git-changelog>=2.5.3",
+]
+
+[tool.uv]
+package = true
+default-groups = "all"
+
+[tool.bumpversion]
+tag = true
+allow_dirty = true
+commit = true
+message = "Bump version: {current_version} → {new_version} [skip actions]"
+
+[tool.poe.tasks]
 ruff = "ruff check src --fix-only"
 black = "black src"
 pytest = "pytest --cov-report term-missing:skip-covered --cov-report=html"
 mypy = "mypy src --install-types --non-interactive"
 log = "git-changelog -o CHANGELOG.md"
-dryrun = "pdm publish --repository testpypi --dry-run"
-post_init = "pdm install --plugins"
-
-[tool.pdm.scripts.test]
-composite = [
-    "pdm run mypy",
-    "pdm run pytest",
-]
-
-[tool.pdm.scripts.docs]
-shell = "cd docs && mkdocs serve"
-help = "Start the dev server for doc preview"
-
-[tool.pdm.scripts.bumpver]
-composite = [
-    "pdm self add pdm-bump",
-    "pdm bump micro",
-]
-
-[tool.pdm.scripts.tag]
-composite = [
-    "pdm self add pdm-bump",
-    "pdm bump tag",
-]
+bump = "bump-my-version bump patch --no-tag --no-commit"
+tag = "bump-my-version --tag --commit"
+update_lock = "uv lock --upgrade-package lazynwb"
+format = ["ruff", "black"]
+test = ["mypy", "pytest"]
+pre_build = ["test", "format", "bump", "update_lock", "log", "tag"]
 
 [tool.pdm.scripts.pre_build]
 composite = [
@@ -249,14 +257,3 @@ composite = [
     "pdm run log",
 ]
 
-[dependency-groups]
-dev = [
-    "pytest>=7.4.0",
-    "ruff>=0.0.282",
-    "mypy>=1.4.1",
-    "pytest-cov>=4.1.0",
-    "black>=23.7.0",
-    "git-changelog>=2.3",
-    "parver>=0.3",
-    "psutil>=5.9.8",
-]
