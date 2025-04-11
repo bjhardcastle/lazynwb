@@ -1,7 +1,7 @@
 site_name: "lazynwb"
 site_description: ""
 site_url: "https://AllenInstitute.github.io/lazynwb"
-repo_url: "https://github.com/AllenInstitute/lazynwb"
+repo_url: "https://github.com/bjhardcastle/lazynwb"
 repo_name: "AllenInstitute/lazynwb"
 site_dir: "site"
 watch: [mkdocs.yml, ../src/lazynwb]
@@ -65,7 +65,7 @@ extra_css:
 extra:
   social:
   - icon: fontawesome/brands/github
-    link: https://github.com/AllenInstitute/lazynwb
+    link: https://github.com/bjhardcastle/lazynwb
   - icon: fontawesome/brands/python
     link: https://pypi.org/project/lazynwb/
 

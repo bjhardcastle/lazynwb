@@ -7,7 +7,7 @@ Every little bit helps, and credit will always be given.
 
 1. Fork and clone the repository:
 ```bash
-git clone https://github.com/AllenInstitute/lazynwb
+git clone https://github.com/bjhardcastle/lazynwb
 cd lazynwb
 ```
 
@@ -83,5 +83,5 @@ Always commit & push `pdm.lock` to share the up-to-date dev environment
 ## Updating from the original template
 With a clean working directory, run `pipx run copier update --defaults`.
 
-See [here](https://github.com/AllenInstitute/copier-pdm-npc/blob/main/README.md)
+See [here](https://github.com/bjhardcastle/copier-pdm-npc/blob/main/README.md)
 for more info.

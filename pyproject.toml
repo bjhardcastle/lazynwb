@@ -15,9 +15,9 @@ dependencies = [
     "pandas>=2.0.0",
     "polars[pandas]>=1.26.0",
 ]
-version = "0.2.0"
+version = "0.2.1"
 classifiers = [
-    "Development Status :: 3 - Alpha", # https://pypi.org/classifiers/
+    "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -31,14 +31,11 @@ classifiers = [
 text = "MIT"
 
 [project.urls]
-Repository = "https://github.com/AllenInstitute/lazynwb"
-Issues = "https://github.com/AllenInstitute/lazynwb/issues"
+Repository = "https://github.com/bjhardcastle/lazynwb"
+Issues = "https://github.com/bjhardcastle/lazynwb/issues"
 
 [build-system]
-requires = [
-    "setuptools>=61",
-    "wheel",
-]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
@@ -47,15 +44,8 @@ task = "poethepoet:main"
 [dependency-groups]
 task_runner = ["poethepoet>=0.33.1"]
 linting = ["black>=25.1.0", "isort>=6.0.1", "ruff>=0.11.2"]
-testing = [
-    "pytest>=7.4.0",
-    "mypy>=1.4.1",
-    "pytest-cov>=4.1.0",
-]
-bump = [
-    "bump-my-version>=1.1.1",
-    "git-changelog>=2.5.3",
-]
+testing = ["pytest>=7.4.0", "mypy>=1.4.1", "pytest-cov>=4.1.0"]
+bump = ["bump-my-version>=1.1.1", "git-changelog>=2.5.3"]
 
 [tool.uv]
 package = true
@@ -68,8 +58,8 @@ commit = true
 commit_args = "-a"
 message = "Bump version: {current_version} → {new_version} [skip actions]"
 pre_commit_hooks = [
-    "uv run task update_lock",
-    "uv run task log",
+    "uv lock --upgrade-package lazynwb",
+    "git-changelog -o CHANGELOG.md",
     "uv build",
     "uv publish",
 ]
@@ -81,40 +71,33 @@ test = ["mypy", "pytest"]
 ruff = "ruff check src --fix-only"
 black = "black src"
 format = ["ruff", "black"]
-update_lock = "uv lock --upgrade-package lazynwb"
-log = "git-changelog -o CHANGELOG.md"
 bump_pub_tag = "bump-my-version bump patch"
 release = ["format", "bump_pub_tag"]
 
 [tool.setuptools.packages.find]
-where = [
-    "src",
-]
+where = ["src"]
 
 [tool.setuptools.package-data]
-lazynwb = [
-    "py.typed",
-]
+lazynwb = ["py.typed"]
+
+[tool.setuptools]
+license-files = ["LICENSE"]
 
 [tool.black]
 # line-length = 100
-target-version = [
-    "py39", 
-    "py310", 
-    "py311",
-]
+target-version = ["py39", "py310", "py311"]
 
 [tool.ruff]
 line-length = 100
 select = [
-    "B",    # flake8-bugbear
-    "C4",   # flake8-comprehensions
-    "E",    # pycodestyle
-    "F",    # pyflakes
-    "PGH",  # pygrep-hooks
-    "RUF",  # ruff
-    "W",    # pycodestyle
-    "YTT",  # flake8-2020
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "E",      # pycodestyle
+    "F",      # pyflakes
+    "PGH",    # pygrep-hooks
+    "RUF",    # ruff
+    "W",      # pycodestyle
+    "YTT",    # flake8-2020
     "ANN",
     "C",
     "I",
@@ -123,12 +106,8 @@ select = [
     "UP",
 ]
 # extend-ignore = ["B018", "B019"]
-src = [
-    "src",
-]
-extend-exclude = [
-    "tests/fixtures",
-]
+src = ["src"]
+extend-exclude = ["tests/fixtures"]
 target-version = "py39"
 
 [tool.ruff.flake8-tidy-imports]
@@ -137,20 +116,15 @@ ban-relative-imports = "all"
 [tool.ruff.mccabe]
 max-complexity = 10
 
-# [tool.ruff.isort]
-# known-first-party = ["lazynwb"]
-
+[tool.ruff.isort]
+known-first-party = ["lazynwb"]
 
 [tool.coverage.paths]
-source = [
-    "src",
-]
+source = ["src"]
 
 [tool.coverage.run]
 branch = true
-source = [
-    "src",
-]
+source = ["src"]
 
 [tool.coverage.report]
 skip_covered = true
@@ -181,10 +155,7 @@ doctest_optionflags = [
     "IGNORE_EXCEPTION_DETAIL",
     "ELLIPSIS",
 ]
-testpaths = [
-    "src",
-    "tests",
-]
+testpaths = ["src", "tests"]
 
 [tool.mypy]
 check_untyped_defs = false
@@ -198,17 +169,11 @@ no_implicit_optional = true
 show_error_codes = true
 ignore_missing_imports = true
 implicit_reexport = false
-exclude = [
-    "src/lazynwb/scripts",
-]
+exclude = ["src/lazynwb/scripts"]
 
 [tool.isort]
 profile = "black"
 atomic = true
-skip_glob = [
-    "*/setup.py",
-]
+skip_glob = ["*/setup.py"]
 filter_files = true
-known_first_party = [
-    "lazynwb",
-]
+known_first_party = ["lazynwb"]
