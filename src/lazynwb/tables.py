@@ -58,6 +58,7 @@ def get_df(
         | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor]
     ),
     search_term: str,
+    include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
@@ -77,6 +78,7 @@ def get_df(
         | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor]
     ),
     search_term: str,
+    include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
@@ -95,6 +97,7 @@ def get_df(
         | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor]
     ),
     search_term: str,
+    include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
@@ -119,6 +122,7 @@ def get_df(
                 nwb_path=paths[0],
                 search_term=search_term,
                 exclude_column_names=exclude_column_names,
+                include_column_names=include_column_names,
                 exclude_array_columns=exclude_array_columns,
             )
         )
@@ -140,6 +144,7 @@ def get_df(
             nwb_path=path,
             search_term=search_term,
             exclude_column_names=exclude_column_names,
+            include_column_names=include_column_names,
             exclude_array_columns=exclude_array_columns,
         )
         future_to_path[future] = path
@@ -186,6 +191,7 @@ def get_df(
 def _get_table_data(
     file: lazynwb.file_io.FileAccessor,
     search_term: str,
+    include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
 ) -> dict[str, Any]:
@@ -220,12 +226,28 @@ def _get_table_data(
         exclude_column_names = (exclude_column_names,)
     elif exclude_column_names is not None:
         exclude_column_names = tuple(exclude_column_names)
+    if isinstance(include_column_names, str):
+        include_column_names = (include_column_names,)
+    elif include_column_names is not None:
+        include_column_names = tuple(include_column_names)
+    if include_column_names and exclude_column_names:
+        ambiguous_column_names = set(include_column_names).intersection(exclude_column_names)
+        if ambiguous_column_names:
+            raise ValueError(
+                f"Column names {ambiguous_column_names} are both included and excluded: unclear how to proceed"
+            )
+    # get filtered set of column names:
     for name in tuple(column_accessors.keys()):
-        is_indexed = exclude_array_columns and is_indexed_column(
+        is_indexed = is_indexed_column(
             name, column_accessors.keys()
         )
         is_excluded = exclude_column_names is not None and name in exclude_column_names
-        if is_indexed or is_excluded:
+        is_included = include_column_names is not None and name in include_column_names
+        if (
+            not is_included
+            or is_excluded
+            or (exclude_array_columns and is_indexed and not is_included)
+        ):
             column_accessors.pop(name, None)
             column_accessors.pop(f"{name}_index", None)
             column_accessors.pop(name.removesuffix("_index"), None)

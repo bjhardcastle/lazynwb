@@ -224,6 +224,7 @@ class LazyNWB:
     def get_df(
         self,
         search_term: str,
+        include_column_names: str | Iterable[str] | None = None,
         exclude_column_names: str | Iterable[str] | None = None,
         exclude_array_columns: bool = True,
         use_process_pool: bool = False,
@@ -237,6 +238,7 @@ class LazyNWB:
     def get_df(
         self,
         search_term: str,
+        include_column_names: str | Iterable[str] | None = None,
         exclude_column_names: str | Iterable[str] | None = None,
         exclude_array_columns: bool = True,
         use_process_pool: bool = False,
@@ -249,6 +251,7 @@ class LazyNWB:
     def get_df(
         self,
         search_term: str,
+        include_column_names: str | Iterable[str] | None = None,
         exclude_column_names: str | Iterable[str] | None = None,
         exclude_array_columns: bool = True,
         use_process_pool: bool = False,
@@ -260,6 +263,7 @@ class LazyNWB:
         return lazynwb.tables.get_df(
             nwb_data_sources=self._file,
             search_term=search_term,
+            include_column_names=include_column_names,
             exclude_column_names=exclude_column_names,
             exclude_array_columns=exclude_array_columns,
             use_process_pool=use_process_pool,
