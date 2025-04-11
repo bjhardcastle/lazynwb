@@ -292,7 +292,7 @@ def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]
             name
             for name, prop in obj.__class__.__dict__.items()
             if isinstance(prop, property)
-            and any(t in inspect.signature(prop.fget).return_annotation  for t in ("str", "list[str]", "datetime.datetime"))
+            and any(t in inspect.signature(prop.fget).return_annotation  for t in ("str", "list[str]", "datetime.datetime")) # type: ignore[arg-type]
         ]
 
     results = {}

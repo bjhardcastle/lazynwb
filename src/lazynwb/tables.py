@@ -797,9 +797,17 @@ def _spikes_times_in_intervals_helper(
 
     return results_df.to_dict(as_series=False)
 
+def _get_pl_df(df: FrameType) -> pl.DataFrame:
+    if isinstance(df, pl.LazyFrame):
+        return df.collect()
+    elif isinstance(df, pd.DataFrame):
+        return pl.from_pandas(df)
+    assert isinstance(df, pl.DataFrame), f"Expected pandas or polars dataframe, got {type(df)}"
+    return df
+    
 
 def get_spike_times_in_intervals(
-    units_df: FrameType,
+    filtered_units_df: FrameType,
     intervals: dict[str, tuple[pl.Expr, pl.Expr]],
     intervals_df: str | FrameType = "/intervals/trials",
     intervals_df_filter: str | pl.Expr | None = None,
@@ -811,27 +819,20 @@ def get_spike_times_in_intervals(
     as_polars: bool = False,
 ) -> pl.DataFrame:
     """"""
-    if isinstance(units_df, pl.LazyFrame):
-        units_df = units_df.collect()
-    elif isinstance(units_df, pd.DataFrame):
-        units_df = pl.from_pandas(units_df)
-    else:
-        units_df = units_df
+    units_df: pl.DataFrame = _get_pl_df(filtered_units_df)
     assert not isinstance(units_df, pl.LazyFrame)
     n_sessions = units_df[NWB_PATH_COLUMN_NAME].n_unique()
 
     if not isinstance(intervals_df, str):
-        intervals_df = pl.DataFrame(intervals_df)
-        intervals_df_row_indices = intervals_df[TABLE_INDEX_COLUMN_NAME].to_list()
+        intervals_df_row_indices = _get_pl_df(intervals_df)[TABLE_INDEX_COLUMN_NAME].to_list()
     else:
         intervals_df_row_indices = None # all rows will be used when table fetched from NWB, but `filter` can be applied
 
-    def _get_intervals_table_path(nwb_path, trials_frame) -> str:
-        if isinstance(trials_frame, str):
-            return trials_frame
-        assert isinstance(trials_frame, pl.DataFrame)
+    def _get_intervals_table_path(nwb_path: str | npc_io.PathLike | lazynwb.file_io.FileAccessor, intervals_df: str | FrameType) -> str:
+        if isinstance(intervals_df, str):
+            return intervals_df
         return get_table_path(
-            trials_frame.filter(pl.col(NWB_PATH_COLUMN_NAME) == nwb_path)
+            _get_pl_df(intervals_df).filter(pl.col(NWB_PATH_COLUMN_NAME) == nwb_path)
         )
 
     results: list[pl.DataFrame] = []
@@ -844,6 +845,7 @@ def get_spike_times_in_intervals(
             return
         results.append(pl.DataFrame(result))
 
+    iterable: Iterable
     if n_sessions == 1 or not use_process_pool:
         iterable = units_df.group_by(NWB_PATH_COLUMN_NAME)
         if not disable_progress:
@@ -854,8 +856,9 @@ def get_spike_times_in_intervals(
                 ncols=120,
             )
         for (nwb_path, *_), df in iterable:
+            nwb_path = str(nwb_path)
             result = _spikes_times_in_intervals_helper(
-                nwb_path=str(nwb_path),
+                nwb_path=nwb_path,
                 col_name_to_intervals=intervals,
                 intervals_table_path=_get_intervals_table_path(nwb_path, intervals_df),
                 intervals_table_filter=intervals_df_filter,
@@ -869,9 +872,10 @@ def get_spike_times_in_intervals(
     else:
         future_to_nwb_path = {}
         for (nwb_path, *_), df in units_df.group_by(NWB_PATH_COLUMN_NAME):
+            nwb_path = str(nwb_path)
             future = lazynwb.utils.get_processpool_executor().submit(
                 _spikes_times_in_intervals_helper,
-                nwb_path=str(nwb_path),
+                nwb_path=nwb_path,
                 col_name_to_intervals=intervals,
                 intervals_table_path=_get_intervals_table_path(nwb_path, intervals_df),
                 intervals_table_filter=intervals_df_filter,
@@ -881,8 +885,8 @@ def get_spike_times_in_intervals(
                 as_counts=as_counts,
                 keep_only_necessary_cols=keep_only_necessary_cols,
             )
-            future_to_nwb_path[future] = str(nwb_path)
-        iterable = tuple(concurrent.futures.as_completed(future_to_nwb_path))  # type: ignore[assignment]
+            future_to_nwb_path[future] = nwb_path
+        iterable = tuple(concurrent.futures.as_completed(future_to_nwb_path))
         if not disable_progress:
             iterable = tqdm.tqdm(
                 iterable,
@@ -890,7 +894,7 @@ def get_spike_times_in_intervals(
                 unit="NWB",
                 ncols=120,
             )
-        for future in iterable:  # type: ignore[assignment]
+        for future in iterable:
             try:
                 result = future.result()
             except Exception as exc:
