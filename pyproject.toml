@@ -10,7 +10,6 @@ dependencies = [
     "npc-io>=0.1.32",
     "h5py>=3.10.0",
     "zarr>=2.17.0",
-    "dandi>=0.59.1",
     "remfile>=0.1.10",
     "tqdm>=4.66.2",
     "pandas>=2.0.0",
