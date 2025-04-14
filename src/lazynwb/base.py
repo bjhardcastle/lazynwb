@@ -133,16 +133,16 @@ class LazyNWB:
 
     @property
     def trials(self) -> pd.DataFrame:
-        return lazynwb.tables.get_df(self._file, search_term="/intervals/trials")
+        return lazynwb.tables.get_df(self._file, search_term="/intervals/trials", exact_path=True)
 
     @property
     def epochs(self) -> pd.DataFrame:
-        return lazynwb.tables.get_df(self._file, search_term="/intervals/epochs")
+        return lazynwb.tables.get_df(self._file, search_term="/intervals/epochs", exact_path=True)
 
     @property
     def electrodes(self) -> pd.DataFrame:
         return lazynwb.tables.get_df(
-            self._file, search_term="/general/extracellular_ephys/electrodes"
+            self._file, search_term="/general/extracellular_ephys/electrodes", exact_path=True
         )
 
     @property
@@ -151,6 +151,7 @@ class LazyNWB:
             self._file,
             search_term="/units",
             exclude_array_columns=True,
+            exact_path=True,
         ).pipe(lazynwb.tables.merge_array_column, "obs_intervals")
 
     @property
@@ -224,6 +225,7 @@ class LazyNWB:
     def get_df(
         self,
         search_term: str,
+        exact_path: bool = False,
         include_column_names: str | Iterable[str] | None = None,
         exclude_column_names: str | Iterable[str] | None = None,
         exclude_array_columns: bool = True,
@@ -238,6 +240,7 @@ class LazyNWB:
     def get_df(
         self,
         search_term: str,
+        exact_path: bool = False,
         include_column_names: str | Iterable[str] | None = None,
         exclude_column_names: str | Iterable[str] | None = None,
         exclude_array_columns: bool = True,
@@ -251,6 +254,7 @@ class LazyNWB:
     def get_df(
         self,
         search_term: str,
+        exact_path: bool = False,
         include_column_names: str | Iterable[str] | None = None,
         exclude_column_names: str | Iterable[str] | None = None,
         exclude_array_columns: bool = True,
@@ -263,6 +267,7 @@ class LazyNWB:
         return lazynwb.tables.get_df(
             nwb_data_sources=self._file,
             search_term=search_term,
+            exact_path=exact_path,
             include_column_names=include_column_names,
             exclude_column_names=exclude_column_names,
             exclude_array_columns=exclude_array_columns,

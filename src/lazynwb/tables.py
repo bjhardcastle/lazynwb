@@ -55,6 +55,7 @@ def get_df(
         | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor]
     ),
     search_term: str,
+    exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -75,6 +76,7 @@ def get_df(
         | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor]
     ),
     search_term: str,
+    exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -94,6 +96,7 @@ def get_df(
         | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor]
     ),
     search_term: str,
+    exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
@@ -112,12 +115,18 @@ def get_df(
     else:
         paths = tuple(nwb_data_sources)
 
+    # speedup known table locations:
+    if search_term == 'trials': 
+        search_term = '/intervals/trials'
+        exact_path = True
+        
     if len(paths) == 1:  # don't use a pool for a single file
         frame_cls = pl.DataFrame if as_polars else pd.DataFrame
         return frame_cls(
             _get_df_helper(
                 nwb_path=paths[0],
                 search_term=search_term,
+                exact_path=exact_path,
                 exclude_column_names=exclude_column_names,
                 include_column_names=include_column_names,
                 exclude_array_columns=exclude_array_columns,
@@ -142,6 +151,7 @@ def get_df(
             _get_df_helper,
             nwb_path=path,
             search_term=search_term,
+            exact_path=exact_path,
             exclude_column_names=exclude_column_names,
             include_column_names=include_column_names,
             exclude_array_columns=exclude_array_columns,
@@ -190,12 +200,13 @@ def get_df(
 def _get_table_data(
     file: lazynwb.file_io.FileAccessor,
     search_term: str,
+    exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
 ) -> dict[str, Any]:
     t0 = time.time()
-    if lazynwb.utils.normalize_internal_file_path(search_term) not in file:
+    if not exact_path and lazynwb.utils.normalize_internal_file_path(search_term) not in file:
         path_to_accessor = _get_internal_file_paths(file._accessor)
         matches = difflib.get_close_matches(
             search_term, path_to_accessor.keys(), n=1, cutoff=0.3
