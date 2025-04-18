@@ -106,6 +106,42 @@ def get_df(
     suppress_errors: bool = False,
     as_polars: bool = False,
 ) -> pd.DataFrame | pl.DataFrame:
+    """""Get a DataFrame from one or more NWB files.
+    
+    Parameters
+    ----------
+    nwb_data_sources : str, PathLike, FileAccessor, or iterable of these
+        Paths to the NWB file(s) to read from. May be hdf5 or zarr.
+    search_term : str
+        An exact path to the table within each file, e.g. '/intervals/trials' or '/units', or a
+        partial path, e.g. 'trials' or 'units'. If a partial path is provided, the function will
+        scan the entire file for a match, which takes time - so be specific if you can.
+        If the exact path is used, also set `exact_path=True`.
+    exact_path : bool, default False
+        Set to True if `search_term` is an exact path to the table within each file: this is
+        important when a table is not present in all files, to ensure that the next closest match is
+        not returned.
+    include_column_names : str or iterable of str, default None
+        Columns within the table to include in the DataFrame. If None, all columns are included.
+    exclude_column_names : str or iterable of str, default None
+        Columns within the table to exclude from the DataFrame. If None, no columns are excluded.
+    exclude_array_columns : bool, default True
+        If True, any column containing list- or array-like data (which can potentially be large)
+        will not be returned. These can be merged after filtering the DataFrame, e.g.
+        `get_df(nwb_paths, '/units').query('structure == MOs').pipe(merge_array_column, 'spike_times')`.
+    use_process_pool : bool, default False
+        If True, a process pool will be used to read the data from the files. This will not
+        generally be faster than the default, which uses a thread pool.
+    disable_progress : bool, default False
+        If True, the progress bar will not be shown.
+    raise_on_missing : bool, default False
+        If True, a KeyError will be raised if the table is not found in any of the files.
+    suppress_errors : bool, default False
+        If True, any errors encountered while reading the files will be suppressed and a warning
+        will be logged.
+    as_polars : bool, default False
+        If True, a Polars DataFrame will be returned. Otherwise, a Pandas DataFrame will be returned.
+    """
     t0 = time.time()
 
     if isinstance(
