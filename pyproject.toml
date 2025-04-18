@@ -63,6 +63,9 @@ pre_commit_hooks = [
     "uv build",
     "uv publish",
 ]
+post_commit_hooks = [
+    "git push origin main"
+]
 
 [tool.poe.tasks]
 mypy = "mypy src --install-types --non-interactive"
