@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Add post commit hook for publishing ([f821852](https://github.com/bjhardcastle/lazynwb/commit/f8218526fc3ba8343d16fe1b089d41245047896f) by bjhardcastle).
+- Add git config ([64f9fe9](https://github.com/bjhardcastle/lazynwb/commit/64f9fe933c54cf7d4a702f9b16b13bad48c594e2) by bjhardcastle).
+- Add `get_timeseries()` docstring ([a3f4f6e](https://github.com/bjhardcastle/lazynwb/commit/a3f4f6ee1f140fc829fd39e6a1a572e14551ce16) by bjhardcastle).
+- Add `get_df()` docstring ([e7a64e5](https://github.com/bjhardcastle/lazynwb/commit/e7a64e57a7475bfa820da7ca5302d9e67266f5ba) by bjhardcastle).
 - Add `include_column_names` parameter to `get_df()` ([0856275](https://github.com/bjhardcastle/lazynwb/commit/0856275bc95d34d926b73e669710417b1e8de52f) by bjhardcastle).
 - Add diagram ([03d1cf5](https://github.com/bjhardcastle/lazynwb/commit/03d1cf5cead1cb702a08a1eac924d40737ce2673) by bjhardcastle).
 - Add `as_polars` option to metadata_df ([0a50489](https://github.com/bjhardcastle/lazynwb/commit/0a50489888db90b14f5c27a7dfe516880d62580a) by bjhardcastle).
@@ -53,6 +57,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Fix sorting df ([3a8dee6](https://github.com/bjhardcastle/lazynwb/commit/3a8dee65ad18d06fee890a88a20d15dedfca9c3c) by bjhardcastle).
 - Fix types ([79baed7](https://github.com/bjhardcastle/lazynwb/commit/79baed7b29dc74d9dd187bb3e68f68755b554260) by bjhardcastle).
 - Fix task command ([8299bf0](https://github.com/bjhardcastle/lazynwb/commit/8299bf01e6e5c44f8671c283e26558914f788dc0) by bjhardcastle).
 - Fix type ([d4da20e](https://github.com/bjhardcastle/lazynwb/commit/d4da20ed18409e194c6d16766f733e6f89ee24d4) by bjhardcastle).
@@ -96,6 +101,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Removed
 
+- Remove pdm lock ([59dd31d](https://github.com/bjhardcastle/lazynwb/commit/59dd31d335c6e24e4246a467ab1d4f3cfcc0ff10) by bjhardcastle).
 - Remove LazyComponent for performance ([287458c](https://github.com/bjhardcastle/lazynwb/commit/287458c4e3a62fd75781772f024abd4a958d9be0) by bjhardcastle).
 - Remove warning ([0747093](https://github.com/bjhardcastle/lazynwb/commit/0747093bc2d37c239b5cb1168109d7249262bcee) by bjhardcastle).
 - Remove anon s3 access Causing permission error on private bucket ([6a16529](https://github.com/bjhardcastle/lazynwb/commit/6a1652954806596e59e1b1185a8c985442c30157) by bjhardcastle).

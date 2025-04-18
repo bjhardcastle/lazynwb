@@ -132,7 +132,7 @@ def get_timeseries(
     Retrieve a TimeSeries object from an NWB file.
     This function searches for TimeSeries in an NWB file and returns either a specific
     TimeSeries object or a dictionary of all TimeSeries objects if `match_all` is True.
-    
+
     Parameters
     ----------
     nwb_path_or_accessor : PathLike or FileAccessor
@@ -143,7 +143,7 @@ def get_timeseries(
         the first match will be returned with a warning.
     match_all : bool, default=False
         If True, returns all TimeSeries in the NWB as a dictionary regardless of search_term.
-        
+
     Returns
     -------
     dict[str, TimeSeries] or TimeSeries
@@ -152,16 +152,16 @@ def get_timeseries(
         to all NWB TimeSeries objects exposed, e.g. data, timestamps, rate, unit.
         For specialized TimeSeries objects, other attributes may be accessed via the h5py/zarr
         accessor using the `file` and `path` attributes, e.g. `ts.file[ts.path + '/data']`
-        
+
     Raises
     ------
     ValueError
         If neither search_term is provided nor match_all is set to True.
-        
+
     Notes
     -----
-    The function identifies TimeSeries by looking for paths ending with "/data" 
-    or "/timestamps", which are characteristic of TimeSeries objects in NWB files.    
+    The function identifies TimeSeries by looking for paths ending with "/data"
+    or "/timestamps", which are characteristic of TimeSeries objects in NWB files.
     """
     if not (search_term or match_all):
         raise ValueError(

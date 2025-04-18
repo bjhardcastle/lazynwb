@@ -106,8 +106,8 @@ def get_df(
     suppress_errors: bool = False,
     as_polars: bool = False,
 ) -> pd.DataFrame | pl.DataFrame:
-    """""Get a DataFrame from one or more NWB files.
-    
+    """ ""Get a DataFrame from one or more NWB files.
+
     Parameters
     ----------
     nwb_data_sources : str, PathLike, FileAccessor, or iterable of these
@@ -152,10 +152,10 @@ def get_df(
         paths = tuple(nwb_data_sources)
 
     # speedup known table locations:
-    if search_term == 'trials': 
-        search_term = '/intervals/trials'
+    if search_term == "trials":
+        search_term = "/intervals/trials"
         exact_path = True
-        
+
     if len(paths) == 1:  # don't use a pool for a single file
         frame_cls = pl.DataFrame if as_polars else pd.DataFrame
         return frame_cls(
@@ -242,7 +242,10 @@ def _get_table_data(
     exclude_array_columns: bool = True,
 ) -> dict[str, Any]:
     t0 = time.time()
-    if not exact_path and lazynwb.utils.normalize_internal_file_path(search_term) not in file:
+    if (
+        not exact_path
+        and lazynwb.utils.normalize_internal_file_path(search_term) not in file
+    ):
         path_to_accessor = _get_internal_file_paths(file._accessor)
         matches = difflib.get_close_matches(
             search_term, path_to_accessor.keys(), n=1, cutoff=0.3
