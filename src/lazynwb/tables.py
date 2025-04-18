@@ -517,7 +517,7 @@ def merge_array_column(
         df = df.select(column_name).collect()  # type: ignore[assignment]
     assert not isinstance(df, pl.LazyFrame)
     if isinstance(df, pd.DataFrame):
-        df = df.sort_values(by=[NWB_PATH_COLUMN_NAME, TABLE_INDEX_COLUMN_NAME], axis=1)
+        df = df.sort_values(by=[NWB_PATH_COLUMN_NAME, TABLE_INDEX_COLUMN_NAME])
     else:
         df = df.sort(NWB_PATH_COLUMN_NAME, TABLE_INDEX_COLUMN_NAME)
     future_to_path = {}
