@@ -91,6 +91,8 @@ jobs:
     - name: Publish with bump & tag
       # actions/checkout 
       run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         uv run task release
       env:
         GITHUB_TOKEN: ${{ secrets.PAT }}
