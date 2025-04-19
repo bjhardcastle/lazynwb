@@ -101,13 +101,16 @@ def scan_nwb(
                     filtered_df.join(
                         other=(
                             lazynwb.tables.get_df(
-                                nwb_path_to_row_indices.keys(),
+                                nwb_data_sources=nwb_path_to_row_indices.keys(),
                                 search_term=table_path,
                                 exact_path=True,
                                 include_column_names=include_column_names,
                                 exclude_array_columns=False,
                                 nwb_path_to_row_indices=nwb_path_to_row_indices,
                                 disable_progress=False,
+                                use_process_pool=any(
+                                    isinstance(schema[name], pl.List) for name in include_column_names
+                                ),
                                 as_polars=True,
                             )
                         ),
