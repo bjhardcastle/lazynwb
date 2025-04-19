@@ -64,7 +64,6 @@ def scan_nwb(
             yield df[:n_rows] if n_rows is not None and n_rows < df.height else df
         else:
             filtered_df = df.filter(predicate)
-
             # TODO
             #! table_row_indices cannot be indices alone:
             #! needs the corresponding nwb path as well!
@@ -79,11 +78,7 @@ def scan_nwb(
                                 filtered_df[lazynwb.NWB_PATH_COLUMN_NAME],
                                 search_term=table_path,
                                 exact_path=True,
-                                include_column_names=(
-                                    (set(with_columns) - initial_columns)
-                                    if with_columns is not None
-                                    else None
-                                ),
+                                include_column_names=set(with_columns) - initial_columns if with_columns else schema.keys(),
                                 exclude_array_columns=False,
                                 nwb_path_to_row_indices=lazynwb.tables._get_path_to_row_indices(
                                     filtered_df[i : min(i + batch_size, n_rows)]
