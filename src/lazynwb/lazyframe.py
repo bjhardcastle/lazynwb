@@ -51,7 +51,7 @@ def scan_nwb(
             # - if we have a predicate, we'll fetch the minimal df, apply predicate, then fetch remaining columns in with_columns
             initial_columns = predicate.meta.root_names()
             logger.debug(
-                f"Predicate specified: fetching initial columns in {table_path!r}: {sorted(initial_columns)}"
+                f"Predicate specified: fetching initial columns in {table_path!r}: {initial_columns}"
             )
         else:
             # - if we don't have a predicate, we'll fetch all required columns in the initial df
