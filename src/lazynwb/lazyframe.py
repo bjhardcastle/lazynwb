@@ -13,8 +13,8 @@ import lazynwb.tables
 def scan_nwb(
     files: lazynwb.file_io.FileAccessor | Sequence[lazynwb.file_io.FileAccessor],
     table_path: str,
-    first_n_files_to_infer_schema: int | None = None,
-    include_array_columns: bool = False,
+    first_n_files_to_infer_schema: int | None = 1,
+    include_array_columns: bool = True,
 ) -> pl.LazyFrame:
     if not isinstance(files, Sequence):
         files = [files]
@@ -64,16 +64,14 @@ def scan_nwb(
             yield df[:n_rows] if n_rows is not None and n_rows < df.height else df
         else:
             filtered_df = df.filter(predicate)
-            table_row_indices = filtered_df[lazynwb.TABLE_INDEX_COLUMN_NAME]
-            if n_rows is not None:
-                table_row_indices = table_row_indices[:n_rows]
 
             # TODO
             #! table_row_indices cannot be indices alone:
             #! needs the corresponding nwb path as well!
-
+            if not n_rows:
+                n_rows = len(filtered_df)
             i = 0
-            while i < len(table_row_indices):
+            while i < n_rows:
                 yield (
                     filtered_df.join(
                         other=(
@@ -86,8 +84,9 @@ def scan_nwb(
                                     if with_columns is not None
                                     else None
                                 ),
+                                exclude_array_columns=False,
                                 nwb_path_to_row_indices=lazynwb.tables._get_path_to_row_indices(
-                                    filtered_df[i : min(i + batch_size, len(table_row_indices))]
+                                    filtered_df[i : min(i + batch_size, n_rows)]
                                 ),
                                 disable_progress=False,
                                 as_polars=True,

@@ -674,6 +674,7 @@ def _get_table_schema(
     if first_n_files_to_read is not None:
         files = files[:first_n_files_to_read]
     schema = {}
+    # TODO speed up with threadpool
     for file in files:
         schema.update(
             {
