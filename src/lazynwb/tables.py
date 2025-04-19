@@ -16,6 +16,7 @@ import numpy.typing as npt
 import pandas as pd
 import polars as pl
 import polars._typing
+import polars.datatypes.convert
 import tqdm
 import zarr
 
@@ -58,6 +59,7 @@ def get_df(
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
+    table_row_indices: Sequence[int] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
@@ -79,6 +81,7 @@ def get_df(
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
+    table_row_indices: Sequence[int] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
@@ -99,6 +102,7 @@ def get_df(
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
+    table_row_indices: Sequence[int] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
@@ -156,6 +160,7 @@ def get_df(
         search_term = "/intervals/trials"
         exact_path = True
 
+
     if len(paths) == 1:  # don't use a pool for a single file
         frame_cls = pl.DataFrame if as_polars else pd.DataFrame
         return frame_cls(
@@ -166,6 +171,7 @@ def get_df(
                 exclude_column_names=exclude_column_names,
                 include_column_names=include_column_names,
                 exclude_array_columns=exclude_array_columns,
+                table_row_indices=table_row_indices,
             )
         )
 
@@ -240,6 +246,7 @@ def _get_table_data(
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
+    table_row_indices: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     t0 = time.time()
     if (
@@ -289,7 +296,7 @@ def _get_table_data(
             )
     # get filtered set of column names:
     for name in tuple(column_accessors.keys()):
-        is_indexed = is_indexed_column(name, column_accessors.keys())
+        is_indexed = is_nominally_indexed_column(name, column_accessors.keys())
         is_excluded = exclude_column_names is not None and name in exclude_column_names
         is_included = include_column_names is not None and name in include_column_names
         is_not_included = (
@@ -314,6 +321,10 @@ def _get_table_data(
     logger.debug(
         f"materializing non-indexed columns for {file._path}/{search_term}: {non_indexed_column_names}"
     )
+    if table_row_indices is not None:
+        _idx: Sequence[int] | slice = table_row_indices
+    else:
+        _idx = slice(None)
     for column_name in non_indexed_column_names:
         if (ndim := column_accessors[column_name].ndim) >= 2:
             logger.debug(
@@ -322,9 +333,9 @@ def _get_table_data(
             multi_dim_column_names.append(column_name)
             continue
         if column_accessors[column_name].dtype.kind in ("S", "O"):
-            column_data[column_name] = column_accessors[column_name][:].astype(str)
+            column_data[column_name] = column_accessors[column_name][_idx].astype(str)
         else:
-            column_data[column_name] = column_accessors[column_name][:]
+            column_data[column_name] = column_accessors[column_name][_idx]
 
     if not exclude_array_columns and indexed_column_names:
         data_column_names = {
@@ -337,6 +348,7 @@ def _get_table_data(
             column_data[column_name] = get_indexed_column_data(
                 data_column_accessor=column_accessors[column_name],
                 index_column_accessor=column_accessors[f"{column_name}_index"],
+                table_row_indices=table_row_indices,
             )
     if not exclude_array_columns and multi_dim_column_names:
         logger.debug(
@@ -344,7 +356,7 @@ def _get_table_data(
         )
         for column_name in multi_dim_column_names:
             column_data[column_name] = _format_multi_dim_column(
-                column_accessors[column_name][:]
+                column_accessors[column_name][_idx]
             )
 
     column_length = len(next(iter(column_data.values())))
@@ -413,15 +425,15 @@ def get_indexed_column_data(
     return column_data
 
 
-def is_indexed_column(column_name: str, all_column_names: Iterable[str]) -> bool:
+def is_nominally_indexed_column(column_name: str, all_column_names: Iterable[str]) -> bool:
     """
-    >>> is_indexed_column('spike_times', ['spike_times', 'spike_times_index'])
+    >>> is_nominally_indexed_column('spike_times', ['spike_times', 'spike_times_index'])
     True
-    >>> is_indexed_column('spike_times_index', ['spike_times', 'spike_times_index'])
+    >>> is_nominally_indexed_column('spike_times_index', ['spike_times', 'spike_times_index'])
     True
-    >>> is_indexed_column('spike_times', ['spike_times'])
+    >>> is_nominally_indexed_column('spike_times', ['spike_times'])
     False
-    >>> is_indexed_column('unit_index', ['unit_index'])
+    >>> is_nominally_indexed_column('unit_index', ['unit_index'])
     False
     """
     all_column_names = set(all_column_names)  # in case object is an iterator
@@ -440,7 +452,7 @@ def get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
     >>> sorted(get_indexed_columns(['spike_times', 'spike_times_index', 'presence_ratio']))
     ['spike_times', 'spike_times_index']
     """
-    return {k for k in column_names if is_indexed_column(k, column_names)}
+    return {k for k in column_names if is_nominally_indexed_column(k, column_names)}
 
 
 def _indexed_column_helper(
@@ -608,6 +620,40 @@ def _get_table_column_accessors(
     )
     return names_to_columns
 
+def _get_polars_dtype(dataset: zarr.Array | h5py.Dataset) -> polars._typing.PolarsDataType:
+    dtype = dataset.dtype
+    if dtype == 'O':
+        return pl.String
+    return polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
+
+def _get_table_schema(
+    files: lazynwb.file_io.FileAccessor | Sequence[lazynwb.file_io.FileAccessor],
+    table_path: str,
+    first_n_files_to_read: int | None = 1,
+    include_array_columns: bool = True,
+) -> pl.Schema:
+    if isinstance(files, lazynwb.file_io.FileAccessor):
+        files = [files]
+    if first_n_files_to_read is not None:
+        files = files[:first_n_files_to_read]
+    schema = {}
+    for file in files:
+        schema.update({
+            name: _get_polars_dtype(dataset)
+            for name, dataset
+            in _get_table_column_accessors(file, table_path).items()
+        })
+    if include_array_columns:
+        # the _index column won't be part of the final dataframe, so don't include in schema
+        schema = {k:v for k, v in schema.items() if not (k in get_indexed_column_names(schema) and k.endswith('_index'))}
+    else:
+        schema = {k:v for k, v in schema.items() if k not in get_indexed_column_names(schema)}
+        if table_path == 'units':
+            # in older version of nwb these large array cols are not indexed:
+            schema.pop('waveform_sd')
+            schema.pop('waveform_mean', None)
+
+    return pl.Schema(schema)
 
 def _get_internal_file_paths(
     group: h5py.Group | zarr.Group | zarr.Array,
