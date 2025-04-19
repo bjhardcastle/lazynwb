@@ -1,14 +1,14 @@
-# Use python for csv parsing.
+import logging
 from collections.abc import Iterator, Sequence
 
 import polars as pl
 
-# Used to register a new generator on every instantiation.
 from polars.io.plugins import register_io_source
 
 import lazynwb.file_io
 import lazynwb.tables
 
+logger = logging.getLogger(__name__)
 
 def scan_nwb(
     files: lazynwb.file_io.FileAccessor | Sequence[lazynwb.file_io.FileAccessor],
@@ -18,11 +18,10 @@ def scan_nwb(
 ) -> pl.LazyFrame:
     if not isinstance(files, Sequence):
         files = [files]
-
-    if not isinstance(files, Sequence):
-        files = [files]
     if not isinstance(files[0], lazynwb.file_io.FileAccessor):
         files = [lazynwb.file_io.FileAccessor(file) for file in files]
+        
+    logger.debug(f"Fetching schema for {table_path!r} from {len(files)} files")
     schema = lazynwb.tables._get_table_schema(
         files,
         table_path,
@@ -42,13 +41,25 @@ def scan_nwb(
         """
         if batch_size is None:
             batch_size = 1_000
-
+            logger.debug(
+                f"Batch size not specified: using default of {batch_size} rows per batch"
+            )
+        else:
+            logger.debug(f"Batch size set to {batch_size} rows per batch")
+            
         if predicate is not None:
             # - if we have a predicate, we'll fetch the minimal df, apply predicate, then fetch remaining columns in with_columns
             initial_columns = set(predicate.meta.root_names())
+            logger.debug(
+                f"Predicate specified: fetching initial columns in {table_path!r}: {sorted(initial_columns)}"
+            )
         else:
             # - if we don't have a predicate, we'll fetch the full df
             initial_columns = set()
+            logger.debug(
+                f"Predicate not specified: fetching all columns in {table_path!r} ({include_array_columns=})"
+            )
+            
         # TODO if n_rows is not None, don't use all files, or do one file at a time until fulfilled
         # TODO also use batch_size
         # ? use lazynwb.tables._get_table_length()
@@ -61,16 +72,23 @@ def scan_nwb(
             as_polars=True,
             exclude_array_columns=False,
         )
+        
         if predicate is None:
+            logger.debug(f"Yielding {table_path!r} df with {df.height} rows and {df.width} columns")
             yield df[:n_rows] if n_rows is not None and n_rows < df.height else df
             
         else:
             filtered_df = df.filter(predicate)
+            logger.debug(
+                f"Initial {table_path!r} df filtered with predicate: {df.height} rows reduced to {filtered_df.height}"
+            )
             if with_columns:
                 include_column_names = set(with_columns) - initial_columns
             else: 
                 include_column_names = set(schema.keys()) - initial_columns
-                
+            logger.debug(
+                f"Fetching additional columns from {table_path!r}: {sorted(include_column_names)}"
+            )
             # TODO
             #! table_row_indices cannot be indices alone:
             #! needs the corresponding nwb path as well!
