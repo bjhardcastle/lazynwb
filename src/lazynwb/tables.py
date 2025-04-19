@@ -639,11 +639,20 @@ def _get_table_column_accessors(
 
 def _get_polars_dtype(
     dataset: zarr.Array | h5py.Dataset,
+    column_name: str,
+    all_column_names: Iterable[str],
 ) -> polars._typing.PolarsDataType:
     dtype = dataset.dtype
     if dtype == "O":
         return pl.String
-    return polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
+    dtype = polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
+    if dataset.ndim > 1:
+        for _ in range(dataset.ndim - 1):
+            dtype = pl.List(dtype)
+    elif is_nominally_indexed_column(column_name, all_column_names):
+        for _ in [c for c in get_indexed_column_names(all_column_names) if c.startswith(column_name) and c.endswith('_index')]:
+            dtype = pl.List(dtype)
+    return dtype
 
 
 def _get_table_length(
@@ -681,12 +690,11 @@ def _get_table_schema(
     schema = {}
     # TODO speed up with threadpool
     for file in files:
+        column_accessors = _get_table_column_accessors(file, table_path)
         schema.update(
             {
-                name: _get_polars_dtype(dataset)
-                for name, dataset in _get_table_column_accessors(
-                    file, table_path
-                ).items()
+                name: _get_polars_dtype(dataset, name, column_accessors.keys())
+                for name, dataset in column_accessors.items()
             }
         )
     if include_array_columns:
