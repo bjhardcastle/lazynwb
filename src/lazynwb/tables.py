@@ -672,6 +672,7 @@ def _get_table_schema(
     table_path: str,
     first_n_files_to_read: int | None = 1,
     include_array_columns: bool = True,
+    include_internal_columns: bool = True,
 ) -> pl.Schema:
     if isinstance(files, lazynwb.file_io.FileAccessor):
         files = [files]
@@ -703,7 +704,11 @@ def _get_table_schema(
             # in older version of nwb these large array cols are not indexed:
             schema.pop("waveform_sd")
             schema.pop("waveform_mean", None)
-
+    if include_internal_columns:
+        # add the internal columns to the schema:
+        schema[NWB_PATH_COLUMN_NAME] = pl.String
+        schema[TABLE_PATH_COLUMN_NAME] = pl.String
+        schema[TABLE_INDEX_COLUMN_NAME] = pl.UInt32
     return pl.Schema(schema)
 
 
