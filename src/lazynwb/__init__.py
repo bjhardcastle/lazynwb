@@ -8,6 +8,7 @@ import logging
 
 from lazynwb.base import *
 from lazynwb.file_io import *
+from lazynwb.lazyframe import *
 from lazynwb.tables import *
 from lazynwb.timeseries import *
 from lazynwb.utils import *
