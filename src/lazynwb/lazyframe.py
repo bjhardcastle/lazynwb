@@ -89,9 +89,6 @@ def scan_nwb(
             logger.debug(
                 f"Fetching additional columns from {table_path!r}: {sorted(include_column_names)}"
             )
-            # TODO
-            #! table_row_indices cannot be indices alone:
-            #! needs the corresponding nwb path as well!
             if not n_rows:
                 n_rows = len(filtered_df)
             i = 0
