@@ -94,18 +94,19 @@ def scan_nwb(
                 n_rows = len(filtered_df)
             i = 0
             while i < n_rows:
+                nwb_path_to_row_indices=  lazynwb.tables._get_path_to_row_indices(
+                    filtered_df[i : min(i + batch_size, n_rows)]
+                )
                 yield (
                     filtered_df.join(
                         other=(
                             lazynwb.tables.get_df(
-                                filtered_df[lazynwb.NWB_PATH_COLUMN_NAME].unique(),
+                                nwb_path_to_row_indices.keys(),
                                 search_term=table_path,
                                 exact_path=True,
                                 include_column_names=include_column_names,
                                 exclude_array_columns=False,
-                                nwb_path_to_row_indices=lazynwb.tables._get_path_to_row_indices(
-                                    filtered_df[i : min(i + batch_size, n_rows)]
-                                ),
+                                nwb_path_to_row_indices=nwb_path_to_row_indices,
                                 disable_progress=False,
                                 as_polars=True,
                             )
