@@ -50,6 +50,8 @@ def scan_nwb(
         else:
             # - if we don't have a predicate, we'll fetch the full df
             initial_columns = set()
+        #TODO if n_rows is not None, don't use all files, or do one file at a time until fulfilled
+        #TODO also use batch_size
         df = lazynwb.tables.get_df(
             files,
             search_term=table_path,
@@ -59,30 +61,30 @@ def scan_nwb(
         )
         if predicate is None:
             yield df[:n_rows] if n_rows is not None and n_rows < df.height else df
-        
-        assert predicate
-        filtered_df = df.filter(predicate)
-        table_row_indices = filtered_df[lazynwb.TABLE_INDEX_COLUMN_NAME]
-        if n_rows is not None:
-            table_row_indices = table_row_indices[:n_rows]
-        i = 0
-        while i < len(table_row_indices):
-            yield (
-                filtered_df
-                .join(
-                    other=(
-                        lazynwb.tables.get_df(
-                            filtered_df[lazynwb.NWB_PATH_COLUMN_NAME],
-                            search_term=table_path,
-                            include_column_names=set(with_columns) - initial_columns,
-                            table_row_indices=table_row_indices[i : min(i + batch_size, len(table_row_indices))],
-                            disable_progress=False,
-                            as_polars=True,
-                        )
-                    ),
-                    on=[lazynwb.NWB_PATH_COLUMN_NAME, lazynwb.TABLE_INDEX_COLUMN_NAME],
-                    how="inner",
+        else:
+            assert predicate
+            filtered_df = df.filter(predicate)
+            table_row_indices = filtered_df[lazynwb.TABLE_INDEX_COLUMN_NAME]
+            if n_rows is not None:
+                table_row_indices = table_row_indices[:n_rows]
+            i = 0
+            while i < len(table_row_indices):
+                yield (
+                    filtered_df
+                    .join(
+                        other=(
+                            lazynwb.tables.get_df(
+                                filtered_df[lazynwb.NWB_PATH_COLUMN_NAME],
+                                search_term=table_path,
+                                include_column_names=set(with_columns) - initial_columns,
+                                table_row_indices=table_row_indices[i : min(i + batch_size, len(table_row_indices))],
+                                disable_progress=False,
+                                as_polars=True,
+                            )
+                        ),
+                        on=[lazynwb.NWB_PATH_COLUMN_NAME, lazynwb.TABLE_INDEX_COLUMN_NAME],
+                        how="inner",
+                    )
                 )
-            )
-            i += batch_size
+                i += batch_size
     return register_io_source(io_source=source_generator, schema=schema)
