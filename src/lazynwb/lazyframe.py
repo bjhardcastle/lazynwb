@@ -82,7 +82,7 @@ def scan_nwb(
                     filtered_df.join(
                         other=(
                             lazynwb.tables.get_df(
-                                filtered_df[lazynwb.NWB_PATH_COLUMN_NAME],
+                                filtered_df[lazynwb.NWB_PATH_COLUMN_NAME].unique(),
                                 search_term=table_path,
                                 exact_path=True,
                                 include_column_names=include_column_names,
