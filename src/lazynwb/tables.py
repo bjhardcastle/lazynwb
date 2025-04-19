@@ -307,6 +307,10 @@ def _get_table_data(
     # get filtered set of column names:
     for name in tuple(column_accessors.keys()):
         is_indexed = is_nominally_indexed_column(name, column_accessors.keys())
+        if is_indexed and name.endswith('_index'):
+            # users are not expected to include/exclude the '_index' suffix columns,
+            # and they will be removed by the column name without the suffix
+            continue 
         is_excluded = exclude_column_names is not None and name in exclude_column_names
         is_included = include_column_names is not None and name in include_column_names
         is_not_included = (
