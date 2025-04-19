@@ -57,7 +57,7 @@ def scan_nwb(
             # - if we don't have a predicate, we'll fetch all required columns in the initial df
             initial_columns = with_columns or []
             logger.debug(
-                f"Predicate not specified: fetching all columns in {table_path!r} ({include_array_columns=})"
+                f"Predicate not specified: fetching all columns in {table_path!r} ({initial_columns})"
             )
             
         # TODO if n_rows is not None, don't use all files, or do one file at a time until fulfilled
