@@ -49,13 +49,13 @@ def scan_nwb(
             
         if predicate is not None:
             # - if we have a predicate, we'll fetch the minimal df, apply predicate, then fetch remaining columns in with_columns
-            initial_columns = set(predicate.meta.root_names())
+            initial_columns = predicate.meta.root_names()
             logger.debug(
                 f"Predicate specified: fetching initial columns in {table_path!r}: {sorted(initial_columns)}"
             )
         else:
-            # - if we don't have a predicate, we'll fetch the full df
-            initial_columns = set()
+            # - if we don't have a predicate, we'll fetch all required columns in the initial df
+            initial_columns = with_columns or []
             logger.debug(
                 f"Predicate not specified: fetching all columns in {table_path!r} ({include_array_columns=})"
             )
@@ -83,9 +83,9 @@ def scan_nwb(
                 f"Initial {table_path!r} df filtered with predicate: {df.height} rows reduced to {filtered_df.height}"
             )
             if with_columns:
-                include_column_names = set(with_columns) - initial_columns
+                include_column_names = set(with_columns) - set(initial_columns)
             else: 
-                include_column_names = set(schema.keys()) - initial_columns
+                include_column_names = set(schema.keys()) - set(initial_columns)
             logger.debug(
                 f"Fetching additional columns from {table_path!r}: {sorted(include_column_names)}"
             )
