@@ -7,7 +7,7 @@ import logging
 import time
 import typing
 from collections.abc import Iterable, Sequence
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, Mapping, TypeVar
 
 import h5py
 import npc_io
@@ -59,7 +59,7 @@ def get_df(
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
-    table_row_indices: Sequence[int] | None = None,
+    nwb_path_to_row_indices: Mapping[str, Sequence[int]] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
@@ -81,7 +81,7 @@ def get_df(
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
-    table_row_indices: Sequence[int] | None = None,
+    nwb_path_to_row_indices: Mapping[str, Sequence[int]] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
@@ -102,7 +102,7 @@ def get_df(
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
     exclude_column_names: str | Iterable[str] | None = None,
-    table_row_indices: Sequence[int] | None = None,
+    nwb_path_to_row_indices: Mapping[str, Sequence[int]] | None = None,
     exclude_array_columns: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
@@ -159,8 +159,17 @@ def get_df(
     if search_term == "trials":
         search_term = "/intervals/trials"
         exact_path = True
-
-
+        
+    if nwb_path_to_row_indices is None:
+        nwb_path_to_row_indices = {}
+        
+    def _get_path(file) -> str:
+        if isinstance(file, lazynwb.file_io.FileAccessor):
+            return file._path.as_posix()
+        with contextlib.suppress(AttributeError):
+            return file.as_posix()
+        return npc_io.from_pathlike(file).as_posix()
+    
     if len(paths) == 1:  # don't use a pool for a single file
         frame_cls = pl.DataFrame if as_polars else pd.DataFrame
         return frame_cls(
@@ -171,7 +180,7 @@ def get_df(
                 exclude_column_names=exclude_column_names,
                 include_column_names=include_column_names,
                 exclude_array_columns=exclude_array_columns,
-                table_row_indices=table_row_indices,
+                table_row_indices=nwb_path_to_row_indices.get(_get_path(paths[0])),
             )
         )
 
@@ -197,6 +206,7 @@ def get_df(
             exclude_column_names=exclude_column_names,
             include_column_names=include_column_names,
             exclude_array_columns=exclude_array_columns,
+            table_row_indices=nwb_path_to_row_indices.get(_get_path(path))
         )
         future_to_path[future] = path
     futures = concurrent.futures.as_completed(future_to_path)
@@ -216,7 +226,7 @@ def get_df(
                 raise
             else:
                 logger.warning(
-                    f"Table {search_term!r} not found in {npc_io.from_pathlike(future_to_path[future])}"
+                    f"Table {search_term!r} not found in {_get_path(future_to_path[future])}"
                 )
                 continue
         except Exception:
@@ -224,7 +234,7 @@ def get_df(
                 raise
             else:
                 logger.exception(
-                    f"Error getting DataFrame for {npc_io.from_pathlike(future_to_path[future])}:"
+                    f"Error getting DataFrame for {_get_path(future_to_path[future])}:"
                 )
                 continue
     if not as_polars:
@@ -425,7 +435,9 @@ def get_indexed_column_data(
     return column_data
 
 
-def is_nominally_indexed_column(column_name: str, all_column_names: Iterable[str]) -> bool:
+def is_nominally_indexed_column(
+    column_name: str, all_column_names: Iterable[str]
+) -> bool:
     """
     >>> is_nominally_indexed_column('spike_times', ['spike_times', 'spike_times_index'])
     True
@@ -620,11 +632,36 @@ def _get_table_column_accessors(
     )
     return names_to_columns
 
-def _get_polars_dtype(dataset: zarr.Array | h5py.Dataset) -> polars._typing.PolarsDataType:
+
+def _get_polars_dtype(
+    dataset: zarr.Array | h5py.Dataset,
+) -> polars._typing.PolarsDataType:
     dtype = dataset.dtype
-    if dtype == 'O':
+    if dtype == "O":
         return pl.String
     return polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
+
+
+def _get_table_length(
+    file: lazynwb.file_io.FileAccessor,
+    table_path: str,
+) -> int:
+    for _, column in _get_table_column_accessors(file, table_path).items():
+        if column.ndim == 1:
+            return column.shape[0]
+    raise NotImplementedError(
+        f"Could not determine length of table {table_path} in {file._path}: all columns are ndim arrays"
+    )
+
+
+def _get_path_to_row_indices(df: pl.DataFrame) -> dict[str, list[int]]:
+    return {
+        d[NWB_PATH_COLUMN_NAME]: d[TABLE_INDEX_COLUMN_NAME]
+        for d in df.group_by(NWB_PATH_COLUMN_NAME)
+        .agg(TABLE_INDEX_COLUMN_NAME)
+        .to_dicts()
+    }
+
 
 def _get_table_schema(
     files: lazynwb.file_io.FileAccessor | Sequence[lazynwb.file_io.FileAccessor],
@@ -638,22 +675,32 @@ def _get_table_schema(
         files = files[:first_n_files_to_read]
     schema = {}
     for file in files:
-        schema.update({
-            name: _get_polars_dtype(dataset)
-            for name, dataset
-            in _get_table_column_accessors(file, table_path).items()
-        })
+        schema.update(
+            {
+                name: _get_polars_dtype(dataset)
+                for name, dataset in _get_table_column_accessors(
+                    file, table_path
+                ).items()
+            }
+        )
     if include_array_columns:
         # the _index column won't be part of the final dataframe, so don't include in schema
-        schema = {k:v for k, v in schema.items() if not (k in get_indexed_column_names(schema) and k.endswith('_index'))}
+        schema = {
+            k: v
+            for k, v in schema.items()
+            if not (k in get_indexed_column_names(schema) and k.endswith("_index"))
+        }
     else:
-        schema = {k:v for k, v in schema.items() if k not in get_indexed_column_names(schema)}
-        if table_path == 'units':
+        schema = {
+            k: v for k, v in schema.items() if k not in get_indexed_column_names(schema)
+        }
+        if table_path == "units":
             # in older version of nwb these large array cols are not indexed:
-            schema.pop('waveform_sd')
-            schema.pop('waveform_mean', None)
+            schema.pop("waveform_sd")
+            schema.pop("waveform_mean", None)
 
     return pl.Schema(schema)
+
 
 def _get_internal_file_paths(
     group: h5py.Group | zarr.Group | zarr.Array,
