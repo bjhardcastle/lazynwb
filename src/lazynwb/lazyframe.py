@@ -70,7 +70,7 @@ def scan_nwb(
             include_column_names=initial_columns or None,
             disable_progress=False,
             as_polars=True,
-            exclude_array_columns=False,
+            exclude_array_columns=False if initial_columns else (not include_array_columns),
         )
         
         if predicate is None:
