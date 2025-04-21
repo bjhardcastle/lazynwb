@@ -61,6 +61,7 @@ def get_df(
     exclude_column_names: str | Iterable[str] | None = None,
     nwb_path_to_row_indices: Mapping[str, Sequence[int]] | None = None,
     exclude_array_columns: bool = True,
+    parallel: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
     raise_on_missing: bool = False,
@@ -83,6 +84,7 @@ def get_df(
     exclude_column_names: str | Iterable[str] | None = None,
     nwb_path_to_row_indices: Mapping[str, Sequence[int]] | None = None,
     exclude_array_columns: bool = True,
+    parallel: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
     raise_on_missing: bool = False,
@@ -104,6 +106,7 @@ def get_df(
     exclude_column_names: str | Iterable[str] | None = None,
     nwb_path_to_row_indices: Mapping[str, Sequence[int]] | None = None,
     exclude_array_columns: bool = True,
+    parallel: bool = True,
     use_process_pool: bool = False,
     disable_progress: bool = False,
     raise_on_missing: bool = False,
@@ -170,78 +173,81 @@ def get_df(
             return file.as_posix()
         return npc_io.from_pathlike(file).as_posix()
 
-    if len(paths) == 1:  # don't use a pool for a single file
+    if not parallel or len(paths) == 1:  # don't use a pool for a single file
+        results: list[dict] = [] 
         frame_cls = pl.DataFrame if as_polars else pd.DataFrame
-        return frame_cls(
-            _get_df_helper(
-                nwb_path=paths[0],
+        results.append(
+            frame_cls(
+                _get_df_helper(
+                    nwb_path=paths[0],
+                    search_term=search_term,
+                    exact_path=exact_path,
+                    exclude_column_names=exclude_column_names,
+                    include_column_names=include_column_names,
+                    exclude_array_columns=exclude_array_columns,
+                    table_row_indices=nwb_path_to_row_indices.get(_get_path(paths[0])),
+                )
+            )
+        )
+    else:
+        if exclude_array_columns and use_process_pool:
+            logger.warning(
+                "exclude_array_columns is True: setting use_process_pool=False for speed"
+            )
+            use_process_pool = False
+
+        executor = (
+            lazynwb.utils.get_processpool_executor()
+            if use_process_pool
+            else lazynwb.utils.get_threadpool_executor()
+        )
+        future_to_path = {}
+        results: list[dict] = []
+        for path in paths:
+            future = executor.submit(
+                _get_df_helper,
+                nwb_path=path,
                 search_term=search_term,
                 exact_path=exact_path,
                 exclude_column_names=exclude_column_names,
                 include_column_names=include_column_names,
                 exclude_array_columns=exclude_array_columns,
-                table_row_indices=nwb_path_to_row_indices.get(_get_path(paths[0])),
+                table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
             )
-        )
-
-    if exclude_array_columns and use_process_pool:
-        logger.warning(
-            "exclude_array_columns is True: setting use_process_pool=False for speed"
-        )
-        use_process_pool = False
-
-    executor = (
-        lazynwb.utils.get_processpool_executor()
-        if use_process_pool
-        else lazynwb.utils.get_threadpool_executor()
-    )
-    future_to_path = {}
-    results: list[dict] = []
-    for path in paths:
-        future = executor.submit(
-            _get_df_helper,
-            nwb_path=path,
-            search_term=search_term,
-            exact_path=exact_path,
-            exclude_column_names=exclude_column_names,
-            include_column_names=include_column_names,
-            exclude_array_columns=exclude_array_columns,
-            table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
-        )
-        future_to_path[future] = path
-    futures = concurrent.futures.as_completed(future_to_path)
-    if not disable_progress:
-        futures = tqdm.tqdm(
-            futures,
-            total=len(future_to_path),
-            desc=f"Getting multi-NWB {search_term} table",
-            unit="NWB",
-            ncols=120,
-        )
-    for future in futures:
-        try:
-            results.append(future.result())
-        except KeyError:
-            if raise_on_missing:
-                raise
-            else:
-                logger.warning(
-                    f"Table {search_term!r} not found in {_get_path(future_to_path[future])}"
-                )
-                continue
-        except Exception:
-            if not suppress_errors:
-                raise
-            else:
-                logger.exception(
-                    f"Error getting DataFrame for {_get_path(future_to_path[future])}:"
-                )
-                continue
+            future_to_path[future] = path
+        futures = concurrent.futures.as_completed(future_to_path)
+        if not disable_progress:
+            futures = tqdm.tqdm(
+                futures,
+                total=len(future_to_path),
+                desc=f"Getting multi-NWB {search_term} table",
+                unit="NWB",
+                ncols=120,
+            )
+        for future in futures:
+            try:
+                results.append(future.result())
+            except KeyError:
+                if raise_on_missing:
+                    raise
+                else:
+                    logger.warning(
+                        f"Table {search_term!r} not found in {_get_path(future_to_path[future])}"
+                    )
+                    continue
+            except Exception:
+                if not suppress_errors:
+                    raise
+                else:
+                    logger.exception(
+                        f"Error getting DataFrame for {_get_path(future_to_path[future])}:"
+                    )
+                    continue
     if not as_polars:
         df = pd.concat((pd.DataFrame(r) for r in results), ignore_index=True)
     else:
         df = pl.concat(
-            (pl.DataFrame(r) for r in results), how="diagonal_relaxed", rechunk=True
+            (pl.DataFrame(r) for r in results), how="diagonal_relaxed", rechunk=False
         )
     logger.debug(
         f"Created {search_term!r} DataFrame ({len(df)} rows) from {len(paths)} NWB files in {time.time() - t0:.2f} s"
