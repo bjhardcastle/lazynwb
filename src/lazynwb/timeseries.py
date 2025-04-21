@@ -145,7 +145,7 @@ def get_timeseries(
         only that TimeSeries will be returned. If it partially matches multiple paths,
         the first match will be returned with a warning.
     exact_path: bool, default=False
-        If True, the search term must exactly match the path of the TimeSeries. This is preferred 
+        If True, the search term must exactly match the path of the TimeSeries. This is preferred
         as it is faster and less ambiguous.
     match_all : bool, default=False
         If True, returns all TimeSeries in the NWB as a dictionary regardless of search_term.
@@ -185,7 +185,7 @@ def get_timeseries(
     if exact_path and not is_in_file:
         raise lazynwb.exceptions.InternalPathError(
             f"Exact path {search_term!r} not found in file {file._path.as_posix()}"
-        ) 
+        )
     elif not match_all and search_term and is_in_file:
         return TimeSeries(file=file, path=_format(search_term))
     else:

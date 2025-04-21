@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.6...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.7...HEAD)</small>
+
+### Added
+
+- Add `exact_path` to `get_timeseries()` to match `get_df()` ([473d4b2](https://github.com/bjhardcastle/lazynwb/commit/473d4b2aaea7be7102356ee7ac85ca25c13490c1) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.7](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.7) - 2025-04-21
+
+<small>[Compare with v0.2.6](https://github.com/bjhardcastle/lazynwb/compare/v0.2.6...v0.2.7)</small>
 
 ### Added
 
@@ -31,7 +40,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Remove comments ([9683b1c](https://github.com/bjhardcastle/lazynwb/commit/9683b1c8af79a63eb14899ef6b0ab57fc889a496) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.6](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.6) - 2025-04-18
 
 <small>[Compare with v0.2.2](https://github.com/bjhardcastle/lazynwb/compare/v0.2.2...v0.2.6)</small>
