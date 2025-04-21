@@ -6,8 +6,8 @@ import difflib
 import logging
 import time
 import typing
-from collections.abc import Iterable, Sequence
-from typing import Any, Literal, Mapping, TypeVar
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Literal, TypeVar
 
 import h5py
 import npc_io
@@ -159,17 +159,17 @@ def get_df(
     if search_term == "trials":
         search_term = "/intervals/trials"
         exact_path = True
-        
+
     if nwb_path_to_row_indices is None:
         nwb_path_to_row_indices = {}
-        
+
     def _get_path(file) -> str:
         if isinstance(file, lazynwb.file_io.FileAccessor):
             return file._path.as_posix()
         with contextlib.suppress(AttributeError):
             return file.as_posix()
         return npc_io.from_pathlike(file).as_posix()
-    
+
     if len(paths) == 1:  # don't use a pool for a single file
         frame_cls = pl.DataFrame if as_polars else pd.DataFrame
         return frame_cls(
@@ -206,7 +206,7 @@ def get_df(
             exclude_column_names=exclude_column_names,
             include_column_names=include_column_names,
             exclude_array_columns=exclude_array_columns,
-            table_row_indices=nwb_path_to_row_indices.get(_get_path(path))
+            table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
         )
         future_to_path[future] = path
     futures = concurrent.futures.as_completed(future_to_path)
@@ -307,10 +307,10 @@ def _get_table_data(
     # get filtered set of column names:
     for name in tuple(column_accessors.keys()):
         is_indexed = is_nominally_indexed_column(name, column_accessors.keys())
-        if is_indexed and name.endswith('_index'):
+        if is_indexed and name.endswith("_index"):
             # users are not expected to include/exclude the '_index' suffix columns,
             # and they will be removed by the column name without the suffix
-            continue 
+            continue
         is_excluded = exclude_column_names is not None and name in exclude_column_names
         is_included = include_column_names is not None and name in include_column_names
         is_not_included = (
@@ -650,7 +650,11 @@ def _get_polars_dtype(
         for _ in range(dataset.ndim - 1):
             dtype = pl.List(dtype)
     elif is_nominally_indexed_column(column_name, all_column_names):
-        for _ in [c for c in get_indexed_column_names(all_column_names) if c.startswith(column_name) and c.endswith('_index')]:
+        for _ in [
+            c
+            for c in get_indexed_column_names(all_column_names)
+            if c.startswith(column_name) and c.endswith("_index")
+        ]:
             dtype = pl.List(dtype)
     return dtype
 

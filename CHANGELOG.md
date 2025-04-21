@@ -8,7 +8,33 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.2...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.6...HEAD)</small>
+
+### Added
+
+- Add internal columns to schema ([103b4b8](https://github.com/bjhardcastle/lazynwb/commit/103b4b805fa15ddcfb843b6576d5e3ad65e9310a) by bjhardcastle).
+- Add lazyframe logging ([7ded498](https://github.com/bjhardcastle/lazynwb/commit/7ded4983caa41c494c6191cf5d9a0bed7ee60df8) by bjhardcastle).
+- Add import ([4756fdb](https://github.com/bjhardcastle/lazynwb/commit/4756fdb9fff9ac105e79e2dc54d9edbe0eabbc63) by bjhardcastle).
+
+### Fixed
+
+- Fix getting pl.Schema for multi-dim columns ([4ae3d28](https://github.com/bjhardcastle/lazynwb/commit/4ae3d289d627fefd37f4a97a96aec776aa1769ef) by bjhardcastle).
+- Fix getting table data for indexed columns in include/exclude ([4032410](https://github.com/bjhardcastle/lazynwb/commit/40324103cb17dbffd0f063d807c7bc1c4d893bae) by bjhardcastle).
+- Fix exclude_array_columns logic based on initial_columns ([e51ae3d](https://github.com/bjhardcastle/lazynwb/commit/e51ae3d637764dd4d591a682b5856588f9d1d7e4) by bjhardcastle).
+- Fix intitial columns ([58d57c2](https://github.com/bjhardcastle/lazynwb/commit/58d57c258e9cc39df64690125b771cf7d70934ca) by bjhardcastle).
+- Fix getting filtered rows ([e7134b3](https://github.com/bjhardcastle/lazynwb/commit/e7134b32718a094784b39c60fabf5ab96431cb65) by bjhardcastle).
+- Fix getting included columns ([15047bb](https://github.com/bjhardcastle/lazynwb/commit/15047bba16b66c1c5b995b8c9770f18bd83f873a) by bjhardcastle).
+- Fix getting array columns ([d4ba84f](https://github.com/bjhardcastle/lazynwb/commit/d4ba84f65914cb053b213e8264eca929f4a9f873) by bjhardcastle).
+- Fix filtering row indices on predicate ([65af817](https://github.com/bjhardcastle/lazynwb/commit/65af8171e5aa8cbd68052550991a85102a56ef07) by bjhardcastle).
+
+### Removed
+
+- Remove comments ([9683b1c](https://github.com/bjhardcastle/lazynwb/commit/9683b1c8af79a63eb14899ef6b0ab57fc889a496) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.6](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.6) - 2025-04-18
+
+<small>[Compare with v0.2.2](https://github.com/bjhardcastle/lazynwb/compare/v0.2.2...v0.2.6)</small>
 
 ### Added
 
@@ -25,7 +51,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Remove pdm lock ([59dd31d](https://github.com/bjhardcastle/lazynwb/commit/59dd31d335c6e24e4246a467ab1d4f3cfcc0ff10) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.2](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.2) - 2025-04-11
 
 <small>[Compare with first commit](https://github.com/bjhardcastle/lazynwb/compare/c1551aa173dc2a94aeeecf50dd0324760720848b...v0.2.2)</small>
