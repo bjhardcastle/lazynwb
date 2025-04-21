@@ -174,21 +174,22 @@ def get_df(
         return npc_io.from_pathlike(file).as_posix()
 
     if not parallel or len(paths) == 1:  # don't use a pool for a single file
-        results: list[dict] = []
         frame_cls = pl.DataFrame if as_polars else pd.DataFrame
-        results.append(
-            frame_cls(
-                _get_df_helper(
-                    nwb_path=paths[0],
-                    search_term=search_term,
-                    exact_path=exact_path,
-                    exclude_column_names=exclude_column_names,
-                    include_column_names=include_column_names,
-                    exclude_array_columns=exclude_array_columns,
-                    table_row_indices=nwb_path_to_row_indices.get(_get_path(paths[0])),
+        results: list[dict] = []
+        for path in paths:
+            results.append(
+                frame_cls(
+                    _get_df_helper(
+                        nwb_path=path,
+                        search_term=search_term,
+                        exact_path=exact_path,
+                        exclude_column_names=exclude_column_names,
+                        include_column_names=include_column_names,
+                        exclude_array_columns=exclude_array_columns,
+                        table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
+                    )
                 )
             )
-        )
     else:
         if exclude_array_columns and use_process_pool:
             logger.warning(
