@@ -174,7 +174,7 @@ def get_df(
         return npc_io.from_pathlike(file).as_posix()
 
     if not parallel or len(paths) == 1:  # don't use a pool for a single file
-        results: list[dict] = [] 
+        results: list[dict] = []
         frame_cls = pl.DataFrame if as_polars else pd.DataFrame
         results.append(
             frame_cls(
