@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.9...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.10...HEAD)</small>
+
+### Fixed
+
+- Fix import for Py3.9 ([4d2cb72](https://github.com/bjhardcastle/lazynwb/commit/4d2cb72b1549a17bd312a6d4e07ed78ee7f9678d) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.10](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.10) - 2025-04-22
+
+<small>[Compare with v0.2.9](https://github.com/bjhardcastle/lazynwb/compare/v0.2.9...v0.2.10)</small>
 
 ### Added
 
@@ -19,7 +28,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Fix option to disable concurrency in `get_df()` ([6afd7e3](https://github.com/bjhardcastle/lazynwb/commit/6afd7e370ccad81bf08c02951b7ab1ee499dfd3b) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.9](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.9) - 2025-04-21
 
 <small>[Compare with v0.2.8](https://github.com/bjhardcastle/lazynwb/compare/v0.2.8...v0.2.9)</small>
