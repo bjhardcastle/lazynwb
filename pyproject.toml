@@ -15,7 +15,7 @@ dependencies = [
     "pandas>=2.0.0",
     "polars[pandas]>=1.26.0",
 ]
-version = "0.2.9"
+version = "0.2.10"
 classifiers = [
     "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",

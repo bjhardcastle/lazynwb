@@ -8,13 +8,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.8...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.9...HEAD)</small>
+
+### Added
+
+- Add n_rows to unpredicated lazyframe ([88ed6f2](https://github.com/bjhardcastle/lazynwb/commit/88ed6f28333233b9d74dff798e32de11cfb4abff) by bjhardcastle).
+- Add comment ([5b4db9c](https://github.com/bjhardcastle/lazynwb/commit/5b4db9c0bd31fa48db594606d77488c03033680f) by bjhardcastle).
+
+### Fixed
+
+- Fix option to disable concurrency in `get_df()` ([6afd7e3](https://github.com/bjhardcastle/lazynwb/commit/6afd7e370ccad81bf08c02951b7ab1ee499dfd3b) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.9](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.9) - 2025-04-21
+
+<small>[Compare with v0.2.8](https://github.com/bjhardcastle/lazynwb/compare/v0.2.8...v0.2.9)</small>
 
 ### Added
 
 - Add option to disable concurrency in `get_df()` ([8279b37](https://github.com/bjhardcastle/lazynwb/commit/8279b37b0062bc96e21b32a8978ca911701f1b31) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.8](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.8) - 2025-04-21
 
 <small>[Compare with v0.2.7](https://github.com/bjhardcastle/lazynwb/compare/v0.2.7...v0.2.8)</small>

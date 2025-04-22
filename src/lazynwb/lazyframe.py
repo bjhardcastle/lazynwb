@@ -78,9 +78,11 @@ def scan_nwb(
             disable_progress=False,
             as_polars=True,
             exclude_array_columns=(
-                False if initial_columns else (not include_array_columns)
+                False
+                if initial_columns
+                else (not include_array_columns)
                 # if specific columns were requested, they will be returned regardless of whether or
-                # not they're array columns. Otherwise, use the user setting for include_array_columns                
+                # not they're array columns. Otherwise, use the user setting for include_array_columns
             ),
         )
 
