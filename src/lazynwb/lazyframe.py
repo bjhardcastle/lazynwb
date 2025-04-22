@@ -68,6 +68,7 @@ def scan_nwb(
         df = lazynwb.tables.get_df(
             files,
             search_term=table_path,
+            exact_path=True,
             include_column_names=initial_columns or None,
             disable_progress=False,
             as_polars=True,
