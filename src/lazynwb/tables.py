@@ -436,7 +436,8 @@ def get_indexed_column_data(
     ), "length of data_indices is incorrect"
 
     # read actual data and split into sub-vectors for each row of the table:
-    data_array: npt.NDArray[np.float64] = data_column_accessor[data_indices]
+    #! reading all data is faster than accessing non-sequential indices (tested for local hdf5):
+    data_array: npt.NDArray[np.float64] = data_column_accessor[:][data_indices]
     column_data = []
     start_idx = 0
     for run_length in np.diff(index_array)[table_row_indices]:
