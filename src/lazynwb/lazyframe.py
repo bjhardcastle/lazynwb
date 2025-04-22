@@ -61,10 +61,15 @@ def scan_nwb(
                 f"Predicate not specified: fetching all requested columns in {table_path!r} ({initial_columns})"
             )
 
-        # TODO if n_rows is not None, don't use all files, or do one file at a time until fulfilled
-        # TODO also use batch_size
-        # ? use lazynwb.tables._get_table_length()
-
+        # TODO use batch_size
+        if n_rows and len(files) > 1:
+            sum_rows = 0
+            for idx, file in enumerate(files):
+                sum_rows += lazynwb.tables._get_table_length(file, table_path)
+                if sum_rows >= n_rows:
+                    break
+            files = files[: idx + 1]
+            logger.debug(f"Limiting files to {len(files)} based on n_rows={n_rows}")
         df = lazynwb.tables.get_df(
             files,
             search_term=table_path,
