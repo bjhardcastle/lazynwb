@@ -334,7 +334,7 @@ def _get_table_data(
     # some columns have >2 dims but no index - they also need to be handled differently
     multi_dim_column_names = []
 
-    column_data: dict[str, npt.NDArray | list[npt.NDArray]] = {}
+    column_data: dict[str, npt.NDArray | list] = {}
     logger.debug(
         f"materializing non-indexed columns for {file._path}/{search_term}: {non_indexed_column_names}"
     )
@@ -373,7 +373,7 @@ def _get_table_data(
         )
         for column_name in multi_dim_column_names:
             column_data[column_name] = _format_multi_dim_column(
-                column_accessors[column_name][_idx, :]
+                column_accessors[column_name][_idx]
             )
     try:
         column_length = len(next(iter(column_data.values())))
@@ -496,7 +496,7 @@ def _indexed_column_helper(
             else:
                 raise
         if data_column_accessor.ndim >= 2:
-            column_data = data_column_accessor[table_row_indices][:]
+            column_data = data_column_accessor[table_row_indices]
         else:
             column_data = get_indexed_column_data(
                 data_column_accessor=data_column_accessor,
@@ -514,25 +514,14 @@ def _indexed_column_helper(
 
 def _format_multi_dim_column(
     column_data: npt.NDArray | list[npt.NDArray],
-) -> list[npt.NDArray]:
+) -> list[list[Any]]:
     """Pandas inists 'Per-column arrays must each be 1-dimensional': this converts to a list of
     arrays, if not already"""
-    # determine how many levels of nested list-like objects we have, but don't confuse str (iterable)
-    assert isinstance(column_data[0], Iterable) and not isinstance(column_data[0], str)
-    if isinstance(column_data[0][0], Iterable) and not isinstance(
-        column_data[0][0], str
-    ):
-        # ndim = 3
-        if isinstance(column_data[0][0][0], Iterable) and isinstance(
-            column_data[0][0][0], str
-        ):
-            raise NotImplementedError(
-                "Reading 4-D arrays into tabular format not supported"
-            )
-        return list(list(list(y)) for x in column_data for y in x)
+    if isinstance(column_data[0], list):
+        return list(column_data) # type: ignore[arg-type]
     else:
-        # ndim = 2
-        return list(list(x) for x in column_data)
+        # np array-like
+        return [x.tolist() for x in column_data] # type: ignore[misc]
 
 
 def get_table_path(df: FrameType, assert_unique: bool = True) -> str:
