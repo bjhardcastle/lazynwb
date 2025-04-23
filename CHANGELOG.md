@@ -8,9 +8,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.14...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.15...HEAD)</small>
 
 <!-- insertion marker -->
+## [v0.2.15](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.15) - 2025-04-23
+
+<small>[Compare with v0.2.14](https://github.com/bjhardcastle/lazynwb/compare/v0.2.14...v0.2.15)</small>
+
 ## [v0.2.14](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.14) - 2025-04-23
 
 <small>[Compare with v0.2.13](https://github.com/bjhardcastle/lazynwb/compare/v0.2.13...v0.2.14)</small>
