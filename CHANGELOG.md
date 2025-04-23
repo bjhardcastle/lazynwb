@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.10...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.11...HEAD)</small>
+
+### Fixed
+
+- Fix editing files list in local scope ([59a650c](https://github.com/bjhardcastle/lazynwb/commit/59a650cebc728a6335176dc5c8f159f89de072ba) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.11](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.11) - 2025-04-22
+
+<small>[Compare with v0.2.10](https://github.com/bjhardcastle/lazynwb/compare/v0.2.10...v0.2.11)</small>
 
 ### Fixed
 
 - Fix import for Py3.9 ([4d2cb72](https://github.com/bjhardcastle/lazynwb/commit/4d2cb72b1549a17bd312a6d4e07ed78ee7f9678d) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.10](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.10) - 2025-04-22
 
 <small>[Compare with v0.2.9](https://github.com/bjhardcastle/lazynwb/compare/v0.2.9...v0.2.10)</small>
