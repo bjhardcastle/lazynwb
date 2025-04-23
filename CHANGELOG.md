@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.12...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.13...HEAD)</small>
+
+### Fixed
+
+- Fix regression in getting table accessors for zarr file ([2b5bf99](https://github.com/bjhardcastle/lazynwb/commit/2b5bf992db94eb5c38a0358d0a3b0cca0ef0ead2) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.13](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.13) - 2025-04-23
+
+<small>[Compare with v0.2.12](https://github.com/bjhardcastle/lazynwb/compare/v0.2.12...v0.2.13)</small>
 
 ### Fixed
 
 - Fix files list filtering ([b28fb73](https://github.com/bjhardcastle/lazynwb/commit/b28fb732d1166ab9a9745a391a4d540b95262da7) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.12](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.12) - 2025-04-23
 
 <small>[Compare with v0.2.11](https://github.com/bjhardcastle/lazynwb/compare/v0.2.11...v0.2.12)</small>
