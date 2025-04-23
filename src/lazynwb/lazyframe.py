@@ -64,6 +64,7 @@ def scan_nwb(
             )
 
         # TODO use batch_size
+        global files
         if n_rows and len(files) > 1:
             sum_rows = 0
             for idx, file in enumerate(files):
