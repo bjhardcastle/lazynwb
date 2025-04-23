@@ -289,9 +289,7 @@ def _get_table_data(
         _get_table_column_accessors(
             file=file,
             table_path=search_term,
-            use_thread_pool=(
-                file._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.ZARR
-            ),
+            use_thread_pool=False,
         )
     )
 
