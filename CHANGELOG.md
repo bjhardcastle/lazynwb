@@ -8,13 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.16...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.17...HEAD)</small>
+
+<!-- insertion marker -->
+## [v0.2.17](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.17) - 2025-04-23
+
+<small>[Compare with v0.2.16](https://github.com/bjhardcastle/lazynwb/compare/v0.2.16...v0.2.17)</small>
 
 ### Fixed
 
 - Fix nested list arrays in polars ([645e7d9](https://github.com/bjhardcastle/lazynwb/commit/645e7d982fd0ba302490e4b356ceed51f31b0f4c) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.16](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.16) - 2025-04-23
 
 <small>[Compare with v0.2.15](https://github.com/bjhardcastle/lazynwb/compare/v0.2.15...v0.2.16)</small>
