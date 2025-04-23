@@ -377,8 +377,12 @@ def _get_table_data(
             column_data[column_name] = _format_multi_dim_column(
                 column_accessors[column_name][_idx]
             )
-
-    column_length = len(next(iter(column_data.values())))
+    try:
+        column_length = len(next(iter(column_data.values())))
+    except StopIteration:
+        raise lazynwb.exceptions.InternalPathError(
+            f"Table matching {search_term!r} not found in {file._path}"
+        ) from None
 
     # add identifiers to each row, so they can be linked back their source at a later time:
     identifier_column_data = {
