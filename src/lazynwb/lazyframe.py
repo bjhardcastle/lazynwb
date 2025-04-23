@@ -72,7 +72,7 @@ def scan_nwb(
                     break
             filtered_files = files[: idx + 1]
             logger.debug(f"Limiting files to {len(files)} based on n_rows={n_rows}")
-        else: 
+        else:
             filtered_files = files
         df = lazynwb.tables.get_df(
             filtered_files,

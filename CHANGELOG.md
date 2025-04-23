@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.11...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.12...HEAD)</small>
+
+### Fixed
+
+- Fix files list filtering ([b28fb73](https://github.com/bjhardcastle/lazynwb/commit/b28fb732d1166ab9a9745a391a4d540b95262da7) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.12](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.12) - 2025-04-23
+
+<small>[Compare with v0.2.11](https://github.com/bjhardcastle/lazynwb/compare/v0.2.11...v0.2.12)</small>
 
 ### Fixed
 
 - Fix editing files list in local scope ([59a650c](https://github.com/bjhardcastle/lazynwb/commit/59a650cebc728a6335176dc5c8f159f89de072ba) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.11](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.11) - 2025-04-22
 
 <small>[Compare with v0.2.10](https://github.com/bjhardcastle/lazynwb/compare/v0.2.10...v0.2.11)</small>
