@@ -64,17 +64,18 @@ def scan_nwb(
             )
 
         # TODO use batch_size
-        global files
         if n_rows and len(files) > 1:
             sum_rows = 0
             for idx, file in enumerate(files):
                 sum_rows += lazynwb.tables._get_table_length(file, table_path)
                 if sum_rows >= n_rows:
                     break
-            files = files[: idx + 1]
+            filtered_files = files[: idx + 1]
             logger.debug(f"Limiting files to {len(files)} based on n_rows={n_rows}")
+        else: 
+            filtered_files = files
         df = lazynwb.tables.get_df(
-            files,
+            filtered_files,
             search_term=table_path,
             exact_path=True,
             include_column_names=initial_columns or None,
