@@ -89,7 +89,7 @@ class FileAccessor:
     type of backend as a string for convenience.
 
     - instantiate with a path to an NWB file or an open h5py.File, h5py.Group, or
-    zarr.Group object
+      zarr.Group object
     - access components via the mapping interface
     - file accessor remains open in read-only mode unless used as a context manager
 
