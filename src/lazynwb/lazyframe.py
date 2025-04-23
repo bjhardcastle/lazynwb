@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Sequence
-from typing import Iterable
+from collections.abc import Iterable, Iterator
 
 import npc_io
 import polars as pl
@@ -13,8 +12,13 @@ import lazynwb.tables
 
 logger = logging.getLogger(__name__)
 
+
 def scan_nwb(
-    source: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
+    source: (
+        npc_io.PathLike
+        | lazynwb.file_io.FileAccessor
+        | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor]
+    ),
     table_path: str,
     first_n_files_to_infer_schema: int | None = 1,
     exclude_array_columns: bool = False,
@@ -24,10 +28,10 @@ def scan_nwb(
 
     This function allows the query optimizer to push down predicates and projections to the scan
     level, typically increasing performance and reducing memory overhead.
-    
+
     See https://docs.pola.rs/user-guide/lazy/using/#using-the-lazy-api-from-a-file for LazyFrame
     usage.
-    
+
     Parameters
     ----------
     source : str, PathLike, lazynwb.file_io.FileAccessor, or iterable of these
@@ -40,7 +44,7 @@ def scan_nwb(
     exclude_array_columns : bool, default False
         If True, columns containing list or array-like data will be excluded from the schema and any
         resulting DataFrame.
-        
+
     Returns
     -------
     pl.LazyFrame
@@ -52,7 +56,7 @@ def scan_nwb(
     for i, f in enumerate(source):
         if not isinstance(f, lazynwb.file_io.FileAccessor):
             files[i] = lazynwb.file_io.FileAccessor(f)
-    
+
     logger.debug(f"Fetching schema for {table_path!r} from {len(files)} files")
     # This doesn't need to be fetched eagerly - could be converted to a callable
     schema = lazynwb.tables._get_table_schema(
@@ -73,12 +77,12 @@ def scan_nwb(
         Generator function that creates the source, following the example in polars.io.plugins.
         Note: the signature of this function is pre-determined, to fulfill the requirements of the
         register_io_source function.
-        
+
         Work is split into multiple parts if we have a predicate:
         1) fetch all data for columns in the predicate,
         2) filter the data with the predicate,
         3) join with values from the remaining columns in with_columns, by reading only the relevant files/rows.
-        
+
         Without a predicate, we fetch all data for all columns.
         """
         if batch_size is None:
@@ -125,7 +129,7 @@ def scan_nwb(
                 False
                 if initial_columns
                 else exclude_array_columns
-                # if array columns were requested specifically, they will be returned regardless of 
+                # if array columns were requested specifically, they will be returned regardless of
                 # this setting. Otherwise, use the user setting.
             ),
         )
@@ -165,7 +169,7 @@ def scan_nwb(
                                 include_column_names=include_column_names,
                                 nwb_path_to_row_indices=nwb_path_to_row_indices,
                                 disable_progress=False,
-                                use_process_pool=False, # no speed gain, cannot use from top-level of scripts
+                                use_process_pool=False,  # no speed gain, cannot use from top-level of scripts
                                 as_polars=True,
                             )
                         ),

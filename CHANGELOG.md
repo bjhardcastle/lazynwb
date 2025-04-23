@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.18...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.19...HEAD)</small>
+
+<!-- insertion marker -->
+## [v0.2.19](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.19) - 2025-04-23
+
+<small>[Compare with v0.2.18](https://github.com/bjhardcastle/lazynwb/compare/v0.2.18...v0.2.19)</small>
 
 ### Fixed
 
@@ -16,7 +21,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Fix getting multi-dim array columns ([aa06281](https://github.com/bjhardcastle/lazynwb/commit/aa062811462008b180ad74484d2ba264af9adcc7) by bjhardcastle).
 - Fix docstring ([77ea55a](https://github.com/bjhardcastle/lazynwb/commit/77ea55a8f961cc2410443c3a1cf872129f8209a2) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.18](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.18) - 2025-04-23
 
 <small>[Compare with v0.2.17](https://github.com/bjhardcastle/lazynwb/compare/v0.2.17...v0.2.18)</small>
