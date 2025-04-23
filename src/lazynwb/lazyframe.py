@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator, Sequence
+from typing import Iterable
 
+import npc_io
 import polars as pl
 from polars.io.plugins import register_io_source
 
@@ -11,22 +13,51 @@ import lazynwb.tables
 
 logger = logging.getLogger(__name__)
 
-
 def scan_nwb(
-    files: lazynwb.file_io.FileAccessor | Sequence[lazynwb.file_io.FileAccessor],
+    source: npc_io.PathLike | lazynwb.file_io.FileAccessor | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor],
     table_path: str,
     first_n_files_to_infer_schema: int | None = 1,
     exclude_array_columns: bool = False,
 ) -> pl.LazyFrame:
-    if not isinstance(files, Sequence):
-        files = [files]
-    if not isinstance(files[0], lazynwb.file_io.FileAccessor):
-        files = [lazynwb.file_io.FileAccessor(file) for file in files]
+    """
+    Lazily read from a common table in one or more local or cloud-hosted NWB files.
 
+    This function allows the query optimizer to push down predicates and projections to the scan
+    level, typically increasing performance and reducing memory overhead.
+    
+    See https://docs.pola.rs/user-guide/lazy/using/#using-the-lazy-api-from-a-file for LazyFrame
+    usage.
+    
+    Parameters
+    ----------
+    source : str, PathLike, lazynwb.file_io.FileAccessor, or iterable of these
+        Paths to the NWB file(s) to read from. May be hdf5 or zarr.
+    table_path : str
+        The internal path to the table in the NWB file, e.g. '/intervals/trials' or '/units'
+        It is expected that the table path is the same for all files.
+    first_n_files_to_infer_schema : int, None, default 1
+        The number of files to read to infer the table schema. If None, all files will be read.
+    exclude_array_columns : bool, default False
+        If True, columns containing list or array-like data will be excluded from the schema and any
+        resulting DataFrame.
+        
+    Returns
+    -------
+    pl.LazyFrame
+    """
+    if not isinstance(source, Iterable) or isinstance(source, str):
+        source = [source]
+
+    files: list[lazynwb.file_io.FileAccessor] = []
+    for i, f in enumerate(source):
+        if not isinstance(f, lazynwb.file_io.FileAccessor):
+            files[i] = lazynwb.file_io.FileAccessor(f)
+    
     logger.debug(f"Fetching schema for {table_path!r} from {len(files)} files")
+    # This doesn't need to be fetched eagerly - could be converted to a callable
     schema = lazynwb.tables._get_table_schema(
-        files,
-        table_path,
+        files=files,
+        table_path=table_path,
         first_n_files_to_read=first_n_files_to_infer_schema,
         include_array_columns=not exclude_array_columns,
         include_internal_columns=True,
@@ -39,8 +70,16 @@ def scan_nwb(
         batch_size: int | None,
     ) -> Iterator[pl.DataFrame]:
         """
-        Generator function that creates the source.
-        This function will be registered as IO source.
+        Generator function that creates the source, following the example in polars.io.plugins.
+        Note: the signature of this function is pre-determined, to fulfill the requirements of the
+        register_io_source function.
+        
+        Work is split into multiple parts if we have a predicate:
+        1) fetch all data for columns in the predicate,
+        2) filter the data with the predicate,
+        3) join with values from the remaining columns in with_columns, by reading only the relevant files/rows.
+        
+        Without a predicate, we fetch all data for all columns.
         """
         if batch_size is None:
             batch_size = 1_000
@@ -75,7 +114,7 @@ def scan_nwb(
         else:
             filtered_files = files
         df = lazynwb.tables.get_df(
-            filtered_files,
+            nwb_data_sources=filtered_files,
             search_term=table_path,
             exact_path=True,
             include_column_names=initial_columns or None,
@@ -86,8 +125,8 @@ def scan_nwb(
                 False
                 if initial_columns
                 else exclude_array_columns
-                # if specific columns were requested, they will be returned regardless of whether or
-                # not they're array columns. Otherwise, use the user setting
+                # if array columns were requested specifically, they will be returned regardless of 
+                # this setting. Otherwise, use the user setting.
             ),
         )
 
@@ -124,13 +163,9 @@ def scan_nwb(
                                 search_term=table_path,
                                 exact_path=True,
                                 include_column_names=include_column_names,
-                                exclude_array_columns=False,
                                 nwb_path_to_row_indices=nwb_path_to_row_indices,
                                 disable_progress=False,
-                                use_process_pool=any(
-                                    isinstance(schema[name], pl.List)
-                                    for name in include_column_names
-                                ),
+                                use_process_pool=False, # no speed gain, cannot use from top-level of scripts
                                 as_polars=True,
                             )
                         ),
