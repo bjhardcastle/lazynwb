@@ -354,7 +354,7 @@ def _get_table_data(
         else:
             column_data[column_name] = column_accessors[column_name][_idx]
 
-    if not exclude_array_columns and indexed_column_names:
+    if indexed_column_names and (include_column_names is not None or not exclude_array_columns):
         data_column_names = {
             name for name in indexed_column_names if not name.endswith("_index")
         }
@@ -367,7 +367,7 @@ def _get_table_data(
                 index_column_accessor=column_accessors[f"{column_name}_index"],
                 table_row_indices=table_row_indices,
             )
-    if not exclude_array_columns and multi_dim_column_names:
+    if multi_dim_column_names and (include_column_names is not None or not exclude_array_columns):
         logger.debug(
             f"materializing multi-dimensional array columns for {file._path}/{search_term}: {multi_dim_column_names}"
         )
