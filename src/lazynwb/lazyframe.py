@@ -16,7 +16,7 @@ def scan_nwb(
     files: lazynwb.file_io.FileAccessor | Sequence[lazynwb.file_io.FileAccessor],
     table_path: str,
     first_n_files_to_infer_schema: int | None = 1,
-    include_array_columns: bool = True,
+    exclude_array_columns: bool = False,
 ) -> pl.LazyFrame:
     if not isinstance(files, Sequence):
         files = [files]
@@ -28,7 +28,7 @@ def scan_nwb(
         files,
         table_path,
         first_n_files_to_read=first_n_files_to_infer_schema,
-        include_array_columns=include_array_columns,
+        include_array_columns=not exclude_array_columns,
         include_internal_columns=True,
     )
 
@@ -85,9 +85,9 @@ def scan_nwb(
             exclude_array_columns=(
                 False
                 if initial_columns
-                else (not include_array_columns)
+                else exclude_array_columns
                 # if specific columns were requested, they will be returned regardless of whether or
-                # not they're array columns. Otherwise, use the user setting for include_array_columns
+                # not they're array columns. Otherwise, use the user setting
             ),
         )
 
