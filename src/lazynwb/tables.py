@@ -354,7 +354,9 @@ def _get_table_data(
         else:
             column_data[column_name] = column_accessors[column_name][_idx]
 
-    if indexed_column_names and (include_column_names is not None or not exclude_array_columns):
+    if indexed_column_names and (
+        include_column_names is not None or not exclude_array_columns
+    ):
         data_column_names = {
             name for name in indexed_column_names if not name.endswith("_index")
         }
@@ -367,7 +369,9 @@ def _get_table_data(
                 index_column_accessor=column_accessors[f"{column_name}_index"],
                 table_row_indices=table_row_indices,
             )
-    if multi_dim_column_names and (include_column_names is not None or not exclude_array_columns):
+    if multi_dim_column_names and (
+        include_column_names is not None or not exclude_array_columns
+    ):
         logger.debug(
             f"materializing multi-dimensional array columns for {file._path}/{search_term}: {multi_dim_column_names}"
         )
@@ -518,10 +522,10 @@ def _format_multi_dim_column(
     """Pandas inists 'Per-column arrays must each be 1-dimensional': this converts to a list of
     arrays, if not already"""
     if isinstance(column_data[0], list):
-        return list(column_data) # type: ignore[arg-type]
+        return list(column_data)  # type: ignore[arg-type]
     else:
         # np array-like
-        return [x.tolist() for x in column_data] # type: ignore[misc]
+        return [x.tolist() for x in column_data]  # type: ignore[misc]
 
 
 def get_table_path(df: FrameType, assert_unique: bool = True) -> str:
