@@ -519,16 +519,20 @@ def _format_multi_dim_column(
     arrays, if not already"""
     # determine how many levels of nested list-like objects we have, but don't confuse str (iterable)
     assert isinstance(column_data[0], Iterable) and not isinstance(column_data[0], str)
-    if isinstance(column_data[0][0], Iterable) and not isinstance(column_data[0][0], str):
+    if isinstance(column_data[0][0], Iterable) and not isinstance(
+        column_data[0][0], str
+    ):
         # ndim = 3
-        if isinstance(column_data[0][0][0], Iterable) and isinstance(column_data[0][0][0], str):
-            raise NotImplementedError(f"Reading 4-D arrays into tabular format not supported")
+        if isinstance(column_data[0][0][0], Iterable) and isinstance(
+            column_data[0][0][0], str
+        ):
+            raise NotImplementedError(
+                "Reading 4-D arrays into tabular format not supported"
+            )
         return list(list(list(y)) for x in column_data for y in x)
     else:
         # ndim = 2
         return list(list(x) for x in column_data)
-
-
 
 
 def get_table_path(df: FrameType, assert_unique: bool = True) -> str:
