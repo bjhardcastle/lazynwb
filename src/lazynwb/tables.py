@@ -178,16 +178,14 @@ def get_df(
         results: list[dict] = []
         for path in paths:
             results.append(
-                frame_cls(
-                    _get_df_helper(
-                        nwb_path=path,
-                        search_term=search_term,
-                        exact_path=exact_path,
-                        exclude_column_names=exclude_column_names,
-                        include_column_names=include_column_names,
-                        exclude_array_columns=exclude_array_columns,
-                        table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
-                    )
+                _get_df_helper(
+                    nwb_path=path,
+                    search_term=search_term,
+                    exact_path=exact_path,
+                    exclude_column_names=exclude_column_names,
+                    include_column_names=include_column_names,
+                    exclude_array_columns=exclude_array_columns,
+                    table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
                 )
             )
     else:
@@ -375,7 +373,7 @@ def _get_table_data(
         )
         for column_name in multi_dim_column_names:
             column_data[column_name] = _format_multi_dim_column(
-                column_accessors[column_name][_idx]
+                column_accessors[column_name][_idx, :]
             )
     try:
         column_length = len(next(iter(column_data.values())))
@@ -519,9 +517,18 @@ def _format_multi_dim_column(
 ) -> list[npt.NDArray]:
     """Pandas inists 'Per-column arrays must each be 1-dimensional': this converts to a list of
     arrays, if not already"""
-    if isinstance(column_data, list):
-        return column_data
-    return list(column_data)
+    # determine how many levels of nested list-like objects we have, but don't confuse str (iterable)
+    assert isinstance(column_data[0], Iterable) and not isinstance(column_data[0], str)
+    if isinstance(column_data[0][0], Iterable) and not isinstance(column_data[0][0], str):
+        # ndim = 3
+        if isinstance(column_data[0][0][0], Iterable) and isinstance(column_data[0][0][0], str):
+            raise NotImplementedError(f"Reading 4-D arrays into tabular format not supported")
+        return list(list(list(y)) for x in column_data for y in x)
+    else:
+        # ndim = 2
+        return list(list(x) for x in column_data)
+
+
 
 
 def get_table_path(df: FrameType, assert_unique: bool = True) -> str:
