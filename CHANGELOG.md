@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.20...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.21...HEAD)</small>
+
+### Fixed
+
+- Fix indexing bug in file conversion ([2713514](https://github.com/bjhardcastle/lazynwb/commit/27135140a952e8933f037da469869a47a6398aaf) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.21](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.21) - 2025-04-24
+
+<small>[Compare with v0.2.20](https://github.com/bjhardcastle/lazynwb/compare/v0.2.20...v0.2.21)</small>
 
 ### Added
 
 - Add low memory mode to scan_nwb lazyframe ([37bfb5d](https://github.com/bjhardcastle/lazynwb/commit/37bfb5d0eb348cbd9b55fdc7d2bb5df217272ec0) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.20](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.20) - 2025-04-23
 
 <small>[Compare with v0.2.19](https://github.com/bjhardcastle/lazynwb/compare/v0.2.19...v0.2.20)</small>

@@ -55,7 +55,7 @@ def scan_nwb(
     if not isinstance(source, Iterable) or isinstance(source, str):
         source = [source]
 
-    files: list[lazynwb.file_io.FileAccessor] = source # type: ignore[assignment]
+    files: list[lazynwb.file_io.FileAccessor] = source  # type: ignore[assignment]
     for i, f in enumerate(source):
         if not isinstance(f, lazynwb.file_io.FileAccessor):
             files[i] = lazynwb.file_io.FileAccessor(f)
