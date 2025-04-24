@@ -66,6 +66,7 @@ def get_df(
     disable_progress: bool = False,
     raise_on_missing: bool = False,
     suppress_errors: bool = False,
+    low_memory: bool = False,
     as_polars: Literal[False] = False,
 ) -> pd.DataFrame: ...
 
@@ -89,6 +90,7 @@ def get_df(
     disable_progress: bool = False,
     raise_on_missing: bool = False,
     suppress_errors: bool = False,
+    low_memory: bool = False,
     as_polars: Literal[True] = True,
 ) -> pl.DataFrame: ...
 
@@ -111,6 +113,7 @@ def get_df(
     disable_progress: bool = False,
     raise_on_missing: bool = False,
     suppress_errors: bool = False,
+    low_memory: bool = False,
     as_polars: bool = False,
 ) -> pd.DataFrame | pl.DataFrame:
     """ ""Get a DataFrame from one or more NWB files.
@@ -146,6 +149,8 @@ def get_df(
     suppress_errors : bool, default False
         If True, any errors encountered while reading the files will be suppressed and a warning
         will be logged.
+    low_memory : bool, default False
+        If True, the data will be read in smaller chunks to reduce memory usage, at the cost of speed.
     as_polars : bool, default False
         If True, a Polars DataFrame will be returned. Otherwise, a Pandas DataFrame will be returned.
     """
@@ -174,7 +179,6 @@ def get_df(
         return npc_io.from_pathlike(file).as_posix()
 
     if not parallel or len(paths) == 1:  # don't use a pool for a single file
-        frame_cls = pl.DataFrame if as_polars else pd.DataFrame
         results: list[dict] = []
         for path in paths:
             results.append(
@@ -186,6 +190,7 @@ def get_df(
                     include_column_names=include_column_names,
                     exclude_array_columns=exclude_array_columns,
                     table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
+                    low_memory=low_memory,
                 )
             )
     else:
@@ -212,6 +217,7 @@ def get_df(
                 include_column_names=include_column_names,
                 exclude_array_columns=exclude_array_columns,
                 table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
+                low_memory=low_memory,
             )
             future_to_path[future] = path
         futures = concurrent.futures.as_completed(future_to_path)
@@ -262,6 +268,7 @@ def _get_table_data(
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
     table_row_indices: Sequence[int] | None = None,
+    low_memory: bool = False,
 ) -> dict[str, Any]:
     t0 = time.time()
     if (
@@ -368,6 +375,7 @@ def _get_table_data(
                 data_column_accessor=column_accessors[column_name],
                 index_column_accessor=column_accessors[f"{column_name}_index"],
                 table_row_indices=table_row_indices,
+                low_memory=low_memory,
             )
     if multi_dim_column_names and (
         include_column_names is not None or not exclude_array_columns
@@ -405,6 +413,7 @@ def get_indexed_column_data(
     data_column_accessor: zarr.Array | h5py.Dataset,
     index_column_accessor: zarr.Array | h5py.Dataset,
     table_row_indices: Sequence[int] | None = None,
+    low_memory: bool = False,
 ) -> list[npt.NDArray[np.float64]]:
     """Get the data for an indexed column in a table, given the data and index array accessors.
 
@@ -440,13 +449,19 @@ def get_indexed_column_data(
     ), "length of data_indices is incorrect"
 
     # read actual data and split into sub-vectors for each row of the table:
-    #! reading all data is faster than accessing non-sequential indices (tested for local hdf5):
-    data_array: npt.NDArray[np.float64] = data_column_accessor[:][data_indices]
+    if low_memory:
+        def _get_data(start_idx, end_idx):
+            return data_column_accessor[data_indices[start_idx: end_idx]]
+    else:
+        # reading all data is faster than accessing non-sequential indices (tested for local hdf5)
+        data_array: npt.NDArray[np.float64] = data_column_accessor[:][data_indices]
+        def _get_data(start_idx, end_idx):
+            return data_array[start_idx:end_idx]
     column_data = []
     start_idx = 0
     for run_length in np.diff(index_array)[table_row_indices]:
         end_idx = start_idx + run_length
-        column_data.append(data_array[start_idx:end_idx])
+        column_data.append(_get_data(start_idx, end_idx))
         start_idx = end_idx
     return column_data
 

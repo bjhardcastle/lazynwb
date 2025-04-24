@@ -12,7 +12,6 @@ import lazynwb.tables
 
 logger = logging.getLogger(__name__)
 
-
 def scan_nwb(
     source: (
         npc_io.PathLike
@@ -22,6 +21,7 @@ def scan_nwb(
     table_path: str,
     first_n_files_to_infer_schema: int | None = 1,
     exclude_array_columns: bool = False,
+    low_memory: bool = False,
 ) -> pl.LazyFrame:
     """
     Lazily read from a common table in one or more local or cloud-hosted NWB files.
@@ -44,6 +44,8 @@ def scan_nwb(
     exclude_array_columns : bool, default False
         If True, columns containing list or array-like data will be excluded from the schema and any
         resulting DataFrame.
+    low_memory : bool, default False
+        If True, the data will be read in smaller chunks to reduce memory usage, at the cost of speed.
 
     Returns
     -------
@@ -132,6 +134,7 @@ def scan_nwb(
                 # if array columns were requested specifically, they will be returned regardless of
                 # this setting. Otherwise, use the user setting.
             ),
+            low_memory=low_memory,
         )
 
         if predicate is None:
@@ -171,6 +174,7 @@ def scan_nwb(
                                 disable_progress=False,
                                 use_process_pool=False,  # no speed gain, cannot use from top-level of scripts
                                 as_polars=True,
+                                low_memory=low_memory,
                             )
                         ),
                         on=[
