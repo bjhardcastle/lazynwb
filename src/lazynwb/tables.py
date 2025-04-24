@@ -156,12 +156,15 @@ def get_df(
     """
     t0 = time.time()
 
-    if isinstance(
-        nwb_data_sources, (str, lazynwb.file_io.FileAccessor)
-    ) or not isinstance(nwb_data_sources, Iterable):
-        paths = (nwb_data_sources,)
+    if nwb_path_to_row_indices is not None:
+        paths = tuple(nwb_path_to_row_indices.keys())
     else:
-        paths = tuple(nwb_data_sources)
+        if isinstance(
+            nwb_data_sources, (str, lazynwb.file_io.FileAccessor)
+        ) or not isinstance(nwb_data_sources, Iterable):
+            paths = (nwb_data_sources,)
+        else:
+            paths = tuple(nwb_data_sources)
 
     # speedup known table locations:
     if search_term == "trials":
