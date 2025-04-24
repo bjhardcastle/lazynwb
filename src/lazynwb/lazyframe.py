@@ -54,9 +54,9 @@ def scan_nwb(
     """
     if not isinstance(source, Iterable) or isinstance(source, str):
         source = [source]
-    
+
     files: list[lazynwb.file_io.FileAccessor] = []
-    for f in source: # type: ignore[union-attr]
+    for f in source:  # type: ignore[union-attr]
         if isinstance(f, lazynwb.file_io.FileAccessor):
             files.append(f)
         else:

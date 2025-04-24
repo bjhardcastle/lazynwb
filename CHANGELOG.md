@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.21...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.22...HEAD)</small>
+
+### Fixed
+
+- Fix parsing file paths ([244774c](https://github.com/bjhardcastle/lazynwb/commit/244774ceb1835fd877cd9aed377b71e104e9c92d) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.22](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.22) - 2025-04-24
+
+<small>[Compare with v0.2.21](https://github.com/bjhardcastle/lazynwb/compare/v0.2.21...v0.2.22)</small>
 
 ### Fixed
 
 - Fix indexing bug in file conversion ([2713514](https://github.com/bjhardcastle/lazynwb/commit/27135140a952e8933f037da469869a47a6398aaf) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.21](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.21) - 2025-04-24
 
 <small>[Compare with v0.2.20](https://github.com/bjhardcastle/lazynwb/compare/v0.2.20...v0.2.21)</small>
