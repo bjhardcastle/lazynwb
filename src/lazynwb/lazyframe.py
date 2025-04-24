@@ -12,6 +12,7 @@ import lazynwb.tables
 
 logger = logging.getLogger(__name__)
 
+
 def scan_nwb(
     source: (
         npc_io.PathLike

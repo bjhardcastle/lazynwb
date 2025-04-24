@@ -8,9 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.19...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.20...HEAD)</small>
+
+### Added
+
+- Add low memory mode to scan_nwb lazyframe ([37bfb5d](https://github.com/bjhardcastle/lazynwb/commit/37bfb5d0eb348cbd9b55fdc7d2bb5df217272ec0) by bjhardcastle).
 
 <!-- insertion marker -->
+## [v0.2.20](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.20) - 2025-04-23
+
+<small>[Compare with v0.2.19](https://github.com/bjhardcastle/lazynwb/compare/v0.2.19...v0.2.20)</small>
+
 ## [v0.2.19](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.19) - 2025-04-23
 
 <small>[Compare with v0.2.18](https://github.com/bjhardcastle/lazynwb/compare/v0.2.18...v0.2.19)</small>

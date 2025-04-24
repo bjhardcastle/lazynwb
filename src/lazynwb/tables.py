@@ -450,13 +450,17 @@ def get_indexed_column_data(
 
     # read actual data and split into sub-vectors for each row of the table:
     if low_memory:
+
         def _get_data(start_idx, end_idx):
-            return data_column_accessor[data_indices[start_idx: end_idx]]
+            return data_column_accessor[data_indices[start_idx:end_idx]]
+
     else:
         # reading all data is faster than accessing non-sequential indices (tested for local hdf5)
         data_array: npt.NDArray[np.float64] = data_column_accessor[:][data_indices]
+
         def _get_data(start_idx, end_idx):
             return data_array[start_idx:end_idx]
+
     column_data = []
     start_idx = 0
     for run_length in np.diff(index_array)[table_row_indices]:
