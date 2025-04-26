@@ -36,6 +36,9 @@ NWB_PATH_COLUMN_NAME = "_nwb_path"
 TABLE_PATH_COLUMN_NAME = "_table_path"
 TABLE_INDEX_COLUMN_NAME = "_table_index"
 
+INTERVALS_TABLE_INDEX_COLUMN_NAME = "_intervals" + TABLE_INDEX_COLUMN_NAME
+UNITS_TABLE_INDEX_COLUMN_NAME = "_units" + TABLE_INDEX_COLUMN_NAME
+    
 
 def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]:
     if isinstance(nwb_path, lazynwb.file_io.FileAccessor):
@@ -855,7 +858,6 @@ def _get_internal_file_paths(
             results[group.name] = group
     return results
 
-
 def insert_is_observed(
     intervals_frame: polars._typing.FrameType,
     units_frame: polars._typing.FrameType | None = None,
@@ -894,14 +896,14 @@ def insert_is_observed(
         )
 
     units_lf = units_lf.rename(
-        {TABLE_INDEX_COLUMN_NAME: f"{TABLE_INDEX_COLUMN_NAME}_units"}, strict=False
+        {TABLE_INDEX_COLUMN_NAME: UNITS_TABLE_INDEX_COLUMN_NAME}, strict=False
     )
     units_schema = units_lf.collect_schema()
     if "obs_intervals" not in units_schema:
         raise lazynwb.exceptions.ColumnError(
             "units frame does not contain 'obs_intervals' column"
         )
-    unit_table_index_col = f"{TABLE_INDEX_COLUMN_NAME}_units"
+    unit_table_index_col = UNITS_TABLE_INDEX_COLUMN_NAME
     if unit_table_index_col not in units_schema:
         raise lazynwb.exceptions.ColumnError(
             f"units frame does not contain a row index column to link rows to original table position (e.g {TABLE_INDEX_COLUMN_NAME!r})"
@@ -1004,21 +1006,19 @@ def _spikes_times_in_intervals_helper(
         intervals_df = intervals_df.with_columns(
             pl.concat_list(start, end).alias(f"{temp_col_prefix}_{col_name}"),
         )
-    trials_id_col = f"_intervals{TABLE_INDEX_COLUMN_NAME}"
-    units_id_col = f"_units{TABLE_INDEX_COLUMN_NAME}"
     results: dict[str, list] = {
-        units_id_col: [],
-        trials_id_col: [],
+        UNITS_TABLE_INDEX_COLUMN_NAME: [],
+        INTERVALS_TABLE_INDEX_COLUMN_NAME: [],
         NWB_PATH_COLUMN_NAME: [],
     }
     for col_name in col_name_to_intervals.keys():
         results[col_name] = []
-    results[trials_id_col].extend(
+    results[INTERVALS_TABLE_INDEX_COLUMN_NAME].extend(
         intervals_df[TABLE_INDEX_COLUMN_NAME].to_list() * len(units_df)
     )
 
     for row in units_df.iter_rows(named=True):
-        results[units_id_col].extend([row[TABLE_INDEX_COLUMN_NAME]] * len(intervals_df))
+        results[UNITS_TABLE_INDEX_COLUMN_NAME].extend([row[TABLE_INDEX_COLUMN_NAME]] * len(intervals_df))
         results[NWB_PATH_COLUMN_NAME].extend([nwb_path] * len(intervals_df))
 
         for col_name in col_name_to_intervals:
@@ -1041,7 +1041,7 @@ def _spikes_times_in_intervals_helper(
 
     results_df = pl.DataFrame(results).join(
         other=intervals_df.drop(pl.selectors.starts_with(temp_col_prefix)),
-        left_on=trials_id_col,
+        left_on=INTERVALS_TABLE_INDEX_COLUMN_NAME,
         right_on=TABLE_INDEX_COLUMN_NAME,
         how="inner",
     )
@@ -1062,7 +1062,7 @@ def _spikes_times_in_intervals_helper(
             ]
         )
         if keep_only_necessary_cols:
-            results_df = results_df.drop(pl.all().exclude(units_id_col, trials_id_col, *col_name_to_intervals.keys()))  # type: ignore[arg-type]
+            results_df = results_df.drop(pl.all().exclude(UNITS_TABLE_INDEX_COLUMN_NAME, INTERVALS_TABLE_INDEX_COLUMN_NAME, *col_name_to_intervals.keys()))  # type: ignore[arg-type]
 
     return results_df.to_dict(as_series=False)
 
@@ -1116,7 +1116,7 @@ def get_spike_times_in_intervals(
 
     def _handle_result(result):
         if not all(
-            len(v) == len(result[f"{TABLE_INDEX_COLUMN_NAME}_trials"])
+            len(v) == len(result[INTERVALS_TABLE_INDEX_COLUMN_NAME])
             for v in result.values()
         ):
             return
@@ -1189,7 +1189,7 @@ def get_spike_times_in_intervals(
             pl.concat(results, how="diagonal_relaxed")
             .join(
                 pl.DataFrame(units_df),
-                left_on=[f"_units{TABLE_INDEX_COLUMN_NAME}", NWB_PATH_COLUMN_NAME],
+                left_on=[UNITS_TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
                 right_on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
                 how="inner",
             )
