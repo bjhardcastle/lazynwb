@@ -1018,7 +1018,9 @@ def _spikes_times_in_intervals_helper(
 
     for row in units_df.iter_rows(named=True):
         results[units_id_col].extend([row[TABLE_INDEX_COLUMN_NAME]] * len(intervals_df))
-        results[NWB_PATH_COLUMN_NAME].extend([row[NWB_PATH_COLUMN_NAME]] * len(intervals_df))
+        results[NWB_PATH_COLUMN_NAME].extend(
+            [row[NWB_PATH_COLUMN_NAME]] * len(intervals_df)
+        )
 
         for col_name in col_name_to_intervals:
             # get spike times with start:end interval for each row of the trials table
