@@ -38,7 +38,7 @@ TABLE_INDEX_COLUMN_NAME = "_table_index"
 
 INTERVALS_TABLE_INDEX_COLUMN_NAME = "_intervals" + TABLE_INDEX_COLUMN_NAME
 UNITS_TABLE_INDEX_COLUMN_NAME = "_units" + TABLE_INDEX_COLUMN_NAME
-    
+
 
 def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]:
     if isinstance(nwb_path, lazynwb.file_io.FileAccessor):
@@ -858,6 +858,7 @@ def _get_internal_file_paths(
             results[group.name] = group
     return results
 
+
 def insert_is_observed(
     intervals_frame: polars._typing.FrameType,
     units_frame: polars._typing.FrameType | None = None,
@@ -1018,7 +1019,9 @@ def _spikes_times_in_intervals_helper(
     )
 
     for row in units_df.iter_rows(named=True):
-        results[UNITS_TABLE_INDEX_COLUMN_NAME].extend([row[TABLE_INDEX_COLUMN_NAME]] * len(intervals_df))
+        results[UNITS_TABLE_INDEX_COLUMN_NAME].extend(
+            [row[TABLE_INDEX_COLUMN_NAME]] * len(intervals_df)
+        )
         results[NWB_PATH_COLUMN_NAME].extend([nwb_path] * len(intervals_df))
 
         for col_name in col_name_to_intervals:

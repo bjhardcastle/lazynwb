@@ -8,13 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.31...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.32...HEAD)</small>
+
+<!-- insertion marker -->
+## [v0.2.32](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.32) - 2025-04-26
+
+<small>[Compare with v0.2.31](https://github.com/bjhardcastle/lazynwb/compare/v0.2.31...v0.2.32)</small>
 
 ### Fixed
 
 - Fix missing identifying column in spike times helper ([051ef93](https://github.com/bjhardcastle/lazynwb/commit/051ef93ddacd740b464f38ad2f6564fd1addfdbb) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.31](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.31) - 2025-04-26
 
 <small>[Compare with v0.2.30](https://github.com/bjhardcastle/lazynwb/compare/v0.2.30...v0.2.31)</small>
