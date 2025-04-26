@@ -136,7 +136,7 @@ def scan_nwb(
             exact_path=True,
             include_column_names=initial_columns or None,
             disable_progress=False,
-            suppress_errors=True,
+            ignore_errors=True,
             as_polars=True,
             exclude_array_columns=(
                 False

@@ -67,7 +67,7 @@ def get_df(
     use_process_pool: bool = False,
     disable_progress: bool = False,
     raise_on_missing: bool = False,
-    suppress_errors: bool = False,
+    ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: Literal[False] = False,
 ) -> pd.DataFrame: ...
@@ -91,7 +91,7 @@ def get_df(
     use_process_pool: bool = False,
     disable_progress: bool = False,
     raise_on_missing: bool = False,
-    suppress_errors: bool = False,
+    ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: Literal[True] = True,
 ) -> pl.DataFrame: ...
@@ -114,7 +114,7 @@ def get_df(
     use_process_pool: bool = False,
     disable_progress: bool = False,
     raise_on_missing: bool = False,
-    suppress_errors: bool = False,
+    ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: bool = False,
 ) -> pd.DataFrame | pl.DataFrame:
@@ -148,7 +148,7 @@ def get_df(
         If True, the progress bar will not be shown.
     raise_on_missing : bool, default False
         If True, a KeyError will be raised if the table is not found in any of the files.
-    suppress_errors : bool, default False
+    ignore_errors : bool, default False
         If True, any errors encountered while reading the files will be suppressed and a warning
         will be logged.
     low_memory : bool, default False
@@ -246,7 +246,7 @@ def get_df(
                     )
                     continue
             except Exception:
-                if not suppress_errors:
+                if not ignore_errors:
                     raise
                 else:
                     logger.exception(

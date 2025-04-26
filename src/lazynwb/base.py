@@ -238,7 +238,7 @@ class LazyNWB:
         use_process_pool: bool = False,
         disable_progress: bool = True,
         raise_on_missing: bool = True,
-        suppress_errors: bool = False,
+        ignore_errors: bool = False,
         as_polars: Literal[False] = False,
     ) -> pd.DataFrame: ...
 
@@ -253,7 +253,7 @@ class LazyNWB:
         use_process_pool: bool = False,
         disable_progress: bool = True,
         raise_on_missing: bool = True,
-        suppress_errors: bool = False,
+        ignore_errors: bool = False,
         as_polars: Literal[True] = True,
     ) -> pl.DataFrame: ...
 
@@ -267,7 +267,7 @@ class LazyNWB:
         use_process_pool: bool = False,
         disable_progress: bool = True,
         raise_on_missing: bool = True,
-        suppress_errors: bool = False,
+        ignore_errors: bool = False,
         as_polars: bool = False,
     ) -> pd.DataFrame | pl.DataFrame:
         return lazynwb.tables.get_df(
@@ -280,7 +280,7 @@ class LazyNWB:
             use_process_pool=use_process_pool,
             disable_progress=disable_progress,
             raise_on_missing=raise_on_missing,
-            suppress_errors=suppress_errors,
+            ignore_errors=ignore_errors,
             as_polars=as_polars,
         )  # type: ignore[call-overload]
 
