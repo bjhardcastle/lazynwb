@@ -1183,10 +1183,13 @@ def get_spike_times_in_intervals(
                 )
             else:
                 _handle_result(result)
+    columns_to_drop = pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME)
+    # original table paths are ambiguous now we've joined rows from units and trials
+    # - we find all that start with, in case any joins added a suffix 
     if keep_only_necessary_cols:
         df = pl.concat(results, how="diagonal_relaxed").drop(
-            pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME), strict=False
-        )  # original table paths are ambiguous now we've joined rows from units and trials
+            columns_to_drop, strict=False
+        )  
     else:
         df = (
             pl.concat(results, how="diagonal_relaxed")
@@ -1197,7 +1200,7 @@ def get_spike_times_in_intervals(
                 how="inner",
             )
             .drop(
-                pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME), strict=False
+                columns_to_drop, strict=False
             )  # original table paths are ambiguous now we've joined rows from units and trials
         )
     if as_polars:
