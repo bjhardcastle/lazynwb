@@ -1183,19 +1183,19 @@ def get_spike_times_in_intervals(
     if keep_only_necessary_cols:
         df = pl.concat(results, how="diagonal_relaxed").drop(
             pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME), strict=False
-        )  # table paths is ambiguous now we've joined rows from units and trials
+        )  # original table paths are ambiguous now we've joined rows from units and trials
     else:
         df = (
             pl.concat(results, how="diagonal_relaxed")
             .join(
                 pl.DataFrame(units_df),
-                left_on=[f"{TABLE_INDEX_COLUMN_NAME}_units", NWB_PATH_COLUMN_NAME],
+                left_on=[f"_units{TABLE_INDEX_COLUMN_NAME}", NWB_PATH_COLUMN_NAME],
                 right_on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
                 how="inner",
             )
             .drop(
                 pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME), strict=False
-            )  # table paths is ambiguous now we've joined rows from units and trials
+            )  # original table paths are ambiguous now we've joined rows from units and trials
         )
     if as_polars:
         return df
