@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import concurrent.futures
 import contextlib
 import difflib
@@ -18,6 +19,7 @@ import polars as pl
 import polars._typing
 import polars.datatypes.convert
 import tqdm
+import upath
 import zarr
 
 import lazynwb.exceptions
@@ -728,9 +730,8 @@ def _get_table_schema(
         files = [files]
     if first_n_files_to_read is not None:
         files = files[:first_n_files_to_read]
-    schema = {}
-    # TODO speed up with threadpool
-    for file in files:
+        
+    def _get_table_schema_helper(file: lazynwb.file_io.FileAccessor) -> dict[str, Any] | None:
         try:
             column_accessors = _get_table_column_accessors(file, table_path)
         except KeyError:
@@ -742,34 +743,67 @@ def _get_table_schema(
                 logger.info(
                     f"Table {table_path!r} not found in {file._path}: skipping"
                 )
-                continue
+                return None
         else:
-            schema.update(
-                {
-                    name: _get_polars_dtype(dataset, name, column_accessors.keys())
-                    for name, dataset in column_accessors.items()
-                }
+            file_schema = {}
+            for name, dataset in column_accessors.items():
+                dtype = _get_polars_dtype(dataset, name, column_accessors.keys())
+                if not include_array_columns and isinstance(dtype, pl.List):
+                    continue
+                file_schema[name] = dtype
+            return file_schema
+
+    schemas: dict[upath.UPath, dict[str, polars.DataType]] = {}
+    if len(files) == 1:
+        file_schema = _get_table_schema_helper(files[0])
+        if file_schema is not None:
+            schemas[files[0]._path] = file_schema
+    else:
+        for file in files:
+            future_to_path = {}
+            future = lazynwb.utils.get_threadpool_executor().submit(
+                _get_table_schema_helper, file=file
             )
-    if not schema:
+            future_to_path[future] = file._path
+        for future in concurrent.futures.as_completed(future_to_path):
+            try:
+                file_schema = future.result()
+            except lazynwb.exceptions.InternalPathError:
+                if raise_on_missing:
+                    raise
+                else:
+                    logger.info(
+                        f"Table {table_path!r} not found in {future_to_path[future]}: skipping"
+                    )
+                    continue
+            except Exception as exc:
+                logger.error(
+                    f"Error getting schema for {table_path!r} in {future_to_path[future]}:"
+                )
+                raise exc from None
+            if file_schema is not None:
+                schemas[future_to_path[future]] = file_schema    
+    if not schemas:
         raise lazynwb.exceptions.InternalPathError(
             f"Table {table_path!r} not found in any files"
         )
-        
-    if include_array_columns:
-        # the _index column won't be part of the final dataframe, so don't include in schema
-        schema = {
-            k: v
-            for k, v in schema.items()
-            if not (k in get_indexed_column_names(schema) and k.endswith("_index"))
-        }
-    else:
-        schema = {
-            k: v for k, v in schema.items() if k not in get_indexed_column_names(schema)
-        }
-        if table_path == "units":
-            # in older version of nwb these large array cols are not indexed:
-            schema.pop("waveform_sd")
-            schema.pop("waveform_mean", None)
+    
+    # merge schemas and warn on inconsistent types:
+    collections.Counter()
+    counts: dict[str, collections.Counter] = {}
+    for path, s in schemas.items():
+        for column_name, counter in s.items():
+            if column_name not in counts:
+                counts[column_name] = collections.Counter()
+            counts[column_name][counter] += 1
+    schema = pl.Schema()
+    for column_name, counter in counts.items():
+        if len(counter) > 1:
+            logger.warning(
+                f"Column {column_name!r} has inconsistent types across files - using most common: {counter}"
+            )
+        schema[column_name] = counter.most_common(1)[0][0]
+
     if include_internal_columns:
         # add the internal columns to the schema:
         schema[NWB_PATH_COLUMN_NAME] = pl.String
