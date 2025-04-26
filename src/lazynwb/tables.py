@@ -1004,8 +1004,8 @@ def _spikes_times_in_intervals_helper(
         intervals_df = intervals_df.with_columns(
             pl.concat_list(start, end).alias(f"{temp_col_prefix}_{col_name}"),
         )
-    trials_id_col = f"{TABLE_INDEX_COLUMN_NAME}_trials"
-    units_id_col = f"{TABLE_INDEX_COLUMN_NAME}_units"
+    trials_id_col = f"_intervals{TABLE_INDEX_COLUMN_NAME}"
+    units_id_col = f"_units{TABLE_INDEX_COLUMN_NAME}"
     results: dict[str, list] = {
         units_id_col: [],
         trials_id_col: [],
@@ -1018,8 +1018,9 @@ def _spikes_times_in_intervals_helper(
 
     for row in units_df.iter_rows(named=True):
         results[units_id_col].extend([row[TABLE_INDEX_COLUMN_NAME]] * len(intervals_df))
+        results[NWB_PATH_COLUMN_NAME].extend([row[NWB_PATH_COLUMN_NAME]] * len(intervals_df))
 
-        for col_name, (start, end) in col_name_to_intervals.items():
+        for col_name in col_name_to_intervals:
             # get spike times with start:end interval for each row of the trials table
             spike_times = row["spike_times"]
             spikes_in_intervals: list[float | list[float]] = []
