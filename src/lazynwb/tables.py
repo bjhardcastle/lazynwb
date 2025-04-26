@@ -722,6 +722,7 @@ def _get_table_schema(
     first_n_files_to_read: int | None = 1,
     include_array_columns: bool = True,
     include_internal_columns: bool = True,
+    raise_on_missing: bool = True,
 ) -> pl.Schema:
     if isinstance(files, lazynwb.file_io.FileAccessor):
         files = [files]
@@ -730,13 +731,30 @@ def _get_table_schema(
     schema = {}
     # TODO speed up with threadpool
     for file in files:
-        column_accessors = _get_table_column_accessors(file, table_path)
-        schema.update(
-            {
-                name: _get_polars_dtype(dataset, name, column_accessors.keys())
-                for name, dataset in column_accessors.items()
-            }
+        try:
+            column_accessors = _get_table_column_accessors(file, table_path)
+        except KeyError:
+            if raise_on_missing:
+                raise lazynwb.exceptions.InternalPathError(
+                    f"Table {table_path!r} not found in {file._path}"
+                ) from None
+            else:
+                logger.info(
+                    f"Table {table_path!r} not found in {file._path}: skipping"
+                )
+                continue
+        else:
+            schema.update(
+                {
+                    name: _get_polars_dtype(dataset, name, column_accessors.keys())
+                    for name, dataset in column_accessors.items()
+                }
+            )
+    if not schema:
+        raise lazynwb.exceptions.InternalPathError(
+            f"Table {table_path!r} not found in any files"
         )
+        
     if include_array_columns:
         # the _index column won't be part of the final dataframe, so don't include in schema
         schema = {

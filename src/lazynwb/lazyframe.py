@@ -20,6 +20,7 @@ def scan_nwb(
         | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor]
     ),
     table_path: str,
+    raise_on_missing: bool = False,
     first_n_files_to_infer_schema: int | None = 1,
     exclude_array_columns: bool = False,
     low_memory: bool = False,
@@ -40,6 +41,9 @@ def scan_nwb(
     table_path : str
         The internal path to the table in the NWB file, e.g. '/intervals/trials' or '/units'
         It is expected that the table path is the same for all files.
+    raise_on_missing : bool, default False
+        If True, a KeyError will be raised if the table is not found in every file. Otherwise, a
+        KeyError is raised only if the table is not found in any file.
     first_n_files_to_infer_schema : int, None, default 1
         The number of files to read to infer the table schema. If None, all files will be read.
     exclude_array_columns : bool, default False
@@ -70,6 +74,7 @@ def scan_nwb(
         first_n_files_to_read=first_n_files_to_infer_schema,
         include_array_columns=not exclude_array_columns,
         include_internal_columns=True,
+        raise_on_missing=False,
     )
 
     def source_generator(
