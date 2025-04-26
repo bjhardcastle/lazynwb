@@ -555,13 +555,22 @@ def _format_multi_dim_column(
         return [x.tolist() for x in column_data]  # type: ignore[misc]
 
 
-def get_table_path(df: FrameType, assert_unique: bool = True) -> str:
+def _get_original_table_path(df: FrameType, assert_unique: bool = True) -> str:
     if isinstance(df, pl.LazyFrame):
         df = df.select(TABLE_PATH_COLUMN_NAME).collect()  # type: ignore[assignment]
     assert not isinstance(df, pl.LazyFrame)
-    series = df[TABLE_PATH_COLUMN_NAME]
+    if len(df) == 0:
+        raise ValueError(
+            f"dataframe is empty: cannot determine original table path"
+        )
+    try:
+        series = df[TABLE_PATH_COLUMN_NAME]
+    except KeyError:
+        raise lazynwb.exceptions.ColumnError(
+            f"Column {TABLE_PATH_COLUMN_NAME!r} not found in DataFrame"
+        ) from None
     if assert_unique:
-        assert len(set(series)) == 1, f"multiple table paths found: {series.unique()}"
+        assert len(set(series)) == 1, f"multiple table paths found: {set(series)}"
     return series[0]
 
 
@@ -604,7 +613,7 @@ def merge_array_column(
         future = lazynwb.utils.get_threadpool_executor().submit(
             _indexed_column_helper,
             nwb_path=nwb_path,
-            table_path=get_table_path(session_df, assert_unique=True),
+            table_path=_get_original_table_path(session_df, assert_unique=True),
             column_name=column_name,
             table_row_indices=get_table_column(session_df, TABLE_INDEX_COLUMN_NAME),
         )
@@ -971,8 +980,7 @@ def _spikes_times_in_intervals_helper(
     keep_only_necessary_cols: bool,
 ) -> dict[str, list[int | list[float]]]:
     units_df: pl.DataFrame = (
-        get_df(nwb_path, search_term="units", as_polars=True)
-        # TODO speedup by only getting rows in initial get_df for units requested
+        get_df(nwb_path, search_term="units", exact_path=True, as_polars=True)
         .filter(pl.col(TABLE_INDEX_COLUMN_NAME).is_in(units_table_indices)).pipe(
             merge_array_column, column_name="spike_times"
         )
@@ -1111,7 +1119,7 @@ def get_spike_times_in_intervals(
     ) -> str:
         if isinstance(intervals_df, str):
             return intervals_df
-        return get_table_path(
+        return _get_original_table_path(
             _get_pl_df(intervals_df).filter(pl.col(NWB_PATH_COLUMN_NAME) == nwb_path)
         )
 
