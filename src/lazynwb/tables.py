@@ -1009,6 +1009,7 @@ def _spikes_times_in_intervals_helper(
     results: dict[str, list] = {
         units_id_col: [],
         trials_id_col: [],
+        NWB_PATH_COLUMN_NAME: [],
     }
     for col_name in col_name_to_intervals.keys():
         results[col_name] = []
