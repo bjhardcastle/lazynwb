@@ -8,13 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.25...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.26...HEAD)</small>
+
+<!-- insertion marker -->
+## [v0.2.26](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.26) - 2025-04-26
+
+<small>[Compare with v0.2.25](https://github.com/bjhardcastle/lazynwb/compare/v0.2.25...v0.2.26)</small>
 
 ### Fixed
 
 - Fix helper function ([0e17d65](https://github.com/bjhardcastle/lazynwb/commit/0e17d65c2e105758432d6d45345a3094a0a1684d) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.25](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.25) - 2025-04-26
 
 <small>[Compare with v0.2.24](https://github.com/bjhardcastle/lazynwb/compare/v0.2.24...v0.2.25)</small>
