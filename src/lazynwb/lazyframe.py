@@ -120,7 +120,10 @@ def scan_nwb(
         if n_rows and len(files) > 1:
             sum_rows = 0
             for idx, file in enumerate(files):
-                sum_rows += lazynwb.tables._get_table_length(file, table_path)
+                try:
+                    sum_rows += lazynwb.tables._get_table_length(file, table_path)
+                except KeyError:
+                    continue
                 if sum_rows >= n_rows:
                     break
             filtered_files = files[: idx + 1]
