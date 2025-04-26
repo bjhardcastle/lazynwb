@@ -8,14 +8,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.30...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.31...HEAD)</small>
+
+### Fixed
+
+- Fix missing identifying column in spike times helper ([051ef93](https://github.com/bjhardcastle/lazynwb/commit/051ef93ddacd740b464f38ad2f6564fd1addfdbb) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.31](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.31) - 2025-04-26
+
+<small>[Compare with v0.2.30](https://github.com/bjhardcastle/lazynwb/compare/v0.2.30...v0.2.31)</small>
 
 ### Fixed
 
 - Fix use of raise on missing in scan_nwb ([a3643fa](https://github.com/bjhardcastle/lazynwb/commit/a3643fa23fad42cbcb85f7ba73745151c0a53bb3) by bjhardcastle).
 - Fix missing identifying column in spike times helper ([68f55f0](https://github.com/bjhardcastle/lazynwb/commit/68f55f038759ad6524751567de3e5e7faab701cf) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.30](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.30) - 2025-04-26
 
 <small>[Compare with v0.2.29](https://github.com/bjhardcastle/lazynwb/compare/v0.2.29...v0.2.30)</small>
