@@ -718,51 +718,47 @@ def _get_path_to_row_indices(df: pl.DataFrame) -> dict[str, list[int]]:
     }
 
 
+def _get_table_schema_helper(file: lazynwb.file_io.FileAccessor, table_path: str, raise_on_missing: bool) -> dict[str, Any] | None:
+    try:
+        column_accessors = _get_table_column_accessors(file, table_path)
+    except KeyError:
+        if raise_on_missing:
+            raise lazynwb.exceptions.InternalPathError(
+                f"Table {table_path!r} not found in {file._path}"
+            ) from None
+        else:
+            logger.info(
+                f"Table {table_path!r} not found in {file._path}: skipping"
+            )
+            return None
+    else:
+        file_schema = {}
+        for name, dataset in column_accessors.items():
+            file_schema[name] = _get_polars_dtype(dataset, name, column_accessors.keys())
+        return file_schema
+
 def _get_table_schema(
     files: lazynwb.file_io.FileAccessor | Sequence[lazynwb.file_io.FileAccessor],
     table_path: str,
-    first_n_files_to_read: int | None = 1,
+    first_n_files_to_infer_schema: int | None = None,
     include_array_columns: bool = True,
     include_internal_columns: bool = True,
-    raise_on_missing: bool = True,
+    raise_on_missing: bool = False,
 ) -> pl.Schema:
     if isinstance(files, lazynwb.file_io.FileAccessor):
         files = [files]
-    if first_n_files_to_read is not None:
-        files = files[:first_n_files_to_read]
-
-    def _get_table_schema_helper(
-        file: lazynwb.file_io.FileAccessor,
-    ) -> dict[str, Any] | None:
-        try:
-            column_accessors = _get_table_column_accessors(file, table_path)
-        except KeyError:
-            if raise_on_missing:
-                raise lazynwb.exceptions.InternalPathError(
-                    f"Table {table_path!r} not found in {file._path}"
-                ) from None
-            else:
-                logger.info(f"Table {table_path!r} not found in {file._path}: skipping")
-                return None
-        else:
-            file_schema = {}
-            for name, dataset in column_accessors.items():
-                dtype = _get_polars_dtype(dataset, name, column_accessors.keys())
-                if not include_array_columns and isinstance(dtype, pl.List):
-                    continue
-                file_schema[name] = dtype
-            return file_schema
-
+    if first_n_files_to_infer_schema is not None:
+        files = files[:min(first_n_files_to_infer_schema, len(files))]
     schemas: dict[upath.UPath, dict[str, polars.DataType]] = {}
     if len(files) == 1:
-        file_schema = _get_table_schema_helper(files[0])
+        file_schema = _get_table_schema_helper(file=files[0], table_path=table_path, raise_on_missing=raise_on_missing)
         if file_schema is not None:
             schemas[files[0]._path] = file_schema
     else:
         for file in files:
             future_to_path = {}
             future = lazynwb.utils.get_threadpool_executor().submit(
-                _get_table_schema_helper, file=file
+                _get_table_schema_helper, file=file, table_path=table_path, raise_on_missing=raise_on_missing
             )
             future_to_path[future] = file._path
         for future in concurrent.futures.as_completed(future_to_path):
@@ -785,7 +781,7 @@ def _get_table_schema(
                 schemas[future_to_path[future]] = file_schema
     if not schemas:
         raise lazynwb.exceptions.InternalPathError(
-            f"Table {table_path!r} not found in any files"
+            f"Table {table_path!r} not found in any files" + (f": try increasing `first_n_files_to_infer_schema` (currently) {first_n_files_to_infer_schema})" if first_n_files_to_infer_schema else "")
         )
 
     # merge schemas and warn on inconsistent types:

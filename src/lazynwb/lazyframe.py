@@ -71,7 +71,7 @@ def scan_nwb(
     schema = lazynwb.tables._get_table_schema(
         files=files,
         table_path=table_path,
-        first_n_files_to_read=first_n_files_to_infer_schema,
+        first_n_files_to_infer_schema=first_n_files_to_infer_schema,
         include_array_columns=not exclude_array_columns,
         include_internal_columns=True,
         raise_on_missing=False,
