@@ -74,7 +74,7 @@ def scan_nwb(
         first_n_files_to_infer_schema=first_n_files_to_infer_schema,
         include_array_columns=not exclude_array_columns,
         include_internal_columns=True,
-        raise_on_missing=False,
+        raise_on_missing=raise_on_missing,
     )
 
     def source_generator(
