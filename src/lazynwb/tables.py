@@ -730,8 +730,10 @@ def _get_table_schema(
         files = [files]
     if first_n_files_to_read is not None:
         files = files[:first_n_files_to_read]
-        
-    def _get_table_schema_helper(file: lazynwb.file_io.FileAccessor) -> dict[str, Any] | None:
+
+    def _get_table_schema_helper(
+        file: lazynwb.file_io.FileAccessor,
+    ) -> dict[str, Any] | None:
         try:
             column_accessors = _get_table_column_accessors(file, table_path)
         except KeyError:
@@ -740,9 +742,7 @@ def _get_table_schema(
                     f"Table {table_path!r} not found in {file._path}"
                 ) from None
             else:
-                logger.info(
-                    f"Table {table_path!r} not found in {file._path}: skipping"
-                )
+                logger.info(f"Table {table_path!r} not found in {file._path}: skipping")
                 return None
         else:
             file_schema = {}
@@ -782,12 +782,12 @@ def _get_table_schema(
                 )
                 raise exc from None
             if file_schema is not None:
-                schemas[future_to_path[future]] = file_schema    
+                schemas[future_to_path[future]] = file_schema
     if not schemas:
         raise lazynwb.exceptions.InternalPathError(
             f"Table {table_path!r} not found in any files"
         )
-    
+
     # merge schemas and warn on inconsistent types:
     collections.Counter()
     counts: dict[str, collections.Counter] = {}

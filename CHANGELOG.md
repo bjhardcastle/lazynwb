@@ -8,14 +8,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.23...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.24...HEAD)</small>
+
+<!-- insertion marker -->
+## [v0.2.24](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.24) - 2025-04-24
+
+<small>[Compare with v0.2.23](https://github.com/bjhardcastle/lazynwb/compare/v0.2.23...v0.2.24)</small>
 
 ### Fixed
 
 - Fix formatting list columns ([0c68ddd](https://github.com/bjhardcastle/lazynwb/commit/0c68dddb773f00eb7275d4d26dc9a141b2c5d90e) by bjhardcastle).
 - Fix filtering rows by file path ([8977bea](https://github.com/bjhardcastle/lazynwb/commit/8977bead83abeda07314ebe879adea0d4d69332a) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.23](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.23) - 2025-04-24
 
 <small>[Compare with v0.2.22](https://github.com/bjhardcastle/lazynwb/compare/v0.2.22...v0.2.23)</small>
