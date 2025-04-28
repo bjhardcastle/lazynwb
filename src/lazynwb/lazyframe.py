@@ -21,7 +21,8 @@ def scan_nwb(
     ),
     table_path: str,
     raise_on_missing: bool = False,
-    first_n_files_to_infer_schema: int | None = 1,
+    ignore_errors: bool = False,
+    infer_schema_length: int | None = None,
     exclude_array_columns: bool = False,
     low_memory: bool = False,
 ) -> pl.LazyFrame:
@@ -44,7 +45,10 @@ def scan_nwb(
     raise_on_missing : bool, default False
         If True, a KeyError will be raised if the table is not found in every file. Otherwise, a
         KeyError is raised only if the table is not found in any file.
-    first_n_files_to_infer_schema : int, None, default 1
+    ignore_errors : bool, default False
+        If True, other errors will be ignored when reading files (missing table path errors are
+        toggled via `raise_on_missing`).
+    infer_schema_length : int, None, default None
         The number of files to read to infer the table schema. If None, all files will be read.
     exclude_array_columns : bool, default False
         If True, columns containing list or array-like data will be excluded from the schema and any
@@ -71,7 +75,7 @@ def scan_nwb(
     schema = lazynwb.tables._get_table_schema(
         files=files,
         table_path=table_path,
-        first_n_files_to_infer_schema=first_n_files_to_infer_schema,
+        first_n_files_to_infer_schema=infer_schema_length,
         exclude_array_columns=exclude_array_columns,
         exclude_internal_columns=False,
         raise_on_missing=raise_on_missing,
@@ -136,7 +140,7 @@ def scan_nwb(
             exact_path=True,
             include_column_names=initial_columns or None,
             disable_progress=False,
-            ignore_errors=True,
+            ignore_errors=ignore_errors,
             as_polars=True,
             exclude_array_columns=(
                 False
@@ -185,6 +189,7 @@ def scan_nwb(
                                 disable_progress=False,
                                 use_process_pool=False,  # no speed gain, cannot use from top-level of scripts
                                 as_polars=True,
+                                ignore_errors=ignore_errors,
                                 low_memory=low_memory,
                             )
                         ),
