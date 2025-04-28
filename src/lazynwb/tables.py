@@ -764,13 +764,13 @@ def _get_table_schema(
         files = [files]
     if first_n_files_to_infer_schema is not None:
         files = files[: min(first_n_files_to_infer_schema, len(files))]
-    schemas: dict[upath.UPath, dict[str, polars.DataType]] = {}
+    per_file_schemas: dict[upath.UPath, dict[str, polars.DataType]] = {}
     if len(files) == 1:
         file_schema = _get_table_schema_helper(
             file=files[0], table_path=table_path, raise_on_missing=raise_on_missing
         )
         if file_schema is not None:
-            schemas[files[0]._path] = file_schema
+            per_file_schemas[files[0]._path] = file_schema
     else:
         for file in files:
             future_to_path = {}
@@ -798,8 +798,8 @@ def _get_table_schema(
                 )
                 raise exc from None
             if file_schema is not None:
-                schemas[future_to_path[future]] = file_schema
-    if not schemas:
+                per_file_schemas[future_to_path[future]] = file_schema
+    if not per_file_schemas:
         raise lazynwb.exceptions.InternalPathError(
             f"Table {table_path!r} not found in any files"
             + (
@@ -810,16 +810,15 @@ def _get_table_schema(
         )
 
     # merge schemas and warn on inconsistent types:
-    collections.Counter()
     counts: dict[str, collections.Counter] = {}
-    for path, s in schemas.items():
-        for column_name, counter in s.items():
+    for path, file_schema in per_file_schemas.items():
+        for column_name, pl_dtype in file_schema.items():
             if column_name not in counts:
                 counts[column_name] = collections.Counter()
-            counts[column_name][counter] += 1
+            counts[column_name][pl_dtype] += 1
     schema = pl.Schema()
     for column_name, counter in counts.items():
-        if counter > 1:
+        if len(counter) > 1:
             logger.warning(
                 f"Column {column_name!r} has inconsistent types across files - using most common: {counter}"
             )
