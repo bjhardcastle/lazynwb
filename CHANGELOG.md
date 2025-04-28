@@ -8,9 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.32...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.33...HEAD)</small>
+
+### Added
+
+- Add support for consistently-sized ndim Array type in polars df ([07678c2](https://github.com/bjhardcastle/lazynwb/commit/07678c2ee8206cb70ead04459bf2c4ef49ec2b26) by bjhardcastle).
 
 <!-- insertion marker -->
+## [v0.2.33](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.33) - 2025-04-26
+
+<small>[Compare with v0.2.32](https://github.com/bjhardcastle/lazynwb/compare/v0.2.32...v0.2.33)</small>
+
 ## [v0.2.32](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.32) - 2025-04-26
 
 <small>[Compare with v0.2.31](https://github.com/bjhardcastle/lazynwb/compare/v0.2.31...v0.2.32)</small>

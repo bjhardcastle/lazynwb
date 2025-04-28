@@ -397,7 +397,9 @@ def _get_table_data(
         for column_name in multi_dim_column_names:
             multi_dim_column_data = column_accessors[column_name][_idx]
             if not as_polars:
-                multi_dim_column_data = _format_multi_dim_column_pd(multi_dim_column_data)
+                multi_dim_column_data = _format_multi_dim_column_pd(
+                    multi_dim_column_data
+                )
             column_data[column_name] = multi_dim_column_data
     try:
         column_length = len(next(iter(column_data.values())))
@@ -568,9 +570,7 @@ def _get_original_table_path(df: FrameType, assert_unique: bool = True) -> str:
         df = df.select(TABLE_PATH_COLUMN_NAME).collect()  # type: ignore[assignment]
     assert not isinstance(df, pl.LazyFrame)
     if len(df) == 0:
-        raise ValueError(
-            f"dataframe is empty: cannot determine original table path"
-        )
+        raise ValueError("dataframe is empty: cannot determine original table path")
     try:
         series = df[TABLE_PATH_COLUMN_NAME]
     except KeyError:
@@ -994,9 +994,8 @@ def _spikes_times_in_intervals_helper(
 ) -> dict[str, list[int | list[float]]]:
     units_df: pl.DataFrame = (
         get_df(nwb_path, search_term="units", exact_path=True, as_polars=True)
-        .filter(pl.col(TABLE_INDEX_COLUMN_NAME).is_in(units_table_indices)).pipe(
-            merge_array_column, column_name="spike_times"
-        )
+        .filter(pl.col(TABLE_INDEX_COLUMN_NAME).is_in(units_table_indices))
+        .pipe(merge_array_column, column_name="spike_times")
     )
     if isinstance(intervals_table_filter, str):
         # pandas:
@@ -1206,11 +1205,11 @@ def get_spike_times_in_intervals(
                 _handle_result(result)
     columns_to_drop = pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME)
     # original table paths are ambiguous now we've joined rows from units and trials
-    # - we find all that start with, in case any joins added a suffix 
+    # - we find all that start with, in case any joins added a suffix
     if keep_only_necessary_cols:
         df = pl.concat(results, how="diagonal_relaxed").drop(
             columns_to_drop, strict=False
-        )  
+        )
     else:
         df = (
             pl.concat(results, how="diagonal_relaxed")
