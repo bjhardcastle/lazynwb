@@ -199,6 +199,7 @@ def get_df(
                     exclude_array_columns=exclude_array_columns,
                     table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
                     low_memory=low_memory,
+                    as_polars=as_polars,
                 )
             )
     else:
@@ -226,6 +227,7 @@ def get_df(
                 exclude_array_columns=exclude_array_columns,
                 table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
                 low_memory=low_memory,
+                as_polars=as_polars,
             )
             future_to_path[future] = path
         futures = concurrent.futures.as_completed(future_to_path)
@@ -277,6 +279,7 @@ def _get_table_data(
     exclude_array_columns: bool = True,
     table_row_indices: Sequence[int] | None = None,
     low_memory: bool = False,
+    as_polars: bool = False,
 ) -> dict[str, Any]:
     t0 = time.time()
     if (
@@ -392,9 +395,10 @@ def _get_table_data(
             f"materializing multi-dimensional array columns for {file._path}/{search_term}: {multi_dim_column_names}"
         )
         for column_name in multi_dim_column_names:
-            column_data[column_name] = _format_multi_dim_column(
-                column_accessors[column_name][_idx]
-            )
+            multi_dim_column_data = column_accessors[column_name][_idx]
+            if not as_polars:
+                multi_dim_column_data = _format_multi_dim_column_pd(multi_dim_column_data)
+            column_data[column_name] = multi_dim_column_data
     try:
         column_length = len(next(iter(column_data.values())))
     except StopIteration:
@@ -510,12 +514,13 @@ def get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
     return {k for k in column_names if is_nominally_indexed_column(k, column_names)}
 
 
-def _indexed_column_helper(
+def _array_column_helper(
     nwb_path: npc_io.PathLike,
     table_path: str,
     column_name: str,
     table_row_indices: Sequence[int],
-) -> pd.DataFrame:
+    as_polars: bool = False,
+) -> pd.DataFrame | pl.DataFrame:
     with lazynwb.file_io.FileAccessor(nwb_path) as file:
         try:
             data_column_accessor = file[table_path][column_name]
@@ -528,22 +533,25 @@ def _indexed_column_helper(
                 raise
         if data_column_accessor.ndim >= 2:
             column_data = data_column_accessor[table_row_indices]
+            if not as_polars:
+                column_data = _format_multi_dim_column_pd(column_data)
         else:
             column_data = get_indexed_column_data(
                 data_column_accessor=data_column_accessor,
                 index_column_accessor=file[table_path][f"{column_name}_index"],
                 table_row_indices=table_row_indices,
             )
-    return pd.DataFrame(
+    df_cls = pl.DataFrame if as_polars else pd.DataFrame
+    return df_cls(
         {
-            column_name: _format_multi_dim_column(column_data),
+            column_name: column_data,
             TABLE_INDEX_COLUMN_NAME: table_row_indices,
             NWB_PATH_COLUMN_NAME: [nwb_path] * len(table_row_indices),
         },
     )
 
 
-def _format_multi_dim_column(
+def _format_multi_dim_column_pd(
     column_data: npt.NDArray | list[npt.NDArray],
 ) -> list[list[Any]]:
     """Pandas inists 'Per-column arrays must each be 1-dimensional': this converts to a list of
@@ -611,11 +619,12 @@ def merge_array_column(
             nwb_path = nwb_path[0]
         assert isinstance(nwb_path, str)
         future = lazynwb.utils.get_threadpool_executor().submit(
-            _indexed_column_helper,
+            _array_column_helper,
             nwb_path=nwb_path,
             table_path=_get_original_table_path(session_df, assert_unique=True),
             column_name=column_name,
             table_row_indices=get_table_column(session_df, TABLE_INDEX_COLUMN_NAME),
+            as_polars=not isinstance(df, pd.DataFrame),
         )
         future_to_path[future] = nwb_path
     missing_column_already_warned = False
@@ -650,7 +659,7 @@ def merge_array_column(
         ).set_index(df[TABLE_INDEX_COLUMN_NAME].values)
     else:
         return df.join(
-            pl.concat((pl.from_pandas(d) for d in column_data), how="diagonal_relaxed"),
+            pl.concat(column_data, how="diagonal_relaxed"),
             on=[TABLE_INDEX_COLUMN_NAME, NWB_PATH_COLUMN_NAME],
             how="left",
         )
