@@ -756,8 +756,8 @@ def _get_table_schema(
     files: lazynwb.file_io.FileAccessor | Sequence[lazynwb.file_io.FileAccessor],
     table_path: str,
     first_n_files_to_infer_schema: int | None = None,
-    include_array_columns: bool = True,
-    include_internal_columns: bool = True,
+    exclude_array_columns: bool = False,
+    exclude_internal_columns: bool = False,
     raise_on_missing: bool = False,
 ) -> pl.Schema:
     if isinstance(files, lazynwb.file_io.FileAccessor):
@@ -819,17 +819,22 @@ def _get_table_schema(
             counts[column_name][counter] += 1
     schema = pl.Schema()
     for column_name, counter in counts.items():
-        if len(counter) > 1:
+        if counter > 1:
             logger.warning(
                 f"Column {column_name!r} has inconsistent types across files - using most common: {counter}"
             )
         schema[column_name] = counter.most_common(1)[0][0]
 
-    if include_internal_columns:
+    if not exclude_internal_columns:
         # add the internal columns to the schema:
         schema[NWB_PATH_COLUMN_NAME] = pl.String
         schema[TABLE_PATH_COLUMN_NAME] = pl.String
         schema[TABLE_INDEX_COLUMN_NAME] = pl.UInt32
+    if exclude_array_columns:
+        # remove the array columns from the schema:
+        for column_name in tuple(schema.keys()):
+            if isinstance(schema[column_name], pl.List):
+                schema.pop(column_name, None)
     return pl.Schema(schema)
 
 
