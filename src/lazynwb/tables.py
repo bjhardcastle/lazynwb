@@ -998,7 +998,7 @@ def _spikes_times_in_intervals_helper(
     apply_obs_intervals: bool,
     as_counts: bool,
     keep_only_necessary_cols: bool,
-) -> dict[str, list[int | list[float]]]:
+) -> pl.DataFrame:
     units_df: pl.DataFrame = (
         get_df(nwb_path, search_term="units", exact_path=True, as_polars=True)
         .filter(pl.col(TABLE_INDEX_COLUMN_NAME).is_in(units_table_indices))
@@ -1067,7 +1067,7 @@ def _spikes_times_in_intervals_helper(
             results[col_name].extend(spikes_in_intervals)
 
     if keep_only_necessary_cols and not apply_obs_intervals:
-        return results
+        return pl.DataFrame(results)
 
     results_df = pl.DataFrame(results).join(
         other=intervals_df.drop(pl.selectors.starts_with(temp_col_prefix)),
@@ -1094,7 +1094,7 @@ def _spikes_times_in_intervals_helper(
         if keep_only_necessary_cols:
             results_df = results_df.drop(pl.all().exclude(NWB_PATH_COLUMN_NAME, UNITS_TABLE_INDEX_COLUMN_NAME, INTERVALS_TABLE_INDEX_COLUMN_NAME, *col_name_to_intervals.keys()))  # type: ignore[arg-type]
 
-    return results_df.to_dict(as_series=False)
+    return results_df
 
 
 def _get_pl_df(df: FrameType) -> pl.DataFrame:
@@ -1144,14 +1144,6 @@ def get_spike_times_in_intervals(
 
     results: list[pl.DataFrame] = []
 
-    def _handle_result(result):
-        if not all(
-            len(v) == len(result[INTERVALS_TABLE_INDEX_COLUMN_NAME])
-            for v in result.values()
-        ):
-            return
-        results.append(pl.DataFrame(result))
-
     iterable: Iterable
     if n_sessions == 1 or not use_process_pool:
         iterable = units_df.group_by(NWB_PATH_COLUMN_NAME)
@@ -1175,7 +1167,7 @@ def get_spike_times_in_intervals(
                 as_counts=as_counts,
                 keep_only_necessary_cols=keep_only_necessary_cols,
             )
-            _handle_result(result)
+            results.append(result)
     else:
         future_to_nwb_path = {}
         for (nwb_path, *_), df in units_df.group_by(NWB_PATH_COLUMN_NAME):
@@ -1209,7 +1201,7 @@ def get_spike_times_in_intervals(
                     f"error getting spike times for {npc_io.from_pathlike(future_to_nwb_path[future])}: {exc!r}"
                 )
             else:
-                _handle_result(result)
+                results.append(result)
     columns_to_drop = pl.selectors.starts_with(TABLE_PATH_COLUMN_NAME)
     # original table paths are ambiguous now we've joined rows from units and trials
     # - we find all that start with, in case any joins added a suffix
