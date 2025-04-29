@@ -1092,7 +1092,7 @@ def _spikes_times_in_intervals_helper(
             ]
         )
         if keep_only_necessary_cols:
-            results_df = results_df.drop(pl.all().exclude(UNITS_TABLE_INDEX_COLUMN_NAME, INTERVALS_TABLE_INDEX_COLUMN_NAME, *col_name_to_intervals.keys()))  # type: ignore[arg-type]
+            results_df = results_df.drop(pl.all().exclude(NWB_PATH_COLUMN_NAME, UNITS_TABLE_INDEX_COLUMN_NAME, INTERVALS_TABLE_INDEX_COLUMN_NAME, *col_name_to_intervals.keys()))  # type: ignore[arg-type]
 
     return results_df.to_dict(as_series=False)
 
