@@ -967,7 +967,7 @@ def insert_is_observed(
             on=unit_table_index_col,
             how="left",
         )
-        .cast({'obs_intervals': pl.List(pl.Float64)}) # before using list namespace
+        .cast({"obs_intervals": pl.List(pl.Float64)})  # before using list namespace
         .with_columns(
             pl.when(
                 pl.col("obs_intervals").list.get(0).gt(pl.col("start_time"))
