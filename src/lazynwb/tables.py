@@ -812,7 +812,7 @@ def _get_table_schema(
         raise lazynwb.exceptions.InternalPathError(
             f"Table {table_path!r} not found in any files"
             + (
-                f": try increasing `first_n_files_to_infer_schema` (currently: {first_n_files_to_infer_schema})"
+                f": try increasing `infer_schema_length` (currently: {first_n_files_to_infer_schema})"
                 if first_n_files_to_infer_schema
                 else ""
             )
