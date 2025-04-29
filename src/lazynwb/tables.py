@@ -706,8 +706,7 @@ def _get_polars_dtype(
         return pl.String
     dtype = polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
     if dataset.ndim > 1:
-        for _ in range(dataset.ndim - 1):
-            dtype = pl.List(dtype)
+        dtype = pl.Array(dtype, shape=dataset.shape)
     elif is_nominally_indexed_column(column_name, all_column_names):
         for _ in [
             c
@@ -841,7 +840,7 @@ def _get_table_schema(
     if exclude_array_columns:
         # remove the array columns from the schema:
         for column_name in tuple(schema.keys()):
-            if isinstance(schema[column_name], pl.List):
+            if isinstance(schema[column_name], (pl.List, pl.Array)):
                 schema.pop(column_name, None)
     return pl.Schema(schema)
 
