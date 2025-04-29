@@ -952,13 +952,15 @@ def insert_is_observed(
         isinstance(units_schema["obs_intervals"], pl.Array)
         and len(units_schema["obs_intervals"].shape) > 1
     ):
-        logger.debug("Exploding nested 'obs_intervals' column to create list[float] column for join")
+        logger.debug(
+            "Exploding nested 'obs_intervals' column to create list[float] column for join"
+        )
         units_lf = units_lf.explode("obs_intervals")
     assert (type_ := units_lf.collect_schema()["obs_intervals"]) in (
         pl.List(pl.Float64),
-        pl.List(pl.Null), # in case all obs_intervals are empty
+        pl.List(pl.Null),  # in case all obs_intervals are empty
         pl.Array(pl.Float64, shape=(2,)),
-        pl.Array(pl.Float64, shape=(0,)), # in case all obs_intervals are empty
+        pl.Array(pl.Float64, shape=(0,)),  # in case all obs_intervals are empty
     ), f"Expected exploded obs_intervals to be pl.List(f64) or pl.Array(f64), got {type_}"
     intervals_lf = (
         intervals_lf.join(

@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.34...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.35...HEAD)</small>
+
+### Fixed
+
+- Fix checking obs_intervals type ([9a47979](https://github.com/bjhardcastle/lazynwb/commit/9a479791cc47bc401815e3bd4552db016a5991bc) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.35](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.35) - 2025-04-29
+
+<small>[Compare with v0.2.34](https://github.com/bjhardcastle/lazynwb/compare/v0.2.34...v0.2.35)</small>
 
 ### Fixed
 
 - Fix table schema bug ([1a82503](https://github.com/bjhardcastle/lazynwb/commit/1a82503174e9a7e6814c0336689f0de9891d7702) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.34](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.34) - 2025-04-28
 
 <small>[Compare with v0.2.33](https://github.com/bjhardcastle/lazynwb/compare/v0.2.33...v0.2.34)</small>
