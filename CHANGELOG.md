@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.36...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.37...HEAD)</small>
+
+### Fixed
+
+- Fix nwb path in spike times result df ([b4a99cb](https://github.com/bjhardcastle/lazynwb/commit/b4a99cbf1904aa11225af65564da720846be330c) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.37](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.37) - 2025-04-29
+
+<small>[Compare with v0.2.36](https://github.com/bjhardcastle/lazynwb/compare/v0.2.36...v0.2.37)</small>
 
 ### Fixed
 
 - Fix dtype for ndim arrays ([c1a57d2](https://github.com/bjhardcastle/lazynwb/commit/c1a57d2d53a3f14739a5af3b5654aea992a77d2d) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.36](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.36) - 2025-04-29
 
 <small>[Compare with v0.2.35](https://github.com/bjhardcastle/lazynwb/compare/v0.2.35...v0.2.36)</small>
