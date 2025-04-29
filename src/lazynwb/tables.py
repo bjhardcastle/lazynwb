@@ -781,8 +781,8 @@ def _get_table_schema(
         if file_schema is not None:
             per_file_schemas[files[0]._path] = file_schema
     else:
+        future_to_path = {}
         for file in files:
-            future_to_path = {}
             future = lazynwb.utils.get_threadpool_executor().submit(
                 _get_table_schema_helper,
                 file=file,
