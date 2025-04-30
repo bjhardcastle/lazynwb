@@ -14,10 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def scan_nwb(
-    source: (
-        npc_io.PathLike
-        | Iterable[npc_io.PathLike]
-    ),
+    source: npc_io.PathLike | Iterable[npc_io.PathLike],
     table_path: str,
     raise_on_missing: bool = False,
     ignore_errors: bool = False,
@@ -61,8 +58,9 @@ def scan_nwb(
     """
     if not isinstance(source, Iterable) or isinstance(source, str):
         source = [source]
-        
+
     assert isinstance(source, Sequence)
+
     def _get_schema() -> pl.Schema:
         return lazynwb.tables._get_table_schema(
             files=[lazynwb.file_io.FileAccessor(f) for f in source],

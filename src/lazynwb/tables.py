@@ -789,7 +789,7 @@ def _get_table_schema(
                 raise_on_missing=raise_on_missing,
             )
             future_to_path[future] = file._path
-        is_first_missing = True # used to warn only once
+        is_first_missing = True  # used to warn only once
         for future in concurrent.futures.as_completed(future_to_path):
             try:
                 file_schema = future.result()
@@ -797,7 +797,7 @@ def _get_table_schema(
                 if raise_on_missing:
                     raise
                 else:
-                    if is_first_missing: 
+                    if is_first_missing:
                         logger.warning(
                             f"Table {table_path!r} missing in one or more files"
                         )
