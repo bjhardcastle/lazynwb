@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 
 import npc_io
 import polars as pl
@@ -16,8 +16,7 @@ logger = logging.getLogger(__name__)
 def scan_nwb(
     source: (
         npc_io.PathLike
-        | lazynwb.file_io.FileAccessor
-        | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor]
+        | Iterable[npc_io.PathLike]
     ),
     table_path: str,
     raise_on_missing: bool = False,
@@ -37,7 +36,7 @@ def scan_nwb(
 
     Parameters
     ----------
-    source : str, PathLike, lazynwb.file_io.FileAccessor, or iterable of these
+    source : str, PathLike, or iterable of these
         Paths to the NWB file(s) to read from. May be hdf5 or zarr.
     table_path : str
         The internal path to the table in the NWB file, e.g. '/intervals/trials' or '/units'
@@ -62,24 +61,17 @@ def scan_nwb(
     """
     if not isinstance(source, Iterable) or isinstance(source, str):
         source = [source]
-
-    files: list[lazynwb.file_io.FileAccessor] = []
-    for f in source:  # type: ignore[union-attr]
-        if isinstance(f, lazynwb.file_io.FileAccessor):
-            files.append(f)
-        else:
-            files.append(lazynwb.file_io.FileAccessor(f))
-
-    logger.debug(f"Fetching schema for {table_path!r} from {len(files)} files")
-    # This doesn't need to be fetched eagerly - could be converted to a callable
-    schema = lazynwb.tables._get_table_schema(
-        files=files,
-        table_path=table_path,
-        first_n_files_to_infer_schema=infer_schema_length,
-        exclude_array_columns=exclude_array_columns,
-        exclude_internal_columns=False,
-        raise_on_missing=raise_on_missing,
-    )
+        
+    assert isinstance(source, Sequence)
+    def _get_schema() -> pl.Schema:
+        return lazynwb.tables._get_table_schema(
+            files=[lazynwb.file_io.FileAccessor(f) for f in source],
+            table_path=table_path,
+            first_n_files_to_infer_schema=infer_schema_length,
+            exclude_array_columns=exclude_array_columns,
+            exclude_internal_columns=False,
+            raise_on_missing=raise_on_missing,
+        )
 
     def source_generator(
         with_columns: list[str] | None,
@@ -121,19 +113,19 @@ def scan_nwb(
             )
 
         # TODO use batch_size
-        if n_rows and len(files) > 1:
+        if n_rows and len(source) > 1:
             sum_rows = 0
-            for idx, file in enumerate(files):
+            for idx, file in enumerate(source):
                 try:
                     sum_rows += lazynwb.tables._get_table_length(file, table_path)
                 except KeyError:
                     continue
                 if sum_rows >= n_rows:
                     break
-            filtered_files = files[: idx + 1]
-            logger.debug(f"Limiting files to {len(files)} based on n_rows={n_rows}")
+            filtered_files = source[: idx + 1]
+            logger.debug(f"Limiting files to {len(source)} based on n_rows={n_rows}")
         else:
-            filtered_files = files
+            filtered_files = source
         df = lazynwb.tables.get_df(
             nwb_data_sources=filtered_files,
             search_term=table_path,
@@ -166,6 +158,7 @@ def scan_nwb(
             if with_columns:
                 include_column_names = set(with_columns) - set(initial_columns)
             else:
+                schema = _get_schema()
                 include_column_names = set(schema.keys()) - set(initial_columns)
             logger.debug(
                 f"Fetching additional columns from {table_path!r}: {sorted(include_column_names)}"
@@ -202,4 +195,4 @@ def scan_nwb(
                 )
                 i += batch_size
 
-    return register_io_source(io_source=source_generator, schema=schema)
+    return register_io_source(io_source=source_generator, schema=_get_schema)
