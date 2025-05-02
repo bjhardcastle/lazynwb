@@ -5,6 +5,7 @@ from collections.abc import Iterable, Iterator, Sequence
 
 import npc_io
 import polars as pl
+import polars._typing
 from polars.io.plugins import register_io_source
 
 import lazynwb.file_io
@@ -21,6 +22,8 @@ def scan_nwb(
     infer_schema_length: int | None = None,
     exclude_array_columns: bool = False,
     low_memory: bool = False,
+    schema: polars._typing.SchemaDict | None = None,
+    schema_overrides: polars._typing.SchemaDict | None = None,
 ) -> pl.LazyFrame:
     """
     Lazily read from a common table in one or more local or cloud-hosted NWB files.
@@ -51,26 +54,36 @@ def scan_nwb(
         resulting DataFrame.
     low_memory : bool, default False
         If True, the data will be read in smaller chunks to reduce memory usage, at the cost of speed.
-
+    schema : dict[str, pl.DataType], default None
+        User-defined schema for the table. If None, the schema will be generated using the stored
+        dtypes for columns in each file. Conflicts are signalled to the user via a warning.
+    schema_overrides : dict[str, pl.DataType], default None
+        User-defined schema for a subset of columns, overriding the inferred schema.
+        
     Returns
     -------
     pl.LazyFrame
     """
     if not isinstance(source, Iterable) or isinstance(source, str):
         source = [source]
-
     assert isinstance(source, Sequence)
 
     def _get_schema() -> pl.Schema:
-        return lazynwb.tables._get_table_schema(
-            files=[lazynwb.file_io.FileAccessor(f) for f in source],
-            table_path=table_path,
-            first_n_files_to_infer_schema=infer_schema_length,
-            exclude_array_columns=exclude_array_columns,
-            exclude_internal_columns=False,
-            raise_on_missing=raise_on_missing,
-        )
-
+        if schema is not None:
+            _schema = pl.Schema(schema) 
+        else:
+            _schema = lazynwb.tables._get_table_schema(
+                files=[lazynwb.file_io.FileAccessor(f) for f in source],
+                table_path=table_path,
+                first_n_files_to_infer_schema=infer_schema_length,
+                exclude_array_columns=exclude_array_columns,
+                exclude_internal_columns=False,
+                raise_on_missing=raise_on_missing,
+            )
+        if schema_overrides is not None:
+            _schema |= pl.Schema(schema_overrides)
+        return _schema
+    
     def source_generator(
         with_columns: list[str] | None,
         predicate: pl.Expr | None,
