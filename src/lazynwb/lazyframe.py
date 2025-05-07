@@ -24,6 +24,7 @@ def scan_nwb(
     low_memory: bool = False,
     schema: polars._typing.SchemaDict | None = None,
     schema_overrides: polars._typing.SchemaDict | None = None,
+    disable_progress: bool = False,
 ) -> pl.LazyFrame:
     """
     Lazily read from a common table in one or more local or cloud-hosted NWB files.
@@ -59,7 +60,9 @@ def scan_nwb(
         dtypes for columns in each file. Conflicts are signalled to the user via a warning.
     schema_overrides : dict[str, pl.DataType], default None
         User-defined schema for a subset of columns, overriding the inferred schema.
-        
+    disable_progress : bool, default False
+        If True, progress bars will be disabled.
+
     Returns
     -------
     pl.LazyFrame
@@ -142,7 +145,7 @@ def scan_nwb(
             search_term=table_path,
             exact_path=True,
             include_column_names=initial_columns or None,
-            disable_progress=False,
+            disable_progress=disable_progress,
             ignore_errors=ignore_errors,
             as_polars=True,
             exclude_array_columns=(
@@ -190,7 +193,7 @@ def scan_nwb(
                                 exact_path=True,
                                 include_column_names=include_column_names,
                                 nwb_path_to_row_indices=nwb_path_to_row_indices,
-                                disable_progress=False,
+                                disable_progress=disable_progress,
                                 use_process_pool=False,  # no speed gain, cannot use from top-level of scripts
                                 as_polars=True,
                                 ignore_errors=ignore_errors,
