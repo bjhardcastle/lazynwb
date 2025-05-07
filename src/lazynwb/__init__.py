@@ -1,17 +1,37 @@
 """
-An attempt to speed-up access to large NWB (Neurodata Without Borders) files stored in the cloud.
+lazynwb: A library for lazy loading of NWB (Neurodata Without Borders) files.
 """
 
 import doctest
 import importlib.metadata
 import logging
 
+# Import other modules
 from lazynwb.base import *
-from lazynwb.file_io import *
 from lazynwb.lazyframe import *
 from lazynwb.tables import *
 from lazynwb.timeseries import *
 from lazynwb.utils import *
+
+from .file_handlers import (
+    FileAccessor,
+    FileAccessWrapper,
+    auto_file_close,
+    auto_file_open,
+    get_file_path,
+    is_same_file,
+    open,
+)
+
+__all__ = [
+    "FileAccessWrapper",
+    "FileAccessor",
+    "auto_file_close",
+    "auto_file_open",
+    "get_file_path",
+    "is_same_file",
+    "open",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -20,19 +40,7 @@ logger.debug(f"{__name__}.{__version__ = }")
 
 
 def testmod(**testmod_kwargs) -> doctest.TestResults:
-    """
-    Run doctests for the module, configured to ignore exception details and
-    normalize whitespace.
-
-    Accepts kwargs to pass to doctest.testmod().
-
-    Add to modules to run doctests when run as a script:
-    .. code-block:: text
-        if __name__ == "__main__":
-            from npc_io import testmod
-            testmod()
-
-    """
+    """Run doctests for this package."""
     _ = testmod_kwargs.setdefault(
         "optionflags", doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS
     )

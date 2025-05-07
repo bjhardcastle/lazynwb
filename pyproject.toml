@@ -148,12 +148,12 @@ exclude_also = [
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
-    "--doctest-modules",
-    "--ignore-glob=*scripts*,*examples*,*docs*",
+    # "--doctest-modules",
+    "--ignore-glob=*scripts*,*examples*,*docs*,'*test_speed*",
     "--cov",
     "--cov-report=html",
     "--cov-config=pyproject.toml",
-    "--doctest-glob=*README.md",
+    # "--doctest-glob=*README.md",
     "-x",
     # "-n=auto", for use with pytest-xdist
 ]

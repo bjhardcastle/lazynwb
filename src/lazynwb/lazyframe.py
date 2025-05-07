@@ -24,6 +24,7 @@ def scan_nwb(
     low_memory: bool = False,
     schema: polars._typing.SchemaDict | None = None,
     schema_overrides: polars._typing.SchemaDict | None = None,
+    disable_progress: bool = False,
 ) -> pl.LazyFrame:
     """
     Lazily read from a common table in one or more local or cloud-hosted NWB files.
@@ -72,7 +73,7 @@ def scan_nwb(
 
     def _get_schema() -> pl.Schema:
         if schema is not None:
-            _schema = pl.Schema(schema) 
+            _schema = pl.Schema(schema)
         else:
             _schema = lazynwb.tables._get_table_schema(
                 files=[lazynwb.file_io.FileAccessor(f) for f in source],
@@ -85,7 +86,7 @@ def scan_nwb(
         if schema_overrides is not None:
             _schema |= pl.Schema(schema_overrides)
         return _schema
-    
+
     def source_generator(
         with_columns: list[str] | None,
         predicate: pl.Expr | None,
@@ -193,7 +194,7 @@ def scan_nwb(
                                 include_column_names=include_column_names,
                                 nwb_path_to_row_indices=nwb_path_to_row_indices,
                                 disable_progress=disable_progress,
-                                use_process_pool=False,  # no speed gain, cannot use from top-level of scripts
+                                use_process_pool=False,  # no speed gain & cannot use from top-level of scripts
                                 as_polars=True,
                                 ignore_errors=ignore_errors,
                                 low_memory=low_memory,

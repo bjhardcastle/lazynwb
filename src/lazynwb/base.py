@@ -76,7 +76,7 @@ class LazyNWB:
             self._file = path_or_accessor
         else:
             self._file = lazynwb.file_io.FileAccessor(
-                path=path_or_accessor, fsspec_storage_options=fsspec_storage_options
+                path_or_accessor=path_or_accessor, fsspec_storage_options=fsspec_storage_options
             )
 
     def __repr__(self) -> str:
