@@ -8,9 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.43...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.44...HEAD)</small>
+
+### Fixed
+
+- Fix missing import ([793d44c](https://github.com/bjhardcastle/lazynwb/commit/793d44c2887375b1f7f66f16d72fbc39a8fe6aca) by bjhardcastle).
 
 <!-- insertion marker -->
+## [v0.2.44](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.44) - 2025-05-08
+
+<small>[Compare with v0.2.43](https://github.com/bjhardcastle/lazynwb/compare/v0.2.43...v0.2.44)</small>
+
 ## [v0.2.43](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.43) - 2025-05-08
 
 <small>[Compare with v0.2.42](https://github.com/bjhardcastle/lazynwb/compare/v0.2.42...v0.2.43)</small>
