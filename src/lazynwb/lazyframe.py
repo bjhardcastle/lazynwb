@@ -81,14 +81,16 @@ def scan_nwb(
         else:
             files.append(lazynwb.file_io.FileAccessor(f))
 
-    schema = lazynwb.tables._get_table_schema(
-        files=files,
-        table_path=table_path,
-        first_n_files_to_infer_schema=infer_schema_length,
-        exclude_array_columns=exclude_array_columns,
-        exclude_internal_columns=False,
-        raise_on_missing=raise_on_missing,
-    )
+    if not schema:
+        schema = lazynwb.tables._get_table_schema(
+            files=files,
+            table_path=table_path,
+            first_n_files_to_infer_schema=infer_schema_length,
+            exclude_array_columns=exclude_array_columns,
+            exclude_internal_columns=False,
+            raise_on_missing=raise_on_missing,
+        )
+    schema = pl.Schema(schema) | pl.Schema(schema_overrides or {}) # create new object to avoid mutating the original schema
 
     def source_generator(
         with_columns: list[str] | None,
