@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 
 import npc_io
 import polars as pl
@@ -73,7 +73,7 @@ def scan_nwb(
     """
     if not isinstance(source, Iterable) or isinstance(source, str):
         source = [source]
-    
+
     files: list[lazynwb.file_io.FileAccessor] = []
     for f in source:  # type: ignore[union-attr]
         if isinstance(f, lazynwb.file_io.FileAccessor):
@@ -81,7 +81,6 @@ def scan_nwb(
         else:
             files.append(lazynwb.file_io.FileAccessor(f))
 
-    
     schema = lazynwb.tables._get_table_schema(
         files=files,
         table_path=table_path,
@@ -212,4 +211,6 @@ def scan_nwb(
                 )
                 i += batch_size
 
-    return polars.io.plugins.register_io_source(io_source=source_generator, schema=schema)
+    return polars.io.plugins.register_io_source(
+        io_source=source_generator, schema=schema
+    )
