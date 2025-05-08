@@ -6,7 +6,7 @@ from collections.abc import Iterable, Iterator, Sequence
 import npc_io
 import polars as pl
 import polars._typing
-from polars.io.plugins import register_io_source
+import polars.io.plugins
 
 import lazynwb.file_io
 import lazynwb.tables
@@ -209,4 +209,4 @@ def scan_nwb(
                 )
                 i += batch_size
 
-    return register_io_source(io_source=source_generator, schema=_get_schema)
+    return polars.io.plugins.register_io_source(io_source=source_generator, schema=_get_schema)
