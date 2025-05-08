@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import concurrent.futures
 import contextlib
 import difflib
