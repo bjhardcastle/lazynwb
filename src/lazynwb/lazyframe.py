@@ -90,7 +90,9 @@ def scan_nwb(
             exclude_internal_columns=False,
             raise_on_missing=raise_on_missing,
         )
-    schema = pl.Schema(schema) | pl.Schema(schema_overrides or {}) # create new object to avoid mutating the original schema
+    schema = pl.Schema(schema) | pl.Schema(
+        schema_overrides or {}
+    )  # create new object to avoid mutating the original schema
 
     def source_generator(
         with_columns: list[str] | None,

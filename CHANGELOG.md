@@ -8,9 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.41...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.42...HEAD)</small>
+
+### Added
+
+- Add back override schema ([4f86b40](https://github.com/bjhardcastle/lazynwb/commit/4f86b40d2dab9520d12149daf011398744e422ad) by bjhardcastle).
 
 <!-- insertion marker -->
+## [v0.2.42](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.42) - 2025-05-08
+
+<small>[Compare with v0.2.41](https://github.com/bjhardcastle/lazynwb/compare/v0.2.41...v0.2.42)</small>
+
 ## [v0.2.41](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.41) - 2025-05-08
 
 <small>[Compare with v0.2.40](https://github.com/bjhardcastle/lazynwb/compare/v0.2.40...v0.2.41)</small>
