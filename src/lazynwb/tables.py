@@ -820,20 +820,10 @@ def _get_table_schema(
             )
         )
 
-    # merge schemas and warn on inconsistent types:
-    counts: dict[str, collections.Counter] = {}
-    for path, file_schema in per_file_schemas.items():
-        for column_name, pl_dtype in file_schema.items():
-            if column_name not in counts:
-                counts[column_name] = collections.Counter()
-            counts[column_name][pl_dtype] += 1
-    schema = pl.Schema()
-    for column_name, counter in counts.items():
-        if len(counter) > 1:
-            logger.warning(
-                f"Column {column_name!r} has inconsistent types across files - using most common: {counter}"
-            )
-        schema[column_name] = counter.most_common(1)[0][0]
+    # merge schemas:
+    schema = pl.concat(
+        [pl.DataFrame(schema=v) for v in per_file_schemas.values()],
+    ).schema
 
     if not exclude_internal_columns:
         # add the internal columns to the schema:
@@ -845,7 +835,7 @@ def _get_table_schema(
         for column_name in tuple(schema.keys()):
             if isinstance(schema[column_name], (pl.List, pl.Array)):
                 schema.pop(column_name, None)
-    return pl.Schema(schema)
+    return schema
 
 
 def _get_internal_file_paths(
