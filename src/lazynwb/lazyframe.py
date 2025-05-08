@@ -69,6 +69,8 @@ def scan_nwb(
     """
     if not isinstance(source, Iterable) or isinstance(source, str):
         source = [source]
+    if not isinstance(source, Sequence):
+        source = list(source)
     assert isinstance(source, Sequence)
 
     def _get_schema() -> pl.Schema:
