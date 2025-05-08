@@ -73,7 +73,7 @@ def scan_nwb(
 
     def _get_schema() -> pl.Schema:
         if schema is not None:
-            _schema = pl.Schema(schema) 
+            _schema = pl.Schema(schema)
         else:
             _schema = lazynwb.tables._get_table_schema(
                 files=[lazynwb.file_io.FileAccessor(f) for f in source],
@@ -86,7 +86,7 @@ def scan_nwb(
         if schema_overrides is not None:
             _schema |= pl.Schema(schema_overrides)
         return _schema
-    
+
     def source_generator(
         with_columns: list[str] | None,
         predicate: pl.Expr | None,

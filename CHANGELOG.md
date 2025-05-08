@@ -8,9 +8,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.39...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.40...HEAD)</small>
+
+### Added
+
+- Add disable_progress parameter ([8a753ac](https://github.com/bjhardcastle/lazynwb/commit/8a753ac575a6ff374ffa266c298afdc36d8af7dd) by bjhardcastle).
+- Add scratch folder ([34cfa01](https://github.com/bjhardcastle/lazynwb/commit/34cfa01f45dec937a2e447417d909b6d9aab94ee) by bjhardcastle).
+- Add `schema` and `schema_overrides` to `scan_nwb()` ([015fedb](https://github.com/bjhardcastle/lazynwb/commit/015fedb61eab5d9086a13bcb7ab6a06b534a3e26) by bjhardcastle).
 
 <!-- insertion marker -->
+## [v0.2.40](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.40) - 2025-04-30
+
+<small>[Compare with v0.2.39](https://github.com/bjhardcastle/lazynwb/compare/v0.2.39...v0.2.40)</small>
+
 ## [v0.2.39](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.39) - 2025-04-29
 
 <small>[Compare with v0.2.38](https://github.com/bjhardcastle/lazynwb/compare/v0.2.38...v0.2.39)</small>

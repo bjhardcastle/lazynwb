@@ -834,7 +834,7 @@ wheels = [
 
 [[package]]
 name = "lazynwb"
-version = "0.2.40"
+version = "0.2.41"
 source = { editable = "." }
 dependencies = [
     { name = "h5py" },
