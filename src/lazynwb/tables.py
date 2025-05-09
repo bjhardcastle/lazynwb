@@ -183,7 +183,7 @@ def get_df(
         if isinstance(file, lazynwb.file_io.FileAccessor):
             return file._path.as_posix()
         with contextlib.suppress(AttributeError):
-            
+
             return file.as_posix()
         return npc_io.from_pathlike(file).as_posix()
 
@@ -1002,7 +1002,7 @@ def _spikes_times_in_intervals_helper(
     apply_obs_intervals: bool,
     as_counts: bool,
     keep_only_necessary_cols: bool,
-    align_times: bool
+    align_times: bool,
 ) -> pl.DataFrame:
     units_df: pl.DataFrame = (
         get_df(nwb_path, search_term="units", exact_path=True, as_polars=True)
@@ -1061,7 +1061,7 @@ def _spikes_times_in_intervals_helper(
             spike_times = row["spike_times"]
             spikes_in_intervals: list[float | list[float]] = []
             for trial_idx, (a, b) in enumerate(
-                    np.searchsorted(
+                np.searchsorted(
                     spike_times, intervals_df[f"{temp_col_prefix}_{col_name}"].to_list()
                 )
             ):
@@ -1070,7 +1070,12 @@ def _spikes_times_in_intervals_helper(
                 if as_counts:
                     spikes_in_intervals.append(len(spike_times_in_interval))
                 elif align_times:
-                    spikes_in_intervals.append(list(np.array(spike_times_in_interval) - intervals_df[col_name][trial_idx]))
+                    spikes_in_intervals.append(
+                        list(
+                            np.array(spike_times_in_interval)
+                            - intervals_df[col_name][trial_idx]
+                        )
+                    )
                 else:
                     spikes_in_intervals.append(spike_times_in_interval)
             results[col_name].extend(spikes_in_intervals)
