@@ -1001,8 +1001,8 @@ def _spikes_times_in_intervals_helper(
     units_table_indices: Sequence[int],
     apply_obs_intervals: bool,
     as_counts: bool,
-    keep_only_necessary_cols: bool,
     align_times: bool,
+    keep_only_necessary_cols: bool,
 ) -> pl.DataFrame:
     units_df: pl.DataFrame = (
         get_df(nwb_path, search_term="units", exact_path=True, as_polars=True)
@@ -1073,7 +1073,7 @@ def _spikes_times_in_intervals_helper(
                     spikes_in_intervals.append(
                         list(
                             np.array(spike_times_in_interval)
-                            - intervals_df[col_name][trial_idx]
+                            - intervals_df[f"{temp_col_prefix}_{col_name}"][trial_idx]
                         )
                     )
                 else:
