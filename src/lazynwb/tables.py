@@ -1075,7 +1075,9 @@ def _spikes_times_in_intervals_helper(
                     spikes_in_intervals.append(
                         (
                             spike_times_in_interval
-                            - intervals_df[f"{temp_col_prefix}_{col_name}"].to_list()[trial_idx]
+                            - intervals_df[f"{temp_col_prefix}_{col_name}"].to_list()[
+                                trial_idx
+                            ]
                         ).tolist()
                     )
             results[col_name].extend(spikes_in_intervals)
