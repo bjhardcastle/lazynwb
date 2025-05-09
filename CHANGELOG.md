@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.47...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.48...HEAD)</small>
+
+### Fixed
+
+- Fix `align_times` ([27d60f4](https://github.com/bjhardcastle/lazynwb/commit/27d60f47d086b6463108b5610a5b1e63bbdceaf5) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.48](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.48) - 2025-05-09
+
+<small>[Compare with v0.2.47](https://github.com/bjhardcastle/lazynwb/compare/v0.2.47...v0.2.48)</small>
 
 ### Fixed
 
 - Fix `align_times` ([a1a8bb7](https://github.com/bjhardcastle/lazynwb/commit/a1a8bb751e6ea0e6484229f207b87c5bc3901168) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.47](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.47) - 2025-05-09
 
 <small>[Compare with v0.2.46](https://github.com/bjhardcastle/lazynwb/compare/v0.2.46...v0.2.47)</small>
