@@ -183,6 +183,7 @@ def get_df(
         if isinstance(file, lazynwb.file_io.FileAccessor):
             return file._path.as_posix()
         with contextlib.suppress(AttributeError):
+            
             return file.as_posix()
         return npc_io.from_pathlike(file).as_posix()
 
@@ -1001,6 +1002,7 @@ def _spikes_times_in_intervals_helper(
     apply_obs_intervals: bool,
     as_counts: bool,
     keep_only_necessary_cols: bool,
+    align_times: bool
 ) -> pl.DataFrame:
     units_df: pl.DataFrame = (
         get_df(nwb_path, search_term="units", exact_path=True, as_polars=True)
@@ -1058,13 +1060,17 @@ def _spikes_times_in_intervals_helper(
             # get spike times with start:end interval for each row of the trials table
             spike_times = row["spike_times"]
             spikes_in_intervals: list[float | list[float]] = []
-            for a, b in np.searchsorted(
-                spike_times, intervals_df[f"{temp_col_prefix}_{col_name}"].to_list()
+            for trial_idx, (a, b) in enumerate(
+                    np.searchsorted(
+                    spike_times, intervals_df[f"{temp_col_prefix}_{col_name}"].to_list()
+                )
             ):
                 spike_times_in_interval = spike_times[a:b]
                 #! spikes coincident with end of interval are not included
                 if as_counts:
                     spikes_in_intervals.append(len(spike_times_in_interval))
+                elif align_times:
+                    spikes_in_intervals.append(list(np.array(spike_times_in_interval) - intervals_df[col_name][trial_idx]))
                 else:
                     spikes_in_intervals.append(spike_times_in_interval)
             results[col_name].extend(spikes_in_intervals)
@@ -1122,8 +1128,13 @@ def get_spike_times_in_intervals(
     use_process_pool: bool = True,
     disable_progress: bool = False,
     as_polars: bool = False,
+    align_times: bool = False,
 ) -> pl.DataFrame:
     """"""
+    if align_times and as_counts:
+        raise ValueError(
+            "Cannot use `align_times` and `as_counts` at the same time: please choose one"
+        )
     units_df: pl.DataFrame = _get_pl_df(filtered_units_df)
     assert not isinstance(units_df, pl.LazyFrame)
     n_sessions = units_df[NWB_PATH_COLUMN_NAME].n_unique()
@@ -1169,6 +1180,7 @@ def get_spike_times_in_intervals(
                 apply_obs_intervals=apply_obs_intervals,
                 as_counts=as_counts,
                 keep_only_necessary_cols=keep_only_necessary_cols,
+                align_times=align_times,
             )
             results.append(result)
     else:
@@ -1186,6 +1198,7 @@ def get_spike_times_in_intervals(
                 apply_obs_intervals=apply_obs_intervals,
                 as_counts=as_counts,
                 keep_only_necessary_cols=keep_only_necessary_cols,
+                align_times=align_times,
             )
             future_to_nwb_path[future] = nwb_path
         iterable = tuple(concurrent.futures.as_completed(future_to_nwb_path))
