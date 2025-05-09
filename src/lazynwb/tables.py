@@ -1069,15 +1069,15 @@ def _spikes_times_in_intervals_helper(
                 #! spikes coincident with end of interval are not included
                 if as_counts:
                     spikes_in_intervals.append(len(spike_times_in_interval))
-                elif align_times:
-                    spikes_in_intervals.append(
-                        list(
-                            np.array(spike_times_in_interval)
-                            - intervals_df[f"{temp_col_prefix}_{col_name}"][trial_idx]
-                        )
-                    )
-                else:
+                elif not align_times or len(spike_times_in_interval) == 0:
                     spikes_in_intervals.append(spike_times_in_interval)
+                else:
+                    spikes_in_intervals.append(
+                        (
+                            spike_times_in_interval
+                            - intervals_df[f"{temp_col_prefix}_{col_name}"].to_list()[trial_idx]
+                        ).tolist()
+                    )
             results[col_name].extend(spikes_in_intervals)
 
     if keep_only_necessary_cols and not apply_obs_intervals:
