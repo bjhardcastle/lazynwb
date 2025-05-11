@@ -1,0 +1,191 @@
+import gc  # Add this import
+import pathlib
+import tempfile
+import uuid
+from datetime import datetime, timezone
+
+import numpy as np
+import pytest
+from hdmf_zarr import NWBZarrIO
+from pynwb import NWBHDF5IO, NWBFile, TimeSeries
+from pynwb.epoch import TimeIntervals
+from pynwb.file import Subject
+
+# Units class is implicitly used by nwbfile.add_unit, but not directly instantiated here.
+from pynwb.misc import Units  # Uncommented: Ensure Units is imported
+
+
+def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
+    """
+    Populates an NWBFile object with predefined content.
+    """
+    nwbfile.subject = Subject(
+        subject_id=f"sub001_{unique_id_suffix}",
+        species="Mus musculus",
+        sex="M",
+        age="P90D",
+        description=f"Test subject",
+    )
+
+    # Processing module for running data
+    running_module = nwbfile.create_processing_module(
+        name="running", description="Processed running data"
+    )
+    num_samples = 120
+    timestamps = np.linspace(0, 12, num_samples)  # 12 seconds of data
+    running_speed_data = np.cos(timestamps) * 0.5 + 0.5  # Dummy speed data (0 to 1 m/s)
+    running_speed_ts = TimeSeries(
+        name="speed",
+        data=running_speed_data,
+        unit="m/s",
+        timestamps=timestamps,
+        description="forward running speed on wheel",
+    )
+    running_module.add(running_speed_ts)
+
+    # Units table
+    # Create the units table with description first, before adding any units.
+    nwbfile.units = Units(
+        name="units",
+    )
+    # Columns 'spike_times', 'waveform_mean', 'obs_intervals' are standard in pynwb.misc.Units.
+    # nwbfile.add_unit will add data to the nwbfile.units table created above.
+    num_units = 4
+    for i in range(num_units):
+        # Spike times for this unit (ragged array)
+        spike_times_data = np.sort(np.random.uniform(0, 12, np.random.randint(30, 60)))
+        # Waveform mean for this unit (assuming fixed length for simplicity)
+        waveform_mean_data = np.random.randn(25, 384)
+        # Observation intervals for this unit (ragged array of [start, stop] pairs)
+        if i % 2 == 0:
+            obs_intervals_data = np.array([[0.0, 5.5], [6.5, 12.0]])
+        else:
+            obs_intervals_data = np.array([[2.1, 7.5]])
+
+        nwbfile.add_unit(
+            spike_times=spike_times_data,
+            waveform_mean=waveform_mean_data,
+            obs_intervals=obs_intervals_data,
+            # id is managed automatically
+        )
+
+    # Trials table - set description during creation
+    trials_table = TimeIntervals(
+        name="trials"
+    )
+    trials_table.add_column(
+        name="condition", description="experimental condition"
+    )
+
+    num_trials = 6
+    for i in range(num_trials):
+        start_time = i * 2.0 + 0.05  # e.g., 0.05, 2.05, 4.05, ...
+        stop_time = start_time + 1.8  # e.g., 1.85, 3.85, 5.85, ...
+        trials_table.add_row(
+            start_time=start_time,
+            stop_time=stop_time,
+            condition=f"{chr(65+i)}",  # A, B, C...
+        )
+    nwbfile.trials = trials_table
+
+    # Epochs table - set description during creation
+    epochs_table = TimeIntervals(
+        name="epochs",
+        description="experimental epochs",
+    )
+    # Add epochs to the table
+    num_epochs = 3
+    for i in range(num_epochs):
+        start_time = i * 4.0 + 0.1  # e.g., 0.1, 4.1, 8.1
+        stop_time = start_time + 3.5  # e.g., 3.6, 7.6, 11.6
+        epochs_table.add_row(
+            start_time=start_time,
+            stop_time=stop_time,
+            tags=[f"tag_{i+1}", "task"],
+        )
+    nwbfile.epochs = epochs_table
+
+    return nwbfile
+
+
+@pytest.fixture(scope="session")
+def local_hdf5_path(local_hdf5_paths):
+    """Provides a path to a single HDF5 NWB file."""
+    # Use the first file in the list of HDF5 files
+    yield local_hdf5_paths[0]
+
+
+@pytest.fixture(scope="session")
+def local_hdf5_paths():
+    """Provides a path to a directory with multiple HDF5 NWB files."""
+    temp_dir = (
+        pathlib.Path(tempfile.gettempdir()) / f"lazynwb_test_dir_{uuid.uuid4().hex}"
+    )
+    temp_dir.mkdir(exist_ok=True, parents=True)
+
+    # Create 2 NWB files
+    for i in range(2):
+        file_path = temp_dir / f"test_hdf5_{i}.nwb"
+
+        nwbfile_obj = NWBFile(
+            session_description=f"Test hdf5 NWB file {i}",
+            identifier=str(uuid.uuid4()),
+            session_start_time=datetime.now(tz=timezone.utc),
+        )
+        # Populate the NWBFile with content using the helper function
+        nwbfile_obj = _add_nwb_file_content(
+            nwbfile_obj, unique_id_suffix=f"hdf5_dir_{i}"
+        )
+
+        with NWBHDF5IO(str(file_path.absolute()), "w") as io:
+            io.write(nwbfile_obj)
+
+    yield list(temp_dir.iterdir())
+
+    # Clean up
+    import shutil
+
+    gc.collect()  # Force garbage collection before rmtree
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+
+
+@pytest.fixture(scope="session")
+def local_zarr_path(local_zarr_paths):
+    """Provides a path to a single Zarr NWB store (directory)."""
+    yield local_zarr_paths[0]
+
+
+@pytest.fixture(scope="session")
+def local_zarr_paths():
+    """Provides a path to a directory with multiple Zarr NWB files."""
+    temp_dir = (
+        pathlib.Path(tempfile.gettempdir()) / f"lazynwb_zarr_dir_{uuid.uuid4().hex}"
+    )
+    temp_dir.mkdir(exist_ok=True, parents=True)
+
+    # Create 2 Zarr files
+    for i in range(2):
+        zarr_store_path = temp_dir / f"test_zarr_{i}.nwb.zarr"
+
+        nwbfile_obj = NWBFile(
+            session_description=f"Test Zarr NWB file {i}",
+            identifier=str(uuid.uuid4()),
+            session_start_time=datetime.now(tz=timezone.utc),
+        )
+        # Populate the NWBFile with content using the helper function
+        nwbfile_obj = _add_nwb_file_content(
+            nwbfile_obj, unique_id_suffix=f"zarr_dir_{i}"
+        )
+
+        with NWBZarrIO(str(zarr_store_path.absolute()), "w") as io:
+            io.write(nwbfile_obj)
+
+    yield list(temp_dir.iterdir())
+
+    # Clean up
+    import shutil
+
+    gc.collect()  # Force garbage collection before rmtree
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
