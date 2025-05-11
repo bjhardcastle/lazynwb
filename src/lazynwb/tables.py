@@ -181,7 +181,7 @@ def get_df(
         exclude_column_names = tuple(exclude_column_names)
         if len(paths) > 1 and (set(exclude_column_names) & set(INTERNAL_COLUMN_NAMES)):
             raise ValueError(
-                f"Cannot exclude internal column names when reading multiple files: they are required for identifying source of rows"
+                "Cannot exclude internal column names when reading multiple files: they are required for identifying source of rows"
             )
 
     # speedup known table locations:
@@ -435,7 +435,7 @@ def _get_table_data(
         # remove any identifiers that are also in the exclude list:
         for column_name in set(exclude_column_names) & set(identifier_column_data):
             identifier_column_data.pop(column_name)
-        
+
     logger.debug(
         f"fetched data for {file._path}/{search_term} in {time.time() - t0:.2f} s"
     )

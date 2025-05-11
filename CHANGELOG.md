@@ -8,13 +8,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.48...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.49...HEAD)</small>
+
+### Added
+
+- Add basic table tests [skip CI] ([56f6e47](https://github.com/bjhardcastle/lazynwb/commit/56f6e477e0a903fd7e98be22914cc24ad75aca92) by bjhardcastle).
+- Add file fixtures ([22139ea](https://github.com/bjhardcastle/lazynwb/commit/22139ea59a20ccb7af4da0edfda022d67459d1fa) by bjhardcastle).
+
+### Fixed
+
+- Fix exclusion of internal table columns ([f69ffd2](https://github.com/bjhardcastle/lazynwb/commit/f69ffd2d122fc1c8b3c8f1e4a4b04c8650c5cac2) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.49](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.49) - 2025-05-09
+
+<small>[Compare with v0.2.48](https://github.com/bjhardcastle/lazynwb/compare/v0.2.48...v0.2.49)</small>
 
 ### Fixed
 
 - Fix `align_times` ([27d60f4](https://github.com/bjhardcastle/lazynwb/commit/27d60f47d086b6463108b5610a5b1e63bbdceaf5) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.48](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.48) - 2025-05-09
 
 <small>[Compare with v0.2.47](https://github.com/bjhardcastle/lazynwb/compare/v0.2.47...v0.2.48)</small>
