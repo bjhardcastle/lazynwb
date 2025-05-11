@@ -36,6 +36,12 @@ NWB_PATH_COLUMN_NAME = "_nwb_path"
 TABLE_PATH_COLUMN_NAME = "_table_path"
 TABLE_INDEX_COLUMN_NAME = "_table_index"
 
+INTERNAL_COLUMN_NAMES = {
+    NWB_PATH_COLUMN_NAME,
+    TABLE_PATH_COLUMN_NAME,
+    TABLE_INDEX_COLUMN_NAME,
+}
+
 INTERVALS_TABLE_INDEX_COLUMN_NAME = "_intervals" + TABLE_INDEX_COLUMN_NAME
 UNITS_TABLE_INDEX_COLUMN_NAME = "_units" + TABLE_INDEX_COLUMN_NAME
 
@@ -170,6 +176,13 @@ def get_df(
             paths = (nwb_data_sources,)
         else:
             paths = tuple(nwb_data_sources)
+
+    if exclude_column_names is not None:
+        exclude_column_names = tuple(exclude_column_names)
+        if len(paths) > 1 and (set(exclude_column_names) & set(INTERNAL_COLUMN_NAMES)):
+            raise ValueError(
+                f"Cannot exclude internal column names when reading multiple files: they are required for identifying source of rows"
+            )
 
     # speedup known table locations:
     if search_term == "trials":
@@ -418,6 +431,11 @@ def _get_table_data(
         * column_length,
         TABLE_INDEX_COLUMN_NAME: np.arange(column_length),
     }
+    if exclude_column_names is not None:
+        # remove any identifiers that are also in the exclude list:
+        for column_name in set(exclude_column_names) & set(identifier_column_data):
+            identifier_column_data.pop(column_name)
+        
     logger.debug(
         f"fetched data for {file._path}/{search_term} in {time.time() - t0:.2f} s"
     )
