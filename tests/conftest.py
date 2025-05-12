@@ -28,21 +28,32 @@ def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
     )
 
     # Processing module for running data
-    running_module = nwbfile.create_processing_module(
-        name="running", description="Processed running data"
+    nwbfile.create_processing_module(
+        name="behavior", description="processed behavioral data"
     )
     num_samples = 120
     timestamps = np.linspace(0, 12, num_samples)  # 12 seconds of data
     running_speed_data = np.cos(timestamps) * 0.5 + 0.5  # Dummy speed data (0 to 1 m/s)
-    running_speed_ts = TimeSeries(
-        name="speed",
+    running_speed_ts_0 = TimeSeries(
+        name="running_speed_with_timestamps",
         data=running_speed_data,
         unit="m/s",
         timestamps=timestamps,
         description="forward running speed on wheel",
     )
-    running_module.add(running_speed_ts)
+    nwbfile.processing["behavior"].add(running_speed_ts_0)
 
+    # Add a second timeseries with start time and rate
+    running_speed_ts_1 = TimeSeries(
+        name="running_speed_with_rate",
+        data=running_speed_data,
+        unit="m/s",
+        starting_time=2.0,
+        rate=60.0,  # 1000 Hz
+        description="forward running speed on wheel",
+    )
+    nwbfile.processing["behavior"].add(running_speed_ts_1)
+    
     # Units table
     # Create the units table with description first, before adding any units.
     nwbfile.units = Units(
