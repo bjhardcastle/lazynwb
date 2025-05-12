@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import logging
 import typing
@@ -45,11 +46,11 @@ class TimeSeries:
                     f"{self.path} not found in file"
                 ) from None
             rate = self.rate
-            starting_time = self.starting_time
+            starting_time = self._starting_time
             if rate is None or starting_time is None:
                 raise AssertionError(
                     f"Not enough information to calculate timestamps for {self.path}: need rate and starting_time"
-                )
+                ) from None
             return (np.arange(len(self.data)) / rate) + starting_time
 
     @property
@@ -90,18 +91,17 @@ class TimeSeries:
         return self.timestamps[0]
 
     @property
-    def starting_time_unit(self) -> str | None:
-        if (_starting_time := self._starting_time) is not None:
-            return _starting_time.attrs.get("unit", None)
-        return None
-
-    @property
     def timestamps_unit(self) -> str | None:
-        try:
+        with contextlib.suppress(KeyError):
             return self.file[self.path].attrs["timestamps_unit"]
-        except KeyError:
-            return self.timestamps.attrs.get("unit", None)
-
+        with contextlib.suppress(KeyError):
+            return self.file[f"{self.path}/timestamps"].attrs.get("unit", None)
+        with contextlib.suppress(KeyError):
+            return self.file[f"{self.path}/starting_time"].attrs.get("unit", None)
+        raise AttributeError(
+            f"Cannot find timestamps unit for {self.path}: no timestamps or starting_time found"
+        )
+        
     @property
     def unit(self):
         return self.data.attrs.get("unit", None)
