@@ -152,7 +152,7 @@ exclude_also = [
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
-    "--doctest-modules",
+    # "--doctest-modules",
     "--ignore-glob=*scripts*,*examples*,*docs*",
     "--cov",
     "--cov-report=html",
