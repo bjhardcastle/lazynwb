@@ -50,7 +50,7 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]
     if isinstance(nwb_path, lazynwb.file_io.FileAccessor):
         context = contextlib.nullcontext(nwb_path)
     else:
-        context = lazynwb.file_io.FileAccessor(nwb_path)  # type: ignore[assignment]
+        context = lazynwb.file_io.FileAccessor(nwb_path) 
     with context as file:
         return _get_table_data(
             file=file,
@@ -1086,12 +1086,12 @@ def _spikes_times_in_intervals_helper(
             # get spike times with start:end interval for each row of the trials table
             spike_times = row["spike_times"]
             spikes_in_intervals: list[float | list[float]] = []
-            for trial_idx, (a, b) in enumerate( # type: ignore[misc]
+            for trial_idx, (a, b) in enumerate(
                 np.searchsorted(
                     spike_times, intervals_df[f"{temp_col_prefix}_{col_name}"].to_list()
                 )
             ):
-                spike_times_in_interval = spike_times[a:b] # type: ignore[has-type]
+                spike_times_in_interval = spike_times[a:b]
                 #! spikes coincident with end of interval are not included
                 if as_counts:
                     spikes_in_intervals.append(len(spike_times_in_interval))
