@@ -520,7 +520,7 @@ def is_nominally_indexed_column(
     if column_name not in all_column_names:
         return False
     if column_name.endswith("_index"):
-        return column_name.removesuffix("_index") in all_column_names
+        return column_name.split("_index")[0] in all_column_names # _index can appear multiple times at end of name
     else:
         return f"{column_name}_index" in all_column_names
 
@@ -725,13 +725,17 @@ def _get_polars_dtype(
         return pl.String
     dtype = polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
     if dataset.ndim > 1:
-        dtype = pl.Array(dtype, shape=dataset.shape)
-    elif is_nominally_indexed_column(column_name, all_column_names):
-        for _ in [
+        dtype = pl.Array(dtype, shape=dataset.shape[1:]) # shape reported is (Ncols, (*shape for each row)
+    if is_nominally_indexed_column(column_name, all_column_names):
+        # - indexed = variable length list-like (e.g. spike times)
+        # - it's possible to have a list of fixed-length arrays (e.g. obs_intervals)
+        index_cols =  [
             c
             for c in get_indexed_column_names(all_column_names)
             if c.startswith(column_name) and c.endswith("_index")
-        ]:
+        ]
+        for _ in index_cols:
+            # add as many levels of nested list as there are _index columns for this column
             dtype = pl.List(dtype)
     return dtype
 
@@ -773,6 +777,11 @@ def _get_table_schema_helper(
     else:
         file_schema = {}
         for name, dataset in column_accessors.items():
+            if is_nominally_indexed_column(
+                name, column_accessors.keys()
+            ) and name.endswith("_index"):
+                # skip the index columns
+                continue
             file_schema[name] = _get_polars_dtype(
                 dataset, name, column_accessors.keys()
             )
