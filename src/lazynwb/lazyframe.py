@@ -93,7 +93,18 @@ def scan_nwb(
     schema = pl.Schema(schema) | pl.Schema(
         schema_overrides or {}
     )  # create new object to avoid mutating the original schema
-
+    
+    def _apply_schema(
+        df: pl.DataFrame,
+        schema: polars._typing.SchemaDict,
+    ) -> pl.DataFrame:
+        """
+        Apply the schema to the DataFrame, converting columns to the specified types.
+        """
+        return pl.DataFrame(
+            df, schema={column: schema[column] for column in df.columns}
+        )
+        
     def source_generator(
         with_columns: list[str] | None,
         predicate: pl.Expr | None,
@@ -169,6 +180,8 @@ def scan_nwb(
             logger.debug(
                 f"Yielding {table_path!r} df with {df.height} rows and {df.width} columns"
             )
+
+            df = _apply_schema(df, schema=schema)
             yield df[:n_rows] if n_rows is not None and n_rows < df.height else df
 
         else:
@@ -191,26 +204,31 @@ def scan_nwb(
                     filtered_df[i : min(i + batch_size, n_rows)]
                 )
                 yield (
-                    filtered_df.join(
-                        other=(
-                            lazynwb.tables.get_df(
-                                nwb_data_sources=nwb_path_to_row_indices.keys(),
-                                search_term=table_path,
-                                exact_path=True,
-                                include_column_names=include_column_names,
-                                nwb_path_to_row_indices=nwb_path_to_row_indices,
-                                disable_progress=disable_progress,
-                                use_process_pool=False,  # no speed gain, cannot use from top-level of scripts
-                                as_polars=True,
-                                ignore_errors=ignore_errors,
-                                low_memory=low_memory,
-                            )
+                    _apply_schema(
+                        filtered_df
+                        .join(
+                            other=(
+                                lazynwb.tables.get_df(
+                                    nwb_data_sources=nwb_path_to_row_indices.keys(),
+                                    search_term=table_path,
+                                    exact_path=True,
+                                    include_column_names=include_column_names,
+                                    nwb_path_to_row_indices=nwb_path_to_row_indices,
+                                    disable_progress=disable_progress,
+                                    use_process_pool=False,  # no speed gain, cannot use from top-level of scripts
+                                    as_polars=True,
+                                    ignore_errors=ignore_errors,
+                                    low_memory=low_memory,
+                                )
+                            ),
+                            on=[
+                                lazynwb.NWB_PATH_COLUMN_NAME,
+                                lazynwb.TABLE_PATH_COLUMN_NAME,
+                                lazynwb.TABLE_INDEX_COLUMN_NAME,
+                            ],
+                            how="inner",
                         ),
-                        on=[
-                            lazynwb.NWB_PATH_COLUMN_NAME,
-                            lazynwb.TABLE_INDEX_COLUMN_NAME,
-                        ],
-                        how="inner",
+                        schema=schema,
                     )
                 )
                 i += batch_size
