@@ -171,11 +171,11 @@ def get_df(
         paths = tuple(nwb_path_to_row_indices.keys())
     else:
         if isinstance(
-            nwb_data_sources, (str, lazynwb.file_io.FileAccessor)
+            nwb_data_sources, (str, bytes, lazynwb.file_io.FileAccessor)
         ) or not isinstance(nwb_data_sources, Iterable):
-            paths = (nwb_data_sources,)
+            paths = (nwb_data_sources,) # type: ignore[assignment]
         else:
-            paths = tuple(nwb_data_sources)
+            paths = tuple(nwb_data_sources) # type: ignore[arg-type]
 
     if exclude_column_names is not None:
         exclude_column_names = tuple(exclude_column_names)
@@ -200,8 +200,8 @@ def get_df(
             return file.as_posix()
         return npc_io.from_pathlike(file).as_posix()
 
+    results: list[dict] = []
     if not parallel or len(paths) == 1:  # don't use a pool for a single file
-        results: list[dict] = []
         for path in paths:
             results.append(
                 _get_df_helper(
@@ -229,7 +229,6 @@ def get_df(
             else lazynwb.utils.get_threadpool_executor()
         )
         future_to_path = {}
-        results: list[dict] = []
         for path in paths:
             future = executor.submit(
                 _get_df_helper,
@@ -1087,12 +1086,12 @@ def _spikes_times_in_intervals_helper(
             # get spike times with start:end interval for each row of the trials table
             spike_times = row["spike_times"]
             spikes_in_intervals: list[float | list[float]] = []
-            for trial_idx, (a, b) in enumerate(
+            for trial_idx, (a, b) in enumerate( # type: ignore[misc]
                 np.searchsorted(
                     spike_times, intervals_df[f"{temp_col_prefix}_{col_name}"].to_list()
                 )
             ):
-                spike_times_in_interval = spike_times[a:b]
+                spike_times_in_interval = spike_times[a:b] # type: ignore[has-type]
                 #! spikes coincident with end of interval are not included
                 if as_counts:
                     spikes_in_intervals.append(len(spike_times_in_interval))

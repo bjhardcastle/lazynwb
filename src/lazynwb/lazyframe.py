@@ -79,7 +79,7 @@ def scan_nwb(
         if isinstance(f, lazynwb.file_io.FileAccessor):
             files.append(f)
         else:
-            files.append(lazynwb.file_io.FileAccessor(f))
+            files.append(lazynwb.file_io.FileAccessor(f)) # type: ignore[arg-type]
 
     if not schema:
         schema = lazynwb.tables._get_table_schema(
