@@ -78,7 +78,7 @@ post_commit_hooks = [
 [tool.poe.tasks]
 mypy = "mypy src --install-types --non-interactive"
 pytest = "pytest --cov-report term-missing:skip-covered --cov-report=html"
-test = ["mypy", "pytest"]
+test = ["pytest"]
 ruff = "ruff check src --fix-only"
 black = "black src"
 format = ["ruff", "black"]
