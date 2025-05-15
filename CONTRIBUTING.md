@@ -11,12 +11,10 @@ git clone https://github.com/bjhardcastle/lazynwb
 cd lazynwb
 ```
 
-2. Create a new virtual environment:
-- conda is convenient for getting a specific Python version, but adds additional packages
-- it's preferable to use a completely clean environment to properly test the project's specified dependencies in isolation
-- where possible, use the lowest supported Python version (specified in `pyproject.toml` `project/requires-python`) 
+2. Install with `uv` 
 ```bash
-python3 -m venv .venv
+uv python pin 3.11
+uv sync
 ```
 
 3. Activate the environment:
@@ -30,12 +28,6 @@ python3 -m venv .venv
   source .venv/bin/scripts/activate
   ```
 
-4. Add [PDM](https://pdm.fming.dev) to manage the project's dependencies and run pre-build jobs:
-```bash
-pip install pdm
-pdm install
-```
-
 You now have an editable pip install of the project, with all dev dependencies.
 The following should work:
 ```bash
@@ -44,13 +36,14 @@ python -c "import lazynwb; print(lazynwb.__version__)"
 
 ### Using PDM
 
-The project uses [PDM](https://pdm.fming.dev) for reproducible dev environments, with pre-defined `pyproject.toml` configuration for tools
-While working on the project, use PDM to manage dependencies:
-- add dependencies: `pdm add numpy pandas`
-  - add dev dependencies: `pdm add -G dev mypy`
-- remove dependencies correctly: `pdm remove numpy`   # does nothing because pandas still needs numpy!
-- update the environment to reflect changes in `pyproject.toml`: `pdm update`
-Always commit & push `pdm.lock` to share the up-to-date dev environment
+The project uses [uv](https://docs.astral.sh/uv/) for reproducible dev environments, with
+configuration for tools in `pyproject.toml`
+While working on the project, use `uv` to manage dependencies:
+- add dependencies: `uv add numpy pandas`
+  - add dev dependencies: `uv add --dev mypy`
+- remove dependencies correctly: `uv remove numpy`   # does nothing because pandas still needs numpy!
+- update the environment to reflect changes in `pyproject.toml`: `uv sync`
+Always commit & push `uv.lock` to share the up-to-date dev environment
 
 
 ## Development (internal contributors)
@@ -60,17 +53,13 @@ Always commit & push `pdm.lock` to share the up-to-date dev environment
 2. Add simple doctests to functions or more elaborate tests to modules in `tests`
 
 3. If you updated the project's dependencies (or you pulled changes):
-  - run `pdm update`
+  - run `uv sync`
   - if it fails due to dependencies you added, follow any error messages to resolve dependency version conflicts
-  - when it doesn't fail, commit any changes to `pdm.lock` along with the changes to `pyproject.toml`
+  - when it doesn't fail, commit any changes to `uv.lock` along with the changes to `pyproject.toml`
 
-4. Run tests with `pdm run test`
+4. Run tests with `uv run task test`
   - mypy will check all functions that contain type annotations in their signature
   - pytest will run doctests and any tests in the `tests` dir
-
-5. If you updated the documentation or the project dependencies:
-  - run `pdm run doc`
-  - go to http://localhost:8000 and check that everything looks good
  
 - if you are unsure about how to fix a test, just push your changes - the continuous integration will fail on Github and someone else can have a look
 
