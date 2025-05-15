@@ -50,7 +50,7 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]
     if isinstance(nwb_path, lazynwb.file_io.FileAccessor):
         context = contextlib.nullcontext(nwb_path)
     else:
-        context = lazynwb.file_io.FileAccessor(nwb_path) 
+        context = lazynwb.file_io.FileAccessor(nwb_path)
     with context as file:
         return _get_table_data(
             file=file,
@@ -173,9 +173,9 @@ def get_df(
         if isinstance(
             nwb_data_sources, (str, bytes, lazynwb.file_io.FileAccessor)
         ) or not isinstance(nwb_data_sources, Iterable):
-            paths = (nwb_data_sources,) # type: ignore[assignment]
+            paths = (nwb_data_sources,)  # type: ignore[assignment]
         else:
-            paths = tuple(nwb_data_sources) # type: ignore[arg-type]
+            paths = tuple(nwb_data_sources)  # type: ignore[arg-type]
 
     if exclude_column_names is not None:
         exclude_column_names = tuple(exclude_column_names)
@@ -519,7 +519,9 @@ def is_nominally_indexed_column(
     if column_name not in all_column_names:
         return False
     if column_name.endswith("_index"):
-        return column_name.split("_index")[0] in all_column_names # _index can appear multiple times at end of name
+        return (
+            column_name.split("_index")[0] in all_column_names
+        )  # _index can appear multiple times at end of name
     else:
         return f"{column_name}_index" in all_column_names
 
@@ -724,11 +726,13 @@ def _get_polars_dtype(
         return pl.String
     dtype = polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
     if dataset.ndim > 1:
-        dtype = pl.Array(dtype, shape=dataset.shape[1:]) # shape reported is (Ncols, (*shape for each row)
+        dtype = pl.Array(
+            dtype, shape=dataset.shape[1:]
+        )  # shape reported is (Ncols, (*shape for each row)
     if is_nominally_indexed_column(column_name, all_column_names):
         # - indexed = variable length list-like (e.g. spike times)
         # - it's possible to have a list of fixed-length arrays (e.g. obs_intervals)
-        index_cols =  [
+        index_cols = [
             c
             for c in get_indexed_column_names(all_column_names)
             if c.startswith(column_name) and c.endswith("_index")

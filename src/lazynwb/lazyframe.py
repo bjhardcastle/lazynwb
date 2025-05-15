@@ -79,7 +79,7 @@ def scan_nwb(
         if isinstance(f, lazynwb.file_io.FileAccessor):
             files.append(f)
         else:
-            files.append(lazynwb.file_io.FileAccessor(f)) # type: ignore[arg-type]
+            files.append(lazynwb.file_io.FileAccessor(f))  # type: ignore[arg-type]
 
     if not schema:
         schema = lazynwb.tables._get_table_schema(
@@ -93,7 +93,7 @@ def scan_nwb(
     schema = pl.Schema(schema) | pl.Schema(
         schema_overrides or {}
     )  # create new object to avoid mutating the original schema
-    
+
     def _apply_schema(
         df: pl.DataFrame,
         schema: polars._typing.SchemaDict,
@@ -104,7 +104,7 @@ def scan_nwb(
         return pl.DataFrame(
             df, schema={column: schema[column] for column in df.columns}
         )
-        
+
     def source_generator(
         with_columns: list[str] | None,
         predicate: pl.Expr | None,
@@ -205,8 +205,7 @@ def scan_nwb(
                 )
                 yield (
                     _apply_schema(
-                        filtered_df
-                        .join(
+                        filtered_df.join(
                             other=(
                                 lazynwb.tables.get_df(
                                     nwb_data_sources=nwb_path_to_row_indices.keys(),

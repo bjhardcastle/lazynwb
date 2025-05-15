@@ -34,7 +34,9 @@ class TimeSeries:
                 raise lazynwb.exceptions.InternalPathError(
                     f"{self._path} not found in file"
                 ) from None
-            raise AttributeError(f"{self._path} has no data: use event timestamps alone")
+            raise AttributeError(
+                f"{self._path} has no data: use event timestamps alone"
+            )
 
     @property
     def timestamps(self) -> h5py.Dataset | zarr.Array:
@@ -101,7 +103,7 @@ class TimeSeries:
         raise AttributeError(
             f"Cannot find timestamps unit for {self._path}: no timestamps or starting_time found"
         )
-        
+
     @property
     def unit(self):
         return self.data.attrs.get("unit", None)

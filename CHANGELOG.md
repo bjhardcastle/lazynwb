@@ -8,7 +8,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.49...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.50...HEAD)</small>
+
+### Added
+
+- Add scan_nwb tests ([c083b56](https://github.com/bjhardcastle/lazynwb/commit/c083b56b1982a9a69a5db45d0c4565f9d431f41a) by bjhardcastle).
+- Add tests for timeseries data ([4eab192](https://github.com/bjhardcastle/lazynwb/commit/4eab19229c075547a58b5863fb3bac2e22e456b4) by bjhardcastle).
+
+### Fixed
+
+- Fix types Mypy in github workflow gives different results ([284097c](https://github.com/bjhardcastle/lazynwb/commit/284097c343c5fd026637897c44450faf523a9309) by bjhardcastle).
+- Fix types ([0c954c0](https://github.com/bjhardcastle/lazynwb/commit/0c954c09377edf8e608a6ffc9e9dd8e61a6638e6) by bjhardcastle).
+- Fix handling indexed dtype and inferring dtype ([1871d55](https://github.com/bjhardcastle/lazynwb/commit/1871d5515928004c1cbe92fca515eb190c05c24f) by bjhardcastle).
+- Fix TimeSeries properties ([00080cb](https://github.com/bjhardcastle/lazynwb/commit/00080cb2ddf51b0188d64409500f90a94ea9bf67) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.50](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.50) - 2025-05-11
+
+<small>[Compare with v0.2.49](https://github.com/bjhardcastle/lazynwb/compare/v0.2.49...v0.2.50)</small>
 
 ### Added
 
@@ -19,7 +36,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Fix exclusion of internal table columns ([f69ffd2](https://github.com/bjhardcastle/lazynwb/commit/f69ffd2d122fc1c8b3c8f1e4a4b04c8650c5cac2) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.49](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.49) - 2025-05-09
 
 <small>[Compare with v0.2.48](https://github.com/bjhardcastle/lazynwb/compare/v0.2.48...v0.2.49)</small>
