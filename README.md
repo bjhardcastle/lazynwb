@@ -58,11 +58,11 @@ import polars as pl
   # _nwb_path and _table_row_index are not columns in the NWB table: they're added to identify source of each row in a table that spans multiple NWBs
 )
 >>> shape: (101, 4)
-┌─────────┬──────────────────────────────────┬──────────────────────────────────┬──────────────┐
+┌─────────┬─────────────────────────────────┬─────────────────────────────────┬──────────────┐
 │ unit_id ┆ spike_times                     ┆ _nwb_path                       ┆ _table_index │
 │ ---     ┆ ---                             ┆ ---                             ┆ ---          │
 │ i64     ┆ list[f64]                       ┆ str                             ┆ u32          │
-╞═════════╪══════════════════════════════════╪══════════════════════════════════╪══════════════╡
+╞═════════╪═════════════════════════════════╪═════════════════════════════════╪══════════════╡
 │ 193     ┆ [2722.628735, 2723.620493, … 4… ┆ /data/ecephys_702960_2024-03-1… ┆ 5            │
 │ 23      ┆ [1784.801304, 1784.804037, … 3… ┆ /data/ecephys_725805_2024-07-1… ┆ 4            │
 │ 0       ┆ [9.2712e6, 9.2712e6, … 9.2731e… ┆ /data/ecephys_737812_2024-08-0… ┆ 0            │
@@ -83,13 +83,13 @@ lazynwb.get_metadata_df(nwb_paths, as_polars=True)
 >>>
 ```Getting metadata: 100%|█████████████████████| 252/252 [00:17<00:00, 14.51file/s]
 shape: (252, 28)
-┌────────────┬─────────────┬────────────┬───────────┬────┬─────────┬────────────┬───────────┬───────────┐
+┌────────────┬────────────┬───────────┬───────────┬───┬────────┬───────────┬───────────┬───────────┐
 │ identifier ┆ session_st ┆ session_i ┆ session_d ┆ … ┆ weight ┆ strain    ┆ date_of_b ┆ _nwb_path │
 │ ---        ┆ art_time   ┆ d         ┆ escriptio ┆   ┆ ---    ┆ ---       ┆ irth      ┆ ---       │
 │ str        ┆ ---        ┆ ---       ┆ n         ┆   ┆ null   ┆ str       ┆ ---       ┆ str       │
 │            ┆ datetime[μ ┆ str       ┆ ---       ┆   ┆        ┆           ┆ datetime[ ┆           │
 │            ┆ s, UTC]    ┆           ┆ str       ┆   ┆        ┆           ┆ μs, UTC]  ┆           │
-╞════════════╪═════════════╪════════════╪═══════════╪════╪═════════╪════════════╪═══════════╪═══════════╡
+╞════════════╪════════════╪═══════════╪═══════════╪═══╪════════╪═══════════╪═══════════╪═══════════╡
 │ 0514cf12-2 ┆ 2024-08-07 ┆ 713655_20 ┆ ecephys   ┆ … ┆ null   ┆ Sst-IRES- ┆ 2023-11-2 ┆ /data/dyn │
 │ 41f-4ab2-a ┆ 19:03:44   ┆ 24-08-07  ┆ session   ┆   ┆        ┆ Cre;Ai32  ┆ 3         ┆ amicrouti │
 │ ce9-1c2619 ┆ UTC        ┆           ┆ (day 3)   ┆   ┆        ┆           ┆ 08:00:00  ┆ ng_datacu │
@@ -111,7 +111,7 @@ shape: (252, 28)
 │ 971-495d-b ┆ 19:18:59   ┆ 25-03-18  ┆ session   ┆   ┆        ┆ -YFP      ┆ 6         ┆ amicrouti │
 │ 6ed-dc7b08 ┆ UTC        ┆           ┆ (day 1)   ┆   ┆        ┆           ┆ 07:00:00  ┆ ng_datacu │
 │ …          ┆            ┆           ┆ withou…   ┆   ┆        ┆           ┆ UTC       ┆ be_…      │
-└────────────┴─────────────┴────────────┴────────────┴───┴─────────┴───────────┴────────────┴───────────┘
+└────────────┴────────────┴───────────┴───────────┴───┴────────┴───────────┴───────────┴───────────┘
 ```
 
 ## 3. Quickly provide a summary of the contents of a single NWB file
@@ -156,3 +156,6 @@ See instructions in https://github.com/bjhardcastle/lazynwb/CONTRIBUTING.md and 
 
 - hdf5 access seems to have a mutex lock that threads spend a long time waiting to
   acquire (with remfile)
+- seems to slow down over time in single-threaded loop
+    - on laptop, first 5 are fast (2-3 s per iteration) - successive iterations
+      are much slower (>60 s)
