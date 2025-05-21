@@ -395,8 +395,9 @@ def _get_table_data(
             f"materializing indexed columns for {file._path}/{search_term}: {data_column_names}"
         )
         for column_name in data_column_names:
+            data_column_accessor = column_accessors[column_name].asstr()
             column_data[column_name] = get_indexed_column_data(
-                data_column_accessor=column_accessors[column_name],
+                data_column_accessor=data_column_accessor,
                 index_column_accessor=column_accessors[f"{column_name}_index"],
                 table_row_indices=table_row_indices,
                 low_memory=low_memory,
