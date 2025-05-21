@@ -481,7 +481,7 @@ def get_indexed_column_data(
         np.diff(index_array)[table_row_indices]
     ), "length of data_indices is incorrect"
 
-    # read actual data and split into sub-vectors for each row of the table:
+    # read actual data and split into sub-vectors for each row of the table:        
     if low_memory:
 
         def _get_data(start_idx, end_idx):
@@ -724,8 +724,9 @@ def _get_polars_dtype(
 ) -> polars._typing.PolarsDataType:
     dtype = dataset.dtype
     if dtype == "O":
-        return pl.String
-    dtype = polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
+        dtype = pl.String
+    else:
+        dtype = polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
     if dataset.ndim > 1:
         dtype = pl.Array(
             dtype, shape=dataset.shape[1:]
