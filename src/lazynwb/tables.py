@@ -395,7 +395,10 @@ def _get_table_data(
             f"materializing indexed columns for {file._path}/{search_term}: {data_column_names}"
         )
         for column_name in data_column_names:
-            data_column_accessor = column_accessors[column_name].asstr()
+            if column_accessors[column_name].dtype.kind in ("S", "O"):
+                data_column_accessor = column_accessors[column_name].astype(str)
+            else:
+                data_column_accessor = column_accessors[column_name]
             column_data[column_name] = get_indexed_column_data(
                 data_column_accessor=data_column_accessor,
                 index_column_accessor=column_accessors[f"{column_name}_index"],
