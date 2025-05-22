@@ -381,7 +381,7 @@ def _get_table_data(
             multi_dim_column_names.append(column_name)
             continue
         if column_accessors[column_name].dtype.kind in ("S", "O"):
-            column_data[column_name] = column_accessors[column_name][_idx].astype(str)
+            column_data[column_name] = column_accessors[column_name].asstr()[_idx]
         else:
             column_data[column_name] = column_accessors[column_name][_idx]
 
@@ -396,7 +396,7 @@ def _get_table_data(
         )
         for column_name in data_column_names:
             if column_accessors[column_name].dtype.kind in ("S", "O"):
-                data_column_accessor = column_accessors[column_name].astype(str)
+                data_column_accessor = column_accessors[column_name].asstr()
             else:
                 data_column_accessor = column_accessors[column_name]
             column_data[column_name] = get_indexed_column_data(
@@ -726,7 +726,7 @@ def _get_polars_dtype(
     all_column_names: Iterable[str],
 ) -> polars._typing.PolarsDataType:
     dtype = dataset.dtype
-    if dtype == "O":
+    if dtype in ("S", "O"):
         dtype = pl.String
     else:
         dtype = polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
