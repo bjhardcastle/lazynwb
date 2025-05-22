@@ -384,6 +384,7 @@ class Subject:
     def _to_dict(self) -> dict[str, Any]:
         return to_dict(self)
 
+
 @typing.overload
 def get_metadata_df(
     nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
@@ -391,12 +392,14 @@ def get_metadata_df(
     as_polars: Literal[False] = False,
 ) -> pd.DataFrame: ...
 
+
 @typing.overload
 def get_metadata_df(
     nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
     disable_progress: bool = False,
     as_polars: Literal[True] = True,
 ) -> pl.DataFrame: ...
+
 
 def get_metadata_df(
     nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],

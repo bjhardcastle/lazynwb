@@ -8,7 +8,28 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.50...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.51...HEAD)</small>
+
+### Added
+
+- Add overload types ([dae36fd](https://github.com/bjhardcastle/lazynwb/commit/dae36fdfac998897f8d11c81ecf8ed5d416b5ee2) by bjhardcastle).
+
+### Fixed
+
+- Fix asstr() access on ndim array cols ([0ffaea1](https://github.com/bjhardcastle/lazynwb/commit/0ffaea1b1a84e62608774826b0128a94f18f8a13) by bjhardcastle).
+- Fix list[str] cols in schema ([4838694](https://github.com/bjhardcastle/lazynwb/commit/4838694ee654cfbf587286bf8ee81a8936bb9054) by bjhardcastle).
+- Fix list[str] cols in tables ([46e3785](https://github.com/bjhardcastle/lazynwb/commit/46e3785acdeb83ee146576ded8a16706063968c8) by bjhardcastle).
+- Fix formatting ([fac74b0](https://github.com/bjhardcastle/lazynwb/commit/fac74b0dccdf282e7188d9a8a250fb90b32744c9) by Ben Hardcastle).
+- Fix typos [skip CI] ([85177fb](https://github.com/bjhardcastle/lazynwb/commit/85177fbbfd517b342e439cba1f7e68861be30278) by Ben Hardcastle).
+
+### Removed
+
+- Remove outdated note ([953fd55](https://github.com/bjhardcastle/lazynwb/commit/953fd5508a3a7f58082910872da779df00e463a9) by Ben Hardcastle).
+
+<!-- insertion marker -->
+## [v0.2.51](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.51) - 2025-05-15
+
+<small>[Compare with v0.2.50](https://github.com/bjhardcastle/lazynwb/compare/v0.2.50...v0.2.51)</small>
 
 ### Added
 
@@ -22,7 +43,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Fix handling indexed dtype and inferring dtype ([1871d55](https://github.com/bjhardcastle/lazynwb/commit/1871d5515928004c1cbe92fca515eb190c05c24f) by bjhardcastle).
 - Fix TimeSeries properties ([00080cb](https://github.com/bjhardcastle/lazynwb/commit/00080cb2ddf51b0188d64409500f90a94ea9bf67) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.50](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.50) - 2025-05-11
 
 <small>[Compare with v0.2.49](https://github.com/bjhardcastle/lazynwb/compare/v0.2.49...v0.2.50)</small>
