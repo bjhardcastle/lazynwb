@@ -446,7 +446,7 @@ def _get_table_data(
             lazynwb.utils.normalize_internal_file_path(search_term)
         ]
         * column_length,
-        TABLE_INDEX_COLUMN_NAME: np.arange(column_length),
+        TABLE_INDEX_COLUMN_NAME: table_row_indices or np.arange(column_length),
     }
     if exclude_column_names is not None:
         # remove any identifiers that are also in the exclude list:

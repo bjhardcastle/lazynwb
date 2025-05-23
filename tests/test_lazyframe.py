@@ -128,7 +128,8 @@ def test_scan_nwb_predicate_pushdown(local_hdf5_path):
     )
 
     # Apply a predicate filter
-    filtered_lf = lf.filter(pl.col("start_time") > 2.0)
+    expr = pl.col("start_time") > 2.0
+    filtered_lf = lf.filter(expr)
 
     # Execute and check results
     filtered_df = filtered_lf.collect()
@@ -137,6 +138,7 @@ def test_scan_nwb_predicate_pushdown(local_hdf5_path):
     assert (
         filtered_df["start_time"] > 2.0
     ).all(), "Predicate pushdown filter was not applied correctly"
+    assert len(filtered_df) == len(lf.collect().filter(expr)), "Filtered DataFrame length does not match length when collecting and filtering separately"
 
 
 def test_scan_nwb_raises_on_missing(local_hdf5_path):
