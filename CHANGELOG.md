@@ -8,7 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.51...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.52...HEAD)</small>
+
+### Fixed
+
+- Fix handling hdf5 object reference and zarr Array ([5419099](https://github.com/bjhardcastle/lazynwb/commit/541909929262967695bf31f8360de55f6a49378a) by bjhardcastle).
+- Fix asstr() access on ndim array cols ([90675d2](https://github.com/bjhardcastle/lazynwb/commit/90675d2dd7fc95f406a0e8ac54dcd6ddbf3d067c) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.52](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.52) - 2025-05-22
+
+<small>[Compare with v0.2.51](https://github.com/bjhardcastle/lazynwb/compare/v0.2.51...v0.2.52)</small>
 
 ### Added
 
@@ -26,7 +36,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Remove outdated note ([953fd55](https://github.com/bjhardcastle/lazynwb/commit/953fd5508a3a7f58082910872da779df00e463a9) by Ben Hardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.51](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.51) - 2025-05-15
 
 <small>[Compare with v0.2.50](https://github.com/bjhardcastle/lazynwb/compare/v0.2.50...v0.2.51)</small>

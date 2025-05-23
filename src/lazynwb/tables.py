@@ -387,7 +387,9 @@ def _get_table_data(
                 # - no way to tell apart hdf5 reference columns, but if the above fails, we cast to
                 # string differently, resulting in '<HDF5 object reference>'
                 # - zarr Array as no attribute 'asstr'
-                column_data[column_name] = column_accessors[column_name][_idx].astype(str)
+                column_data[column_name] = column_accessors[column_name][_idx].astype(
+                    str
+                )
         else:
             column_data[column_name] = column_accessors[column_name][_idx]
 
