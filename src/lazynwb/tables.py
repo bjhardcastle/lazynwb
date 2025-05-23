@@ -381,7 +381,13 @@ def _get_table_data(
             multi_dim_column_names.append(column_name)
             continue
         if column_accessors[column_name].dtype.kind in ("S", "O"):
-            column_data[column_name] = column_accessors[column_name].asstr()[_idx]
+            try:
+                column_data[column_name] = column_accessors[column_name].asstr()[_idx]
+            except (AttributeError, TypeError):
+                # - no way to tell apart hdf5 reference columns, but if the above fails, we cast to
+                # string differently, resulting in '<HDF5 object reference>'
+                # - zarr Array as no attribute 'asstr'
+                column_data[column_name] = column_accessors[column_name][_idx].astype(str)
         else:
             column_data[column_name] = column_accessors[column_name][_idx]
 
@@ -396,7 +402,13 @@ def _get_table_data(
         )
         for column_name in data_column_names:
             if column_accessors[column_name].dtype.kind in ("S", "O"):
-                data_column_accessor = column_accessors[column_name].asstr()
+                try:
+                    data_column_accessor = column_accessors[column_name].asstr()
+                except (AttributeError, TypeError):
+                    # - no way to tell apart hdf5 reference columns, but if the above fails, we cast to
+                    # string differently, resulting in '<HDF5 object reference>'
+                    # - zarr Array as no attribute 'asstr'
+                    data_column_accessor = column_accessors[column_name].astype(str)
             else:
                 data_column_accessor = column_accessors[column_name]
             column_data[column_name] = get_indexed_column_data(
