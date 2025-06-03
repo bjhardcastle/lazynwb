@@ -321,7 +321,9 @@ def _get_table_data(
             use_thread_pool=False,
         )
     )
-    is_metadata = any(v.shape == () for v in column_accessors.values() if hasattr(v, "dtype"))
+    is_metadata = any(
+        v.shape == () for v in column_accessors.values() if hasattr(v, "dtype")
+    )
 
     if isinstance(exclude_column_names, str):
         exclude_column_names = (exclude_column_names,)
@@ -815,7 +817,16 @@ def _get_table_schema_helper(
             return None
     else:
         file_schema = {}
-        is_metadata = bool(next((v for v in column_accessors.values() if hasattr(v, 'shape') and not v.shape), None))
+        is_metadata = bool(
+            next(
+                (
+                    v
+                    for v in column_accessors.values()
+                    if hasattr(v, "shape") and not v.shape
+                ),
+                None,
+            )
+        )
         for name, dataset in column_accessors.items():
             if is_nominally_indexed_column(
                 name, column_accessors.keys()
