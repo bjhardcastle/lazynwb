@@ -321,6 +321,7 @@ def _get_table_data(
             use_thread_pool=False,
         )
     )
+    is_metadata = any(v.shape == () for v in column_accessors.values() if hasattr(v, "dtype"))
 
     if isinstance(exclude_column_names, str):
         exclude_column_names = (exclude_column_names,)
@@ -374,13 +375,20 @@ def _get_table_data(
     else:
         _idx = slice(None)
     for column_name in non_indexed_column_names:
-        if (ndim := column_accessors[column_name].ndim) >= 2:
+        if (ndim := getattr(column_accessors[column_name], "ndim", None)) is None:
+            # accessor is not a Dataset
+            continue
+        if ndim >= 2:
             logger.debug(
                 f"non-indexed column {column_name!r} has {ndim=}: will be treated as an indexed column"
             )
             multi_dim_column_names.append(column_name)
             continue
         if column_accessors[column_name].dtype.kind in ("S", "O"):
+            if not column_accessors[column_name].shape:
+                column_data[column_name] = column_accessors[column_name].asstr()[()]
+                # this isn't a table: we're picking up single values, e.g. metadata in general/subject
+                continue
             try:
                 column_data[column_name] = column_accessors[column_name].asstr()[_idx]
             except (AttributeError, TypeError):
@@ -432,6 +440,11 @@ def _get_table_data(
                     multi_dim_column_data
                 )
             column_data[column_name] = multi_dim_column_data
+
+    if is_metadata:
+        # we picked up single values, or 1-dim arrays (e.g. keywords) - put each one in a list
+        column_data = {k: [v] for k, v in column_data.items() if v is not None}
+
     try:
         column_length = len(next(iter(column_data.values())))
     except StopIteration:
@@ -738,13 +751,17 @@ def _get_polars_dtype(
     dataset: zarr.Array | h5py.Dataset,
     column_name: str,
     all_column_names: Iterable[str],
+    is_metadata: bool,
 ) -> polars._typing.PolarsDataType:
     dtype = dataset.dtype
     if dtype in ("S", "O"):
         dtype = pl.String
     else:
         dtype = polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
-    if dataset.ndim > 1:
+    if is_metadata and dataset.shape:
+        # this is a regular-looking array among a bunch of single-value metadata: it should be a list
+        return pl.List(dtype)
+    elif dataset.ndim > 1:
         dtype = pl.Array(
             dtype, shape=dataset.shape[1:]
         )  # shape reported is (Ncols, (*shape for each row)
@@ -798,14 +815,18 @@ def _get_table_schema_helper(
             return None
     else:
         file_schema = {}
+        is_metadata = bool(next((v for v in column_accessors.values() if hasattr(v, 'shape') and not v.shape), None))
         for name, dataset in column_accessors.items():
             if is_nominally_indexed_column(
                 name, column_accessors.keys()
             ) and name.endswith("_index"):
                 # skip the index columns
                 continue
+            if not hasattr(dataset, "dtype"):
+                # e.g. Group in h5py or zarr
+                continue
             file_schema[name] = _get_polars_dtype(
-                dataset, name, column_accessors.keys()
+                dataset, name, column_accessors.keys(), is_metadata=is_metadata
             )
         return file_schema
 
