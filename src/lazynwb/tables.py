@@ -341,13 +341,15 @@ def _get_table_data(
             raise ValueError(
                 f"Column names {ambiguous_column_names} are both included and excluded: unclear how to proceed"
             )
-            
+
     # get filtered set of column names:
-    if include_column_names and set(include_column_names).issubset(INTERNAL_COLUMN_NAMES):
+    if include_column_names and set(include_column_names).issubset(
+        INTERNAL_COLUMN_NAMES
+    ):
         only_internal_columns_requested = True
     else:
         only_internal_columns_requested = False
-    
+
     table_length = None
     for name in tuple(column_accessors.keys()):
         is_indexed = is_nominally_indexed_column(name, column_accessors.keys())
@@ -368,10 +370,17 @@ def _get_table_data(
             regular_column = column_accessors.pop(name, None)
             column_accessors.pop(f"{name}_index", None)
             column_accessors.pop(name.removesuffix("_index"), None)
-            
-            if regular_column is not None and only_internal_columns_requested and table_length is None and not name.endswith("_index"):
+
+            if (
+                regular_column is not None
+                and only_internal_columns_requested
+                and table_length is None
+                and not name.endswith("_index")
+            ):
                 if regular_column.ndim == 1:
-                    table_length = regular_column.shape[0] # may be updated below if specific rows requested
+                    table_length = regular_column.shape[
+                        0
+                    ]  # may be updated below if specific rows requested
 
     # indexed columns (columns containing lists) need to be handled differently:
     indexed_column_names: set[str] = get_indexed_column_names(column_accessors.keys())
@@ -460,7 +469,9 @@ def _get_table_data(
         column_data = {k: [v] for k, v in column_data.items() if v is not None}
 
     if only_internal_columns_requested:
-        assert table_length is not None, "We should have found column length before discarding data accessors"
+        assert (
+            table_length is not None
+        ), "We should have found column length before discarding data accessors"
     else:
         try:
             table_length = len(next(iter(column_data.values())))

@@ -8,13 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.54...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.55...HEAD)</small>
+
+<!-- insertion marker -->
+## [v0.2.55](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.55) - 2025-06-03
+
+<small>[Compare with v0.2.54](https://github.com/bjhardcastle/lazynwb/compare/v0.2.54...v0.2.55)</small>
 
 ### Added
 
 - Add compatibility for metadata from nwb/general ([827ab83](https://github.com/bjhardcastle/lazynwb/commit/827ab83558b6d06fee71257b0677bcedd08d8003) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.54](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.54) - 2025-05-23
 
 <small>[Compare with v0.2.53](https://github.com/bjhardcastle/lazynwb/compare/v0.2.53...v0.2.54)</small>
