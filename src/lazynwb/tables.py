@@ -321,7 +321,7 @@ def _get_table_data(
             use_thread_pool=False,
         )
     )
-    is_metadata = any(
+    is_metadata_table = any(
         v.shape == () for v in column_accessors.values() if hasattr(v, "dtype")
     )
 
@@ -341,7 +341,14 @@ def _get_table_data(
             raise ValueError(
                 f"Column names {ambiguous_column_names} are both included and excluded: unclear how to proceed"
             )
+            
     # get filtered set of column names:
+    if include_column_names and set(include_column_names).issubset(INTERNAL_COLUMN_NAMES):
+        only_internal_columns_requested = True
+    else:
+        only_internal_columns_requested = False
+    
+    table_length = None
     for name in tuple(column_accessors.keys()):
         is_indexed = is_nominally_indexed_column(name, column_accessors.keys())
         if is_indexed and name.endswith("_index"):
@@ -358,9 +365,13 @@ def _get_table_data(
             or is_excluded
             or (exclude_array_columns and is_indexed and not is_included)
         ):
-            column_accessors.pop(name, None)
+            regular_column = column_accessors.pop(name, None)
             column_accessors.pop(f"{name}_index", None)
             column_accessors.pop(name.removesuffix("_index"), None)
+            
+            if regular_column is not None and only_internal_columns_requested and table_length is None and not name.endswith("_index"):
+                if regular_column.ndim == 1:
+                    table_length = regular_column.shape[0] # may be updated below if specific rows requested
 
     # indexed columns (columns containing lists) need to be handled differently:
     indexed_column_names: set[str] = get_indexed_column_names(column_accessors.keys())
@@ -374,6 +385,7 @@ def _get_table_data(
     )
     if table_row_indices is not None:
         _idx: Sequence[int] | slice = table_row_indices
+        table_length = len(table_row_indices)
     else:
         _idx = slice(None)
     for column_name in non_indexed_column_names:
@@ -443,25 +455,28 @@ def _get_table_data(
                 )
             column_data[column_name] = multi_dim_column_data
 
-    if is_metadata:
+    if is_metadata_table:
         # we picked up single values, or 1-dim arrays (e.g. keywords) - put each one in a list
         column_data = {k: [v] for k, v in column_data.items() if v is not None}
 
-    try:
-        column_length = len(next(iter(column_data.values())))
-    except StopIteration:
-        raise lazynwb.exceptions.InternalPathError(
-            f"Table matching {search_term!r} not found in {file._path}"
-        ) from None
+    if only_internal_columns_requested:
+        assert table_length is not None, "We should have found column length before discarding data accessors"
+    else:
+        try:
+            table_length = len(next(iter(column_data.values())))
+        except StopIteration:
+            raise lazynwb.exceptions.InternalPathError(
+                f"Table matching {search_term!r} not found in {file._path}"
+            ) from None
 
     # add identifiers to each row, so they can be linked back their source at a later time:
     identifier_column_data = {
-        NWB_PATH_COLUMN_NAME: [file._path.as_posix()] * column_length,
+        NWB_PATH_COLUMN_NAME: [file._path.as_posix()] * table_length,
         TABLE_PATH_COLUMN_NAME: [
             lazynwb.utils.normalize_internal_file_path(search_term)
         ]
-        * column_length,
-        TABLE_INDEX_COLUMN_NAME: table_row_indices or np.arange(column_length),
+        * table_length,
+        TABLE_INDEX_COLUMN_NAME: table_row_indices or np.arange(table_length),
     }
     if exclude_column_names is not None:
         # remove any identifiers that are also in the exclude list:

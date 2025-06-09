@@ -140,6 +140,18 @@ def test_scan_nwb_predicate_pushdown(local_hdf5_path):
     ).all(), "Predicate pushdown filter was not applied correctly"
     assert len(filtered_df) == len(lf.collect().filter(expr)), "Filtered DataFrame length does not match length when collecting and filtering separately"
 
+    # Test filtering on internal columns
+    internal_expr = pl.col(lazynwb.TABLE_INDEX_COLUMN_NAME) == 3
+    filtered_internal_lf = lf.filter(internal_expr)
+
+    # Execute and check results
+    filtered_internal_df = filtered_internal_lf.collect()
+
+    # Verify the filter was applied correctly
+    assert (
+        filtered_internal_df[lazynwb.TABLE_INDEX_COLUMN_NAME] == 3
+    ).all(), "Predicate pushdown filter on internal column was not applied correctly"
+    assert len(filtered_internal_df) == len(lf.collect().filter(internal_expr)), "Filtered DataFrame length does not match length when collecting and filtering separately"
 
 def test_scan_nwb_raises_on_missing(local_hdf5_path):
     """Test that scan_nwb raises an error when the table is not found and raise_on_missing=True."""
