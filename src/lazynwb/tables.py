@@ -50,7 +50,7 @@ def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]
     if isinstance(nwb_path, lazynwb.file_io.FileAccessor):
         context = contextlib.nullcontext(nwb_path)
     else:
-        context = lazynwb.file_io.FileAccessor(nwb_path)
+        context = lazynwb.file_io.FileAccessor(nwb_path) # type: ignore[assignment]
     with context as file:
         return _get_table_data(
             file=file,

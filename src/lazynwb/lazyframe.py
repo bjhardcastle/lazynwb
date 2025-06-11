@@ -235,3 +235,70 @@ def scan_nwb(
     return polars.io.plugins.register_io_source(
         io_source=source_generator, schema=schema
     )
+
+
+def read_nwb(
+    source: (
+        npc_io.PathLike
+        | lazynwb.file_io.FileAccessor
+        | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor]
+    ),
+    table_path: str,
+    raise_on_missing: bool = False,
+    ignore_errors: bool = False,
+    infer_schema_length: int | None = None,
+    exclude_array_columns: bool = False,
+    low_memory: bool = False,
+    schema: polars._typing.SchemaDict | None = None,
+    schema_overrides: polars._typing.SchemaDict | None = None,
+    disable_progress: bool = False,
+) -> pl.DataFrame:
+    """
+    Read from a common table in one or more local or cloud-hosted NWB files into a DataFrame.
+
+    This function is a wrapper around `scan_nwb` that calls `collect()` on the resulting LazyFrame.
+
+    Parameters
+    ----------
+    source : str, PathLike, lazynwb.file_io.FileAccessor, or iterable of these
+        Paths to the NWB file(s) to read from. May be hdf5 or zarr.
+    table_path : str
+        The internal path to the table in the NWB file, e.g. '/intervals/trials' or '/units'
+        It is expected that the table path is the same for all files.
+    raise_on_missing : bool, default False
+        If True, a KeyError will be raised if the table is not found in every file. Otherwise, a
+        KeyError is raised only if the table is not found in any file.
+    ignore_errors : bool, default False
+        If True, other errors will be ignored when reading files (missing table path errors are
+        toggled via `raise_on_missing`).
+    infer_schema_length : int, None, default None
+        The number of files to read to infer the table schema. If None, all files will be read.
+    exclude_array_columns : bool, default False
+        If True, columns containing list or array-like data will be excluded from the schema and any
+        resulting DataFrame.
+    low_memory : bool, default False
+        If True, the data will be read in smaller chunks to reduce memory usage, at the cost of speed.
+    schema : dict[str, pl.DataType], default None
+        User-defined schema for the table. If None, the schema will be generated using the stored
+        dtypes for columns in each file. Conflicts are signalled to the user via a warning.
+    schema_overrides : dict[str, pl.DataType], default None
+        User-defined schema for a subset of columns, overriding the inferred schema.
+    disable_progress : bool, default False
+        If True, progress bars will be disabled.
+
+    Returns
+    -------
+    pl.DataFrame
+    """
+    return scan_nwb(
+        source=source,
+        table_path=table_path,
+        raise_on_missing=raise_on_missing,
+        ignore_errors=ignore_errors,
+        infer_schema_length=infer_schema_length,
+        exclude_array_columns=exclude_array_columns,
+        low_memory=low_memory,
+        schema=schema,
+        schema_overrides=schema_overrides,
+        disable_progress=disable_progress,
+    ).collect()

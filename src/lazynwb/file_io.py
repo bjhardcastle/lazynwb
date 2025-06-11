@@ -7,52 +7,65 @@ from typing import Any
 
 import h5py
 import npc_io
+import pydantic
 import remfile
 import upath
 import zarr
 
+
+class FileIOConfig(pydantic.BaseModel):
+    """
+    Global configuration for file I/O behavior.
+    """
+
+    use_remfile: bool = True
+    fsspec_storage_options: dict[str, Any] = {
+        "anon": False,
+    }
+
+
+# singleton config
+config = FileIOConfig()
+
+# cache for FileAccessor instances by canonical path
+_accessor_cache: dict[str, FileAccessor] = {}
+
+
+def clear_cache() -> None:
+    """
+    Clear the FileAccessor caches.
+
+    Users can call this to reset cached h5py and zarr accessors.
+    """
+    _accessor_cache.clear()
+
+
 logger = logging.getLogger(__name__)
 
 
-def open(
-    path: npc_io.PathLike,
-    is_zarr: bool = False,
-    use_remfile: bool = True,
-    anon_s3: bool = False,
-    **fsspec_storage_options: Any,
-) -> h5py.File | zarr.Group:
+def _open_file(path: npc_io.PathLike) -> h5py.File | zarr.Group:
     """
-    Open a file that meets the NWB spec, minimizing the amount of data/metadata read.
-
-    - file is opened in read-only mode
-    - file is not closed when the function returns
-    - currently supports NWB files saved in .hdf5 and .zarr format
-
-    Examples:
-        >>> nwb = open('https://dandiarchive.s3.amazonaws.com/blobs/f78/fe2/f78fe2a6-3dc9-4c12-a288-fbf31ce6fc1c')
-        >>> nwb = open('https://dandiarchive.s3.amazonaws.com/blobs/f78/fe2/f78fe2a6-3dc9-4c12-a288-fbf31ce6fc1c', use_remfile=False)
-        >>> nwb = open('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/00865745-db58-495d-9c5e-e28424bb4b97/nwb/ecephys_721536_2024-05-16_12-32-31_experiment1_recording1.nwb')
+    Internal: open raw HDF5 or Zarr backend using global config.
     """
-    path = npc_io.from_pathlike(path)
-    if anon_s3 and path.protocol == "s3":
-        fsspec_storage_options.setdefault("anon", True)
-    path = upath.UPath(path, **fsspec_storage_options)
+    from contextlib import suppress
 
-    if "zarr" in path.as_posix():
-        is_zarr = True
-
-    # zarr ------------------------------------------------------------- #
-    # there's no file-name convention for what is a zarr file, so we have to try opening it and see if it works
-    # - zarr.open() is fast regardless of size
+    p = npc_io.from_pathlike(path)
+    u = upath.UPath(p, **config.fsspec_storage_options)
+    key = u.as_posix()
+    is_zarr = "zarr" in key
     if not is_zarr:
-        with contextlib.suppress(Exception):
-            return _open_hdf5(path, use_remfile=use_remfile)
+        with suppress(Exception):
+            return _open_hdf5(u, use_remfile=config.use_remfile)
+    with suppress(Exception):
+        return zarr.open(store=u, mode="r")
+    raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
 
-    with contextlib.suppress(Exception):
-        return zarr.open(store=path, mode="r")
-    raise ValueError(
-        f"Failed to open {path} as hdf5 or zarr. Is this the correct path to an NWB file?"
-    )
+
+def open(path: npc_io.PathLike) -> FileAccessor:
+    """
+    Public API: get a cached FileAccessor for the given path.
+    """
+    return FileAccessor(path)
 
 
 def _s3_to_http(url: str) -> str:
@@ -118,21 +131,51 @@ class FileAccessor:
         ZARR = "zarr"
 
     _path: upath.UPath
+    _skip_init: bool
     _accessor: h5py.File | h5py.Group | zarr.Group
     _hdmf_backend: HDMFBackend
     """File-type backend used by this instance (e.g. HDF5, ZARR)"""
+
+    def __new__(
+        cls,
+        path: npc_io.PathLike,
+        accessor: h5py.File | h5py.Group | zarr.Group | None = None,
+    ) -> FileAccessor:
+        """
+        Reuse existing FileAccessor for the same path if present in cache.
+        """
+        # allow passing through if already a FileAccessor
+        if isinstance(path, FileAccessor):
+            return path
+        # normalize path and build key
+        path_obj = npc_io.from_pathlike(path)
+        u_path = upath.UPath(path_obj, **config.fsspec_storage_options)
+        key = u_path.as_posix()
+        # return cached if no custom accessor provided
+        if accessor is None and key in _accessor_cache:
+            instance = _accessor_cache[key]
+            # mark to skip __init__ for cached instance
+            instance._skip_init = True
+            return instance
+        # create new instance and cache
+        instance = super().__new__(cls)
+        _accessor_cache[key] = instance
+        return instance
 
     def __init__(
         self,
         path: npc_io.PathLike,
         accessor: h5py.File | h5py.Group | zarr.Group | None = None,
-        fsspec_storage_options: dict[str, Any] | None = None,
     ) -> None:
+        # skip init if returned from cache
+        if getattr(self, "_skip_init", False):
+            delattr(self, "_skip_init")
+            return
         self._path = npc_io.from_pathlike(path)
         if accessor is not None:
             self._accessor = accessor
         else:
-            self._accessor = open(self._path, **(fsspec_storage_options or {}))
+            self._accessor = _open_file(self._path)
         self._hdmf_backend = self.get_hdmf_backend()
 
     def get_hdmf_backend(self) -> HDMFBackend:
