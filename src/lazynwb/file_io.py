@@ -146,6 +146,7 @@ class FileAccessor:
         """
         # allow passing through if already a FileAccessor
         if isinstance(path, FileAccessor):
+            logger.debug(f"path input is already a FileAccessor instance: returning as-is")
             return path
         # normalize path and build key
         path_obj = npc_io.from_pathlike(path)
@@ -154,10 +155,12 @@ class FileAccessor:
         # return cached if no custom accessor provided
         if accessor is None and key in _accessor_cache:
             instance = _accessor_cache[key]
+            logger.debug(f"returning cached instance for {key}")
             # mark to skip __init__ for cached instance
             instance._skip_init = True
             return instance
         # create new instance and cache
+        logger.debug(f"creating new instance for {key}")
         instance = super().__new__(cls)
         _accessor_cache[key] = instance
         return instance
@@ -169,14 +172,19 @@ class FileAccessor:
     ) -> None:
         # skip init if returned from cache
         if getattr(self, "_skip_init", False):
+            logger.debug(f"skipping init for cached instance")
             delattr(self, "_skip_init")
             return
         self._path = npc_io.from_pathlike(path)
+        logger.debug(f"initializing new instance for {self._path}")
         if accessor is not None:
+            logger.debug(f"using provided accessor")
             self._accessor = accessor
         else:
+            logger.debug(f"opening file {self._path}")
             self._accessor = _open_file(self._path)
         self._hdmf_backend = self.get_hdmf_backend()
+        logger.debug(f"initialized with backend {self._hdmf_backend}")
 
     def get_hdmf_backend(self) -> HDMFBackend:
         if isinstance(self._accessor, (h5py.File, h5py.Group)):
