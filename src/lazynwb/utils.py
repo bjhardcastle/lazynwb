@@ -6,7 +6,10 @@ import multiprocessing
 import os
 
 import h5py
+import npc_io
 import zarr
+
+import lazynwb.file_io
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +44,56 @@ def normalize_internal_file_path(path: str) -> str:
     return path if path.startswith("/") else f"/{path}"
 
 
-def get_internal_file_paths(
+def get_nwb_file_structure(
+    nwb_path: npc_io.PathLike,
+    exclude_specifications: bool = True,
+    exclude_table_columns: bool = True,
+    exclude_metadata: bool = True,
+) -> dict[str, h5py.Dataset | zarr.Array]:
+    """
+    Get a summary of the internal structure of an NWB file.
+
+    This function provides a quick overview of the contents of a single NWB file,
+    showing all internal paths and their corresponding datasets or groups.
+
+    Parameters
+    ----------
+    nwb_path : PathLike
+        Path to the NWB file (local file path, S3 URL, or other supported path types).
+    exclude_specifications : bool, default True
+        Whether to exclude specification-related paths from the output.
+    exclude_table_columns : bool, default True
+        Whether to exclude individual table columns from the output.
+    exclude_metadata : bool, default True
+        Whether to exclude top-level metadata paths from the output.
+
+    Returns
+    -------
+    dict[str, h5py.Dataset | zarr.Array]
+        Dictionary mapping internal file paths to their corresponding datasets or arrays.
+        Keys are internal paths (e.g., '/units/spike_times'), values are the actual
+        dataset/array objects that can be inspected for shape, dtype, etc.
+
+    Examples
+    --------
+    >>> import lazynwb
+    >>> structure = lazynwb.get_nwb_file_structure("path/to/file.nwb")
+    >>> for path, dataset in structure.items():
+    ...     print(f"{path}: {dataset}")
+    /acquisition/lick_sensor_events/data: <HDF5 dataset "data": shape (2734,), type "<f8">
+    /intervals/trials: <HDF5 group "/intervals/trials" (48 members)>
+    /units/spike_times: <HDF5 dataset "/units/spike_times" ...>
+    """
+    file_accessor = lazynwb.file_io._get_accessor(nwb_path)
+    return _traverse_internal_paths(
+        file_accessor._accessor,
+        exclude_specifications=exclude_specifications,
+        exclude_table_columns=exclude_table_columns,
+        exclude_metadata=exclude_metadata,
+    )
+
+
+def _traverse_internal_paths(
     group: h5py.Group | zarr.Group | zarr.Array,
     exclude_specifications: bool = True,
     exclude_table_columns: bool = True,
@@ -64,7 +116,7 @@ def get_internal_file_paths(
         try:
             results = {
                 **results,
-                **get_internal_file_paths(
+                **_traverse_internal_paths(
                     group[subpath],
                     exclude_specifications=exclude_specifications,
                     exclude_table_columns=exclude_table_columns,
