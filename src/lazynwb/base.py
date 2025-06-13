@@ -69,18 +69,17 @@ class LazyNWB:
 
     def __init__(
         self,
-        path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
-        fsspec_storage_options: dict[str, Any] | None = None,
+        path: npc_io.PathLike,
     ) -> None:
-        if isinstance(path_or_accessor, lazynwb.file_io.FileAccessor):
-            self._file = path_or_accessor
-        else:
-            self._file = lazynwb.file_io.FileAccessor(
-                path=path_or_accessor, fsspec_storage_options=fsspec_storage_options
-            )
+        self._file_path = npc_io.from_pathlike(path)
+
+    @property
+    def _file(self) -> lazynwb.file_io.FileAccessor:
+        """The underlying file accessor for this NWB file."""
+        return lazynwb.file_io._get_accessor(self._file_path)
 
     def __repr__(self) -> str:
-        return f"LazyNWB({self._file._path!r})"
+        return f"LazyNWB({self._file_path!r})"
 
     def _repr_html_(self) -> str:
         main_info = self._to_dict()
@@ -314,22 +313,21 @@ def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]
 
 class Subject:
 
-    _file: lazynwb.file_io.FileAccessor
+    _file_path: upath.UPath
 
     def __init__(
         self,
-        path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
-        fsspec_storage_options: dict[str, Any] | None = None,
+        path: npc_io.PathLike,
     ) -> None:
-        if isinstance(path_or_accessor, lazynwb.file_io.FileAccessor):
-            self._file = path_or_accessor
-        else:
-            self._file = lazynwb.file_io.FileAccessor(
-                path=path_or_accessor, fsspec_storage_options=fsspec_storage_options
-            )
+        self._file_path = npc_io.from_pathlike(path)
+
+    @property
+    def _file(self) -> lazynwb.file_io.FileAccessor:
+        """The underlying file accessor for this subject."""
+        return lazynwb.file_io._get_accessor(self._file_path)
 
     def __repr__(self) -> str:
-        return f"Subject({self._file._path!r})"
+        return f"Subject({self._file_path!r})"
 
     @property
     def age(self) -> str | None:

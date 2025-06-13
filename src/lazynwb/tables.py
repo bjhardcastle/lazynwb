@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import collections
 import concurrent.futures
-import contextlib
 import difflib
 import logging
 import time
@@ -19,7 +18,6 @@ import polars as pl
 import polars._typing
 import polars.datatypes.convert
 import tqdm
-import upath
 import zarr
 
 import lazynwb.exceptions
@@ -46,26 +44,9 @@ INTERVALS_TABLE_INDEX_COLUMN_NAME = "_intervals" + TABLE_INDEX_COLUMN_NAME
 UNITS_TABLE_INDEX_COLUMN_NAME = "_units" + TABLE_INDEX_COLUMN_NAME
 
 
-def _get_df_helper(nwb_path: npc_io.PathLike, **get_df_kwargs) -> dict[str, Any]:
-    if isinstance(nwb_path, lazynwb.file_io.FileAccessor):
-        context = contextlib.nullcontext(nwb_path)
-    else:
-        context = lazynwb.file_io.FileAccessor(nwb_path) # type: ignore[assignment]
-    with context as file:
-        return _get_table_data(
-            file=file,
-            **get_df_kwargs,
-        )
-
-
 @typing.overload
 def get_df(
-    nwb_data_sources: (
-        str
-        | npc_io.PathLike
-        | lazynwb.file_io.FileAccessor
-        | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor]
-    ),
+    nwb_data_sources: str | npc_io.PathLike | Iterable[str | npc_io.PathLike],
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -84,12 +65,7 @@ def get_df(
 
 @typing.overload
 def get_df(
-    nwb_data_sources: (
-        str
-        | npc_io.PathLike
-        | lazynwb.file_io.FileAccessor
-        | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor]
-    ),
+    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike],
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -107,12 +83,7 @@ def get_df(
 
 
 def get_df(
-    nwb_data_sources: (
-        str
-        | npc_io.PathLike
-        | lazynwb.file_io.FileAccessor
-        | Iterable[str | npc_io.PathLike | lazynwb.file_io.FileAccessor]
-    ),
+    nwb_data_sources: str | npc_io.PathLike | Iterable[str | npc_io.PathLike],
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -131,7 +102,7 @@ def get_df(
 
     Parameters
     ----------
-    nwb_data_sources : str, PathLike, FileAccessor, or iterable of these
+    nwb_data_sources : str or PathLike, or iterable of these
         Paths to the NWB file(s) to read from. May be hdf5 or zarr.
     search_term : str
         An exact path to the table within each file, e.g. '/intervals/trials' or '/units', or a
@@ -170,9 +141,9 @@ def get_df(
     if nwb_path_to_row_indices is not None:
         paths = tuple(nwb_path_to_row_indices.keys())
     else:
-        if isinstance(
-            nwb_data_sources, (str, bytes, lazynwb.file_io.FileAccessor)
-        ) or not isinstance(nwb_data_sources, Iterable):
+        if isinstance(nwb_data_sources, (str, bytes)) or not isinstance(
+            nwb_data_sources, Iterable
+        ):
             paths = (nwb_data_sources,)  # type: ignore[assignment]
         else:
             paths = tuple(nwb_data_sources)  # type: ignore[arg-type]
@@ -193,25 +164,22 @@ def get_df(
         nwb_path_to_row_indices = {}
 
     def _get_path(file) -> str:
-        if isinstance(file, lazynwb.file_io.FileAccessor):
-            return file._path.as_posix()
-        with contextlib.suppress(AttributeError):
-
-            return file.as_posix()
         return npc_io.from_pathlike(file).as_posix()
 
     results: list[dict] = []
     if not parallel or len(paths) == 1:  # don't use a pool for a single file
         for path in paths:
             results.append(
-                _get_df_helper(
-                    nwb_path=path,
+                _get_table_data(
+                    path=path,
                     search_term=search_term,
                     exact_path=exact_path,
                     exclude_column_names=exclude_column_names,
                     include_column_names=include_column_names,
                     exclude_array_columns=exclude_array_columns,
-                    table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
+                    table_row_indices=nwb_path_to_row_indices.get(
+                        npc_io.from_pathlike(path).as_posix()
+                    ),
                     low_memory=low_memory,
                     as_polars=as_polars,
                 )
@@ -231,14 +199,16 @@ def get_df(
         future_to_path = {}
         for path in paths:
             future = executor.submit(
-                _get_df_helper,
-                nwb_path=path,
+                _get_table_data,
+                path=path,
                 search_term=search_term,
                 exact_path=exact_path,
                 exclude_column_names=exclude_column_names,
                 include_column_names=include_column_names,
                 exclude_array_columns=exclude_array_columns,
-                table_row_indices=nwb_path_to_row_indices.get(_get_path(path)),
+                table_row_indices=nwb_path_to_row_indices.get(
+                    npc_io.from_pathlike(path).as_posix()
+                ),
                 low_memory=low_memory,
                 as_polars=as_polars,
             )
@@ -260,7 +230,7 @@ def get_df(
                     raise
                 else:
                     logger.warning(
-                        f"Table {search_term!r} not found in {_get_path(future_to_path[future])}"
+                        f"Table {search_term!r} not found in {npc_io.from_pathlike(future_to_path[future]).as_posix()}"
                     )
                     continue
             except Exception:
@@ -268,7 +238,7 @@ def get_df(
                     raise
                 else:
                     logger.exception(
-                        f"Error getting DataFrame for {_get_path(future_to_path[future])}:"
+                        f"Error getting DataFrame for {npc_io.from_pathlike(future_to_path[future]).as_posix()}:"
                     )
                     continue
     if not as_polars:
@@ -284,7 +254,7 @@ def get_df(
 
 
 def _get_table_data(
-    file: lazynwb.file_io.FileAccessor,
+    path: npc_io.PathLike,
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -295,6 +265,7 @@ def _get_table_data(
     as_polars: bool = False,
 ) -> dict[str, Any]:
     t0 = time.time()
+    file = lazynwb.file_io._get_accessor(path)
     if (
         not exact_path
         and lazynwb.utils.normalize_internal_file_path(search_term) not in file
@@ -316,7 +287,7 @@ def _get_table_data(
         search_term = match_
     column_accessors: dict[str, zarr.Array | h5py.Dataset] = (
         _get_table_column_accessors(
-            file=file,
+            file_path=path,
             table_path=search_term,
             use_thread_pool=False,
         )
@@ -352,7 +323,7 @@ def _get_table_data(
 
     table_length = None
     for name in tuple(column_accessors.keys()):
-        is_indexed = is_nominally_indexed_column(name, column_accessors.keys())
+        is_indexed = _is_nominally_indexed_column(name, column_accessors.keys())
         if is_indexed and name.endswith("_index"):
             # users are not expected to include/exclude the '_index' suffix columns,
             # and they will be removed by the column name without the suffix
@@ -383,7 +354,7 @@ def _get_table_data(
                     ]  # may be updated below if specific rows requested
 
     # indexed columns (columns containing lists) need to be handled differently:
-    indexed_column_names: set[str] = get_indexed_column_names(column_accessors.keys())
+    indexed_column_names: set[str] = _get_indexed_column_names(column_accessors.keys())
     non_indexed_column_names = column_accessors.keys() - indexed_column_names
     # some columns have >2 dims but no index - they also need to be handled differently
     multi_dim_column_names = []
@@ -444,7 +415,7 @@ def _get_table_data(
                     data_column_accessor = column_accessors[column_name].astype(str)
             else:
                 data_column_accessor = column_accessors[column_name]
-            column_data[column_name] = get_indexed_column_data(
+            column_data[column_name] = _get_indexed_column_data(
                 data_column_accessor=data_column_accessor,
                 index_column_accessor=column_accessors[f"{column_name}_index"],
                 table_row_indices=table_row_indices,
@@ -500,7 +471,7 @@ def _get_table_data(
     return column_data | identifier_column_data
 
 
-def get_indexed_column_data(
+def _get_indexed_column_data(
     data_column_accessor: zarr.Array | h5py.Dataset,
     index_column_accessor: zarr.Array | h5py.Dataset,
     table_row_indices: Sequence[int] | None = None,
@@ -561,7 +532,7 @@ def get_indexed_column_data(
     return column_data
 
 
-def is_nominally_indexed_column(
+def _is_nominally_indexed_column(
     column_name: str, all_column_names: Iterable[str]
 ) -> bool:
     """
@@ -585,14 +556,14 @@ def is_nominally_indexed_column(
         return f"{column_name}_index" in all_column_names
 
 
-def get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
+def _get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
     """
     >>> get_indexed_columns(['spike_times', 'presence_ratio'])
     set()
     >>> sorted(get_indexed_columns(['spike_times', 'spike_times_index', 'presence_ratio']))
     ['spike_times', 'spike_times_index']
     """
-    return {k for k in column_names if is_nominally_indexed_column(k, column_names)}
+    return {k for k in column_names if _is_nominally_indexed_column(k, column_names)}
 
 
 def _array_column_helper(
@@ -602,26 +573,26 @@ def _array_column_helper(
     table_row_indices: Sequence[int],
     as_polars: bool = False,
 ) -> pd.DataFrame | pl.DataFrame:
-    with lazynwb.file_io.FileAccessor(nwb_path) as file:
-        try:
-            data_column_accessor = file[table_path][column_name]
-        except KeyError as exc:
-            if exc.args[0] == column_name:
-                raise lazynwb.exceptions.ColumnError(column_name) from None
-            elif exc.args[0] == table_path:
-                raise lazynwb.exceptions.InternalPathError(table_path) from None
-            else:
-                raise
-        if data_column_accessor.ndim >= 2:
-            column_data = data_column_accessor[table_row_indices]
-            if not as_polars:
-                column_data = _format_multi_dim_column_pd(column_data)
+    file = lazynwb.file_io._get_accessor(nwb_path)
+    try:
+        data_column_accessor = file[table_path][column_name]
+    except KeyError as exc:
+        if exc.args[0] == column_name:
+            raise lazynwb.exceptions.ColumnError(column_name) from None
+        elif exc.args[0] == table_path:
+            raise lazynwb.exceptions.InternalPathError(table_path) from None
         else:
-            column_data = get_indexed_column_data(
-                data_column_accessor=data_column_accessor,
-                index_column_accessor=file[table_path][f"{column_name}_index"],
-                table_row_indices=table_row_indices,
-            )
+            raise
+    if data_column_accessor.ndim >= 2:
+        column_data = data_column_accessor[table_row_indices]
+        if not as_polars:
+            column_data = _format_multi_dim_column_pd(column_data)
+    else:
+        column_data = _get_indexed_column_data(
+            data_column_accessor=data_column_accessor,
+            index_column_accessor=file[table_path][f"{column_name}_index"],
+            table_row_indices=table_row_indices,
+        )
     df_cls = pl.DataFrame if as_polars else pd.DataFrame
     return df_cls(
         {
@@ -661,7 +632,7 @@ def _get_original_table_path(df: FrameType, assert_unique: bool = True) -> str:
     return series[0]
 
 
-def get_table_column(df: FrameType, column_name: str) -> list[Any]:
+def _get_table_column(df: FrameType, column_name: str) -> list[Any]:
     if isinstance(df, pl.LazyFrame):
         df = df.select(column_name).collect()  # type: ignore[assignment]
     assert not isinstance(df, pl.LazyFrame)
@@ -702,7 +673,7 @@ def merge_array_column(
             nwb_path=nwb_path,
             table_path=_get_original_table_path(session_df, assert_unique=True),
             column_name=column_name,
-            table_row_indices=get_table_column(session_df, TABLE_INDEX_COLUMN_NAME),
+            table_row_indices=_get_table_column(session_df, TABLE_INDEX_COLUMN_NAME),
             as_polars=not isinstance(df, pd.DataFrame),
         )
         future_to_path[future] = nwb_path
@@ -745,7 +716,7 @@ def merge_array_column(
 
 
 def _get_table_column_accessors(
-    file: lazynwb.file_io.FileAccessor,
+    file_path: npc_io.PathLike,
     table_path: str,
     use_thread_pool: bool = False,
 ) -> dict[str, zarr.Array | h5py.Dataset]:
@@ -756,21 +727,22 @@ def _get_table_column_accessors(
     """
     names_to_columns: dict[str, zarr.Array | h5py.Dataset] = {}
     t0 = time.time()
+    table = lazynwb.file_io._get_accessor(file_path)[table_path]
     if use_thread_pool:
         future_to_column = {
             lazynwb.utils.get_threadpool_executor().submit(
-                file[table_path].get, column_name
+                table.get, column_name
             ): column_name
-            for column_name in file[table_path].keys()
+            for column_name in table.keys()
         }
         for future in concurrent.futures.as_completed(future_to_column):
             column_name = future_to_column[future]
             names_to_columns[column_name] = future.result()
     else:
-        for column_name in file[table_path]:
-            names_to_columns[column_name] = file[table_path].get(column_name)
+        for column_name in table:
+            names_to_columns[column_name] = table.get(column_name)
     logger.debug(
-        f"retrieved {len(names_to_columns)} column accessors from {file._accessor} in {time.time() - t0:.2f} s ({use_thread_pool=})"
+        f"retrieved {len(names_to_columns)} column accessors from {file_path!r}/{table_path} in {time.time() - t0:.2f} s ({use_thread_pool=})"
     )
     return names_to_columns
 
@@ -793,12 +765,12 @@ def _get_polars_dtype(
         dtype = pl.Array(
             dtype, shape=dataset.shape[1:]
         )  # shape reported is (Ncols, (*shape for each row)
-    if is_nominally_indexed_column(column_name, all_column_names):
+    if _is_nominally_indexed_column(column_name, all_column_names):
         # - indexed = variable length list-like (e.g. spike times)
         # - it's possible to have a list of fixed-length arrays (e.g. obs_intervals)
         index_cols = [
             c
-            for c in get_indexed_column_names(all_column_names)
+            for c in _get_indexed_column_names(all_column_names)
             if c.startswith(column_name) and c.endswith("_index")
         ]
         for _ in index_cols:
@@ -808,14 +780,14 @@ def _get_polars_dtype(
 
 
 def _get_table_length(
-    file: lazynwb.file_io.FileAccessor,
+    file_path: npc_io.PathLike,
     table_path: str,
 ) -> int:
-    for _, column in _get_table_column_accessors(file, table_path).items():
+    for _, column in _get_table_column_accessors(file_path, table_path).items():
         if column.ndim == 1:
             return column.shape[0]
     raise NotImplementedError(
-        f"Could not determine length of table {table_path} in {file._path}: all columns are ndim arrays"
+        f"Could not determine length of table {table_path} in {file_path!r}: all columns are ndim arrays"
     )
 
 
@@ -829,17 +801,17 @@ def _get_path_to_row_indices(df: pl.DataFrame) -> dict[str, list[int]]:
 
 
 def _get_table_schema_helper(
-    file: lazynwb.file_io.FileAccessor, table_path: str, raise_on_missing: bool
+    file_path: npc_io.PathLike, table_path: str, raise_on_missing: bool
 ) -> dict[str, Any] | None:
     try:
-        column_accessors = _get_table_column_accessors(file, table_path)
+        column_accessors = _get_table_column_accessors(file_path, table_path)
     except KeyError:
         if raise_on_missing:
             raise lazynwb.exceptions.InternalPathError(
-                f"Table {table_path!r} not found in {file._path}"
+                f"Table {table_path!r} not found in {file_path!r}"
             ) from None
         else:
-            logger.info(f"Table {table_path!r} not found in {file._path}: skipping")
+            logger.info(f"Table {table_path!r} not found in {file_path!r}: skipping")
             return None
     else:
         file_schema = {}
@@ -854,7 +826,7 @@ def _get_table_schema_helper(
             )
         )
         for name, dataset in column_accessors.items():
-            if is_nominally_indexed_column(
+            if _is_nominally_indexed_column(
                 name, column_accessors.keys()
             ) and name.endswith("_index"):
                 # skip the index columns
@@ -869,55 +841,47 @@ def _get_table_schema_helper(
 
 
 def _get_table_schema(
-    files: lazynwb.file_io.FileAccessor | Sequence[lazynwb.file_io.FileAccessor],
+    file_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
     table_path: str,
     first_n_files_to_infer_schema: int | None = None,
     exclude_array_columns: bool = False,
     exclude_internal_columns: bool = False,
     raise_on_missing: bool = False,
 ) -> pl.Schema:
-    if isinstance(files, lazynwb.file_io.FileAccessor):
-        files = [files]
+    if not isinstance(file_paths, Iterable) or isinstance(file_paths, (str, bytes)):
+        file_paths = (file_paths,)
+    file_paths = tuple(file_paths)
     if first_n_files_to_infer_schema is not None:
-        files = files[: min(first_n_files_to_infer_schema, len(files))]
-    per_file_schemas: dict[upath.UPath, dict[str, polars.DataType]] = {}
-    if len(files) == 1:
-        file_schema = _get_table_schema_helper(
-            file=files[0], table_path=table_path, raise_on_missing=raise_on_missing
+        file_paths = file_paths[: min(first_n_files_to_infer_schema, len(file_paths))]
+    per_file_schemas: list[dict[str, polars.DataType]] = []
+    future_to_file_path = {}
+    for file_path in file_paths:
+        future = lazynwb.utils.get_threadpool_executor().submit(
+            _get_table_schema_helper,
+            file_path=file_path,
+            table_path=table_path,
+            raise_on_missing=raise_on_missing,
         )
-        if file_schema is not None:
-            per_file_schemas[files[0]._path] = file_schema
-    else:
-        future_to_path = {}
-        for file in files:
-            future = lazynwb.utils.get_threadpool_executor().submit(
-                _get_table_schema_helper,
-                file=file,
-                table_path=table_path,
-                raise_on_missing=raise_on_missing,
+        future_to_file_path[future] = file_path
+    is_first_missing = True  # used to warn only once
+    for future in concurrent.futures.as_completed(future_to_file_path):
+        try:
+            file_schema = future.result()
+        except lazynwb.exceptions.InternalPathError:
+            if raise_on_missing:
+                raise
+            else:
+                if is_first_missing:
+                    logger.warning(f"Table {table_path!r} missing in one or more files")
+                    is_first_missing = False
+                continue
+        except Exception as exc:
+            logger.error(
+                f"Error getting schema for {table_path!r} in {future_to_file_path[future]!r}:"
             )
-            future_to_path[future] = file._path
-        is_first_missing = True  # used to warn only once
-        for future in concurrent.futures.as_completed(future_to_path):
-            try:
-                file_schema = future.result()
-            except lazynwb.exceptions.InternalPathError:
-                if raise_on_missing:
-                    raise
-                else:
-                    if is_first_missing:
-                        logger.warning(
-                            f"Table {table_path!r} missing in one or more files"
-                        )
-                        is_first_missing = False
-                    continue
-            except Exception as exc:
-                logger.error(
-                    f"Error getting schema for {table_path!r} in {future_to_path[future]}:"
-                )
-                raise exc from None
-            if file_schema is not None:
-                per_file_schemas[future_to_path[future]] = file_schema
+            raise exc from None
+        if file_schema is not None:
+            per_file_schemas.append(file_schema)
     if not per_file_schemas:
         raise lazynwb.exceptions.InternalPathError(
             f"Table {table_path!r} not found in any files"
@@ -930,7 +894,7 @@ def _get_table_schema(
 
     # merge schemas and warn on inconsistent types:
     counts: dict[str, collections.Counter] = {}
-    for path, file_schema in per_file_schemas.items():
+    for file_schema in per_file_schemas:
         for column_name, pl_dtype in file_schema.items():
             if column_name not in counts:
                 counts[column_name] = collections.Counter()
@@ -1257,7 +1221,7 @@ def get_spike_times_in_intervals(
         intervals_df_row_indices = None  # all rows will be used when table fetched from NWB, but `filter` can be applied
 
     def _get_intervals_table_path(
-        nwb_path: str | npc_io.PathLike | lazynwb.file_io.FileAccessor,
+        nwb_path: npc_io.PathLike,
         intervals_df: str | FrameType,
     ) -> str:
         if isinstance(intervals_df, str):

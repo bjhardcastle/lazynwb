@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 def scan_nwb(
     source: (
         npc_io.PathLike
-        | lazynwb.file_io.FileAccessor
-        | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor]
+        | Iterable[npc_io.PathLike]
     ),
     table_path: str,
     raise_on_missing: bool = False,
@@ -41,7 +40,7 @@ def scan_nwb(
 
     Parameters
     ----------
-    source : str, PathLike, lazynwb.file_io.FileAccessor, or iterable of these
+    source : str or PathLike, or iterable of these
         Paths to the NWB file(s) to read from. May be hdf5 or zarr.
     table_path : str
         The internal path to the table in the NWB file, e.g. '/intervals/trials' or '/units'
@@ -72,18 +71,13 @@ def scan_nwb(
     pl.LazyFrame
     """
     if not isinstance(source, Iterable) or isinstance(source, str):
-        source = [source]
-
-    files: list[lazynwb.file_io.FileAccessor] = []
-    for f in source:  # type: ignore[union-attr]
-        if isinstance(f, lazynwb.file_io.FileAccessor):
-            files.append(f)
-        else:
-            files.append(lazynwb.file_io.FileAccessor(f))  # type: ignore[arg-type]
-
+        source = (source, )
+        
+    source = tuple(source) # type: ignore[arg-type]
+    
     if not schema:
         schema = lazynwb.tables._get_table_schema(
-            files=files,
+            file_paths=source,
             table_path=table_path,
             first_n_files_to_infer_schema=infer_schema_length,
             exclude_array_columns=exclude_array_columns,
@@ -145,19 +139,19 @@ def scan_nwb(
             )
 
         # TODO use batch_size
-        if n_rows and len(files) > 1:
+        if n_rows and len(source) > 1:
             sum_rows = 0
-            for idx, file in enumerate(files):
+            for idx, file in enumerate(source):
                 try:
                     sum_rows += lazynwb.tables._get_table_length(file, table_path)
                 except KeyError:
                     continue
                 if sum_rows >= n_rows:
                     break
-            filtered_files = files[: idx + 1]
-            logger.debug(f"Limiting files to {len(files)} based on n_rows={n_rows}")
+            filtered_files = source[: idx + 1]
+            logger.debug(f"Limiting files to {len(source)} based on n_rows={n_rows}")
         else:
-            filtered_files = files
+            filtered_files = source
         df = lazynwb.tables.get_df(
             nwb_data_sources=filtered_files,
             search_term=table_path,
@@ -240,8 +234,7 @@ def scan_nwb(
 def read_nwb(
     source: (
         npc_io.PathLike
-        | lazynwb.file_io.FileAccessor
-        | Iterable[npc_io.PathLike | lazynwb.file_io.FileAccessor]
+        | Iterable[npc_io.PathLike]
     ),
     table_path: str,
     raise_on_missing: bool = False,
@@ -260,7 +253,7 @@ def read_nwb(
 
     Parameters
     ----------
-    source : str, PathLike, lazynwb.file_io.FileAccessor, or iterable of these
+    source : str, PathLike, or iterable of these
         Paths to the NWB file(s) to read from. May be hdf5 or zarr.
     table_path : str
         The internal path to the table in the NWB file, e.g. '/intervals/trials' or '/units'

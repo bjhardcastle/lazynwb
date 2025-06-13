@@ -20,38 +20,40 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class TimeSeries:
-    _file: lazynwb.file_io.FileAccessor
-    _path: str
+    _file_path: npc_io.PathLike
+    _table_path: str
 
-    # TODO add generic getattr that defers to attrs
+    @property
+    def _file(self) -> lazynwb.file_io.FileAccessor:
+        return lazynwb.file_io._get_accessor(self._file_path)
 
     @property
     def data(self) -> h5py.Dataset | zarr.Array:
         try:
-            return self._file[f"{self._path}/data"]
+            return self._file[f"{self._table_path}/data"]
         except KeyError:
-            if self._path not in self._file:
+            if self._table_path not in self._file:
                 raise lazynwb.exceptions.InternalPathError(
-                    f"{self._path} not found in file"
+                    f"{self._table_path} not found in file"
                 ) from None
             raise AttributeError(
-                f"{self._path} has no data: use event timestamps alone"
+                f"{self._table_path} has no data: use event timestamps alone"
             )
 
     @property
     def timestamps(self) -> h5py.Dataset | zarr.Array:
         try:
-            return self._file[f"{self._path}/timestamps"]
+            return self._file[f"{self._table_path}/timestamps"]
         except KeyError:
-            if self._path not in self._file:
+            if self._table_path not in self._file:
                 raise lazynwb.exceptions.InternalPathError(
-                    f"{self._path} not found in file"
+                    f"{self._table_path} not found in file"
                 ) from None
             rate = self.rate
             starting_time = self._starting_time
             if rate is None or starting_time is None:
                 raise AssertionError(
-                    f"Not enough information to calculate timestamps for {self._path}: need rate and starting_time"
+                    f"Not enough information to calculate timestamps for {self._table_path}: need rate and starting_time"
                 ) from None
             return (np.arange(len(self.data)) / rate) + starting_time
 
@@ -61,7 +63,7 @@ class TimeSeries:
 
     @property
     def description(self) -> str | None:
-        return self._file[f"{self._path}"].attrs.get("description", None)
+        return self._file[f"{self._table_path}"].attrs.get("description", None)
 
     @property
     def offset(self) -> float | None:
@@ -80,11 +82,11 @@ class TimeSeries:
     @property
     def _starting_time(self) -> h5py.Dataset | zarr.Array | None:
         try:
-            return self._file[f"{self._path}/starting_time"]
+            return self._file[f"{self._table_path}/starting_time"]
         except KeyError:
-            if self._path not in self._file:
+            if self._table_path not in self._file:
                 raise lazynwb.exceptions.InternalPathError(
-                    f"{self._path} not found in file"
+                    f"{self._table_path} not found in file"
                 ) from None
             return None
 
@@ -95,13 +97,15 @@ class TimeSeries:
     @property
     def timestamps_unit(self) -> str | None:
         with contextlib.suppress(KeyError):
-            return self._file[self._path].attrs["timestamps_unit"]
+            return self._file[self._table_path].attrs["timestamps_unit"]
         with contextlib.suppress(KeyError):
-            return self._file[f"{self._path}/timestamps"].attrs.get("unit", None)
+            return self._file[f"{self._table_path}/timestamps"].attrs.get("unit", None)
         with contextlib.suppress(KeyError):
-            return self._file[f"{self._path}/starting_time"].attrs.get("unit", None)
+            return self._file[f"{self._table_path}/starting_time"].attrs.get(
+                "unit", None
+            )
         raise AttributeError(
-            f"Cannot find timestamps unit for {self._path}: no timestamps or starting_time found"
+            f"Cannot find timestamps unit for {self._table_path}: no timestamps or starting_time found"
         )
 
     @property
@@ -111,7 +115,7 @@ class TimeSeries:
 
 @typing.overload
 def get_timeseries(
-    nwb_path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
+    nwb_path: npc_io.PathLike,
     search_term: str | None = None,
     exact_path: bool = False,
     match_all: Literal[True] = True,
@@ -120,7 +124,7 @@ def get_timeseries(
 
 @typing.overload
 def get_timeseries(
-    nwb_path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
+    nwb_path: npc_io.PathLike,
     search_term: str | None = None,
     exact_path: bool = False,
     match_all: Literal[False] = False,
@@ -128,7 +132,7 @@ def get_timeseries(
 
 
 def get_timeseries(
-    nwb_path_or_accessor: npc_io.PathLike | lazynwb.file_io.FileAccessor,
+    nwb_path: npc_io.PathLike,
     search_term: str | None = None,
     exact_path: bool = False,
     match_all: bool = False,
@@ -140,8 +144,8 @@ def get_timeseries(
 
     Parameters
     ----------
-    nwb_path_or_accessor : PathLike or FileAccessor
-        Path to an NWB file or a FileAccessor object. Can be an hdf5 or zarr NWB.
+    nwb_path : PathLike
+        Path to an NWB file. Can be an hdf5 or zarr NWB.
     search_term : str or None, default=None
         String to search for specific TimeSeries. If the search term exactly matches a path,
         only that TimeSeries will be returned. If it partially matches multiple paths,
@@ -175,24 +179,21 @@ def get_timeseries(
         raise ValueError(
             "Either `search_term` must be specified or `match_all` must be set to True"
         )
-    if isinstance(nwb_path_or_accessor, lazynwb.file_io.FileAccessor):
-        file = nwb_path_or_accessor
-    else:
-        file = lazynwb.file_io.FileAccessor(nwb_path_or_accessor)
 
     def _format(name: str) -> str:
         return name.removesuffix("/data").removesuffix("/timestamps")
 
+    file = lazynwb.file_io._get_accessor(nwb_path)
     is_in_file = search_term in file
     if exact_path and not is_in_file:
         raise lazynwb.exceptions.InternalPathError(
             f"Exact path {search_term!r} not found in file {file._path.as_posix()}"
         )
     elif not match_all and search_term and is_in_file:
-        return TimeSeries(_file=file, _path=_format(search_term))
+        return TimeSeries(_file_path=nwb_path, _table_path=_format(search_term))
     else:
         path_to_accessor = {
-            _format(k): TimeSeries(_file=file, _path=_format(k))
+            _format(k): TimeSeries(_file_path=nwb_path, _table_path=_format(k))
             for k in lazynwb.utils.get_internal_file_paths(file._accessor)
             if k.split("/")[-1] in ("data", "timestamps")
             and (not search_term or search_term in k)

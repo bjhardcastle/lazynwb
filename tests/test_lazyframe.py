@@ -9,7 +9,7 @@ import lazynwb.tables
 
 def test_polars_dtype_inference(local_hdf5_path):
     schema = lazynwb.tables._get_table_schema(
-        lazynwb.FileAccessor(local_hdf5_path),
+        local_hdf5_path,
         table_path='units',
     )
     assert schema['obs_intervals'] == pl.List(pl.Array(pl.Float64, shape=(2,))), f"Expected polars dtype for obs_intervals to be List[List[Float64]]: {schema['obs_intervals']=}"

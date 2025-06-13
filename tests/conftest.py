@@ -1,5 +1,6 @@
 import gc  # Add this import
 import pathlib
+import shutil
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -14,6 +15,15 @@ from pynwb.file import Subject
 # Units class is implicitly used by nwbfile.add_unit, but not directly instantiated here.
 from pynwb.misc import Units  # Uncommented: Ensure Units is imported
 
+import lazynwb
+
+def pytest_collection_modifyitems(session, config, items: list[pytest.Function]):
+    """Modify the order of tests"""
+    # run this test last as it will close all FileAccessor instances which are reused for the whole session
+    cache_clearing_test = next((i for i in items if i.name == "test_file_accessor_clearing"), None)
+    if cache_clearing_test is not None:
+        items.remove(cache_clearing_test)
+        items[:] = items + [cache_clearing_test]
 
 def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
     """
@@ -24,7 +34,7 @@ def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
         species="Mus musculus",
         sex="M",
         age="P90D",
-        description=f"Test subject",
+        description="Test subject",
     )
 
     # Processing module for running data
@@ -53,7 +63,7 @@ def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
         description="forward running speed on wheel",
     )
     nwbfile.processing["behavior"].add(running_speed_ts_1)
-    
+
     # Units table
     # Create the units table with description first, before adding any units.
     nwbfile.units = Units(
@@ -81,12 +91,8 @@ def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
         )
 
     # Trials table - set description during creation
-    trials_table = TimeIntervals(
-        name="trials"
-    )
-    trials_table.add_column(
-        name="condition", description="experimental condition"
-    )
+    trials_table = TimeIntervals(name="trials")
+    trials_table.add_column(name="condition", description="experimental condition")
 
     num_trials = 6
     for i in range(num_trials):
@@ -154,8 +160,8 @@ def local_hdf5_paths():
     yield list(temp_dir.iterdir())
 
     # Clean up
-    import shutil
 
+    lazynwb.clear_cache()
     gc.collect()  # Force garbage collection before rmtree
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
@@ -195,8 +201,7 @@ def local_zarr_paths():
     yield list(temp_dir.iterdir())
 
     # Clean up
-    import shutil
-
+    lazynwb.clear_cache()
     gc.collect()  # Force garbage collection before rmtree
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
