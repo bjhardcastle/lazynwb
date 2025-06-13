@@ -116,7 +116,7 @@ shape: (252, 28)
 
 ## 3. Quickly provide a summary of the contents of a single NWB file
 ```python
-lazynwb.get_nwb_file_structure(nwb_paths[0])
+lazynwb.get_internal_paths(nwb_paths[0])
 >>> {
   '/acquisition/frametimes_eye_camera/timestamps': <HDF5 dataset "timestamps": shape (267399,), type "<f8">,
   '/acquisition/frametimes_front_camera/timestamps': <HDF5 dataset "timestamps": shape (267204,), type "<f8">,

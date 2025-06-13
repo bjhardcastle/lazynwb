@@ -44,28 +44,32 @@ def normalize_internal_file_path(path: str) -> str:
     return path if path.startswith("/") else f"/{path}"
 
 
-def get_nwb_file_structure(
+def get_internal_paths(
     nwb_path: npc_io.PathLike,
-    exclude_specifications: bool = True,
-    exclude_table_columns: bool = True,
-    exclude_metadata: bool = True,
+    include_arrays: bool = True,
+    include_table_columns: bool = False,
+    include_metadata: bool = False,
+    include_specifications: bool = False,
+    parents: bool = False,
 ) -> dict[str, h5py.Dataset | zarr.Array]:
     """
-    Get a summary of the internal structure of an NWB file.
-
-    This function provides a quick overview of the contents of a single NWB file,
-    showing all internal paths and their corresponding datasets or groups.
+    Traverse the internal structure of an NWB file and return a mapping of paths to data accessors.
 
     Parameters
     ----------
     nwb_path : PathLike
-        Path to the NWB file (local file path, S3 URL, or other supported path types).
-    exclude_specifications : bool, default True
-        Whether to exclude specification-related paths from the output.
-    exclude_table_columns : bool, default True
-        Whether to exclude individual table columns from the output.
-    exclude_metadata : bool, default True
-        Whether to exclude top-level metadata paths from the output.
+        Path to the NWB file (local file path, S3 URL, or other supported path type).
+    include_table_columns : bool, default False
+        Include individual table columns (which are actually arrays) in the output.
+    include_arrays : bool, default False
+        Include arrays like 'data' or 'timestamps' in a TimeSeries object.
+    include_metadata : bool, default False
+        Include top-level metadata paths (like /session_start_time or /general/subject) in the output.
+    include_specifications : bool, default False
+        Include NWB schema-related paths in the output - rarely needed.
+    parents : bool, default False
+        If True, include paths that have children paths in the output, even if it is not a table
+        column or array itself, e.g. the path to a table (parent) as well as its columns (children).
 
     Returns
     -------
@@ -73,54 +77,79 @@ def get_nwb_file_structure(
         Dictionary mapping internal file paths to their corresponding datasets or arrays.
         Keys are internal paths (e.g., '/units/spike_times'), values are the actual
         dataset/array objects that can be inspected for shape, dtype, etc.
-
-    Examples
-    --------
-    >>> import lazynwb
-    >>> structure = lazynwb.get_nwb_file_structure("path/to/file.nwb")
-    >>> for path, dataset in structure.items():
-    ...     print(f"{path}: {dataset}")
-    /acquisition/lick_sensor_events/data: <HDF5 dataset "data": shape (2734,), type "<f8">
-    /intervals/trials: <HDF5 group "/intervals/trials" (48 members)>
-    /units/spike_times: <HDF5 dataset "/units/spike_times" ...>
     """
     file_accessor = lazynwb.file_io._get_accessor(nwb_path)
-    return _traverse_internal_paths(
+    paths_to_accessors = _traverse_internal_paths(
         file_accessor._accessor,
-        exclude_specifications=exclude_specifications,
-        exclude_table_columns=exclude_table_columns,
-        exclude_metadata=exclude_metadata,
+        include_table_columns=include_table_columns,
+        include_arrays=include_arrays,
+        include_metadata=include_metadata,
+        include_specifications=include_specifications,
     )
+    if not parents:
+        paths = list(paths_to_accessors.keys())
+        # remove paths that have children
+        for path in paths:
+            if any(p.startswith(path + "/") for p in paths):
+                del paths_to_accessors[path]
+    return paths_to_accessors
 
 
 def _traverse_internal_paths(
     group: h5py.Group | zarr.Group | zarr.Array,
-    exclude_specifications: bool = True,
-    exclude_table_columns: bool = True,
-    exclude_metadata: bool = True,
+    include_arrays: bool = False,
+    include_table_columns: bool = False,
+    include_metadata: bool = False,
+    include_specifications: bool = False,
 ) -> dict[str, h5py.Dataset | zarr.Array]:
+    """https://nwb-overview.readthedocs.io/en/latest/intro_to_nwb/2_file_structure.html"""
     results: dict[str, h5py.Dataset | zarr.Array] = {}
-    if exclude_specifications and group.name == "/specifications":
-        return results
-    if not hasattr(group, "keys") or (
-        exclude_table_columns and "colnames" in getattr(group, "attrs", {})
-    ):
-        if exclude_metadata and (
-            group.name.count("/") == 1 or group.name.startswith("/general")
-        ):
-            return {}
-        else:
+    if "/specifications" in group.name:
+        if include_specifications:
             results[group.name] = group
-            return results
+        else:
+            return {}
+    is_dataset = hasattr(group, "keys") and len(group) > 0
+    shape = getattr(group, "shape", None)
+    is_scalar = shape == () or shape == (1,)
+    is_array = shape is not None and not is_scalar
+    if is_scalar:
+        return {}
+    attrs = dict(getattr(group, "attrs", {}))
+    neurodata_type = attrs.get("neurodata_type", None)
+    is_neurodata = neurodata_type is not None
+    is_table = "colnames" in attrs
+    is_metadata = is_scalar or group.name.startswith(
+        "/general"
+    )  # other metadata like /general/lab
+    if is_metadata and not include_metadata:
+        return {}
+    elif is_metadata and include_metadata:
+        results[group.name] = group
+    elif is_neurodata and neurodata_type not in (
+        "/",
+        "NWBFile",
+        "ProcessingModule",
+    ):
+        results[group.name] = group
+    elif is_array and include_arrays:  # has no neurodata_type
+        results[group.name] = group
+    else:
+        pass
+    if is_table and not include_table_columns:
+        return results
+    if not is_dataset:
+        return results
     for subpath in group.keys():
         try:
             results = {
                 **results,
                 **_traverse_internal_paths(
                     group[subpath],
-                    exclude_specifications=exclude_specifications,
-                    exclude_table_columns=exclude_table_columns,
-                    exclude_metadata=exclude_metadata,
+                    include_table_columns=include_table_columns,
+                    include_arrays=include_arrays,
+                    include_metadata=include_metadata,
+                    include_specifications=include_specifications,
                 ),
             }
         except (AttributeError, IndexError, TypeError):

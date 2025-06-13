@@ -17,6 +17,9 @@ from pynwb.misc import Units  # Uncommented: Ensure Units is imported
 
 import lazynwb
 
+CLEANUP_FILES = True
+OVERRIDE_DIR: None | pathlib.Path = None if CLEANUP_FILES else pathlib.Path(__file__).parent / "files"
+
 def pytest_collection_modifyitems(session, config, items: list[pytest.Function]):
     """Modify the order of tests"""
     # run this test last as it will close all FileAccessor instances which are reused for the whole session
@@ -135,14 +138,14 @@ def local_hdf5_path(local_hdf5_paths):
 @pytest.fixture(scope="session")
 def local_hdf5_paths():
     """Provides a path to a directory with multiple HDF5 NWB files."""
-    temp_dir = (
+    test_dir = OVERRIDE_DIR or (
         pathlib.Path(tempfile.gettempdir()) / f"lazynwb_test_dir_{uuid.uuid4().hex}"
     )
-    temp_dir.mkdir(exist_ok=True, parents=True)
+    test_dir.mkdir(exist_ok=True, parents=True)
 
     # Create 2 NWB files
     for i in range(2):
-        file_path = temp_dir / f"test_hdf5_{i}.nwb"
+        file_path = test_dir / f"test_hdf5_{i}.nwb"
 
         nwbfile_obj = NWBFile(
             session_description=f"Test hdf5 NWB file {i}",
@@ -157,14 +160,14 @@ def local_hdf5_paths():
         with NWBHDF5IO(str(file_path.absolute()), "w") as io:
             io.write(nwbfile_obj)
 
-    yield list(temp_dir.iterdir())
+    yield list(test_dir.iterdir())
 
     # Clean up
 
     lazynwb.clear_cache()
     gc.collect()  # Force garbage collection before rmtree
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir)
+    if CLEANUP_FILES and test_dir.exists():
+        shutil.rmtree(test_dir)
 
 
 @pytest.fixture(scope="session")
@@ -176,14 +179,14 @@ def local_zarr_path(local_zarr_paths):
 @pytest.fixture(scope="session")
 def local_zarr_paths():
     """Provides a path to a directory with multiple Zarr NWB files."""
-    temp_dir = (
+    test_dir = OVERRIDE_DIR or (
         pathlib.Path(tempfile.gettempdir()) / f"lazynwb_zarr_dir_{uuid.uuid4().hex}"
     )
-    temp_dir.mkdir(exist_ok=True, parents=True)
+    test_dir.mkdir(exist_ok=True, parents=True)
 
     # Create 2 Zarr files
     for i in range(2):
-        zarr_store_path = temp_dir / f"test_zarr_{i}.nwb.zarr"
+        zarr_store_path = test_dir / f"test_zarr_{i}.nwb.zarr"
 
         nwbfile_obj = NWBFile(
             session_description=f"Test Zarr NWB file {i}",
@@ -198,10 +201,10 @@ def local_zarr_paths():
         with NWBZarrIO(str(zarr_store_path.absolute()), "w") as io:
             io.write(nwbfile_obj)
 
-    yield list(temp_dir.iterdir())
+    yield list(test_dir.iterdir())
 
     # Clean up
     lazynwb.clear_cache()
     gc.collect()  # Force garbage collection before rmtree
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir)
+    if CLEANUP_FILES and test_dir.exists():
+        shutil.rmtree(test_dir)
