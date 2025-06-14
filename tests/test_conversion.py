@@ -1,8 +1,4 @@
-"""Test the conversion functionality."""
-
-import contextlib
-import pathlib
-"""Test the conversion functionality."""
+from __future__ import __annotations__
 
 import contextlib
 import pathlib

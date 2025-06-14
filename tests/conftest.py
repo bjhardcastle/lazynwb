@@ -1,4 +1,6 @@
-import gc  # Add this import
+from __future__ import __annotations__
+
+import gc
 import pathlib
 import shutil
 import tempfile
