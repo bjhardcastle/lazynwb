@@ -4,7 +4,6 @@ import contextlib
 import enum
 import logging
 import threading
-import typing
 from collections.abc import Iterable
 from typing import Any
 
@@ -14,7 +13,6 @@ import pydantic
 import remfile
 import upath
 import zarr
-
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +28,14 @@ class FileIOConfig(pydantic.BaseModel):
     }
     disable_cache: bool = False
 
+
 # singleton config
 config = FileIOConfig()
 
 # cache for FileAccessor instances by canonical path
 _accessor_cache: dict[str, FileAccessor] = {}
-_cache_lock = threading.RLock() # RLock allows same thread to acquire multiple times
+_cache_lock = threading.RLock()  # RLock allows same thread to acquire multiple times
+
 
 def clear_cache() -> None:
     """
@@ -46,17 +46,20 @@ def clear_cache() -> None:
     with _cache_lock:
         FileAccessor._clear_cache()
 
+
 def _get_accessor(path: npc_io.PathLike) -> FileAccessor:
     if isinstance(path, Iterable) and not isinstance(path, str):
-        raise ValueError(
-            f"Expected a single path, but received an iterable: {path!r}"
-        )
+        raise ValueError(f"Expected a single path, but received an iterable: {path!r}")
     return FileAccessor(path)
 
-def _get_accessors(paths: npc_io.PathLike | Iterable[npc_io.PathLike]) -> tuple[FileAccessor, ...]:
+
+def _get_accessors(
+    paths: npc_io.PathLike | Iterable[npc_io.PathLike],
+) -> tuple[FileAccessor, ...]:
     if not isinstance(paths, Iterable) or isinstance(paths, str):
         paths = [paths]  # ensure we have an iterable of paths
     return tuple(FileAccessor(path) for path in paths)
+
 
 def _s3_to_http(url: str) -> str:
     if url.startswith("s3://"):
@@ -66,6 +69,7 @@ def _s3_to_http(url: str) -> str:
         return f"https://{bucket}.s3.amazonaws.com/{object_name}"
     else:
         return url
+
 
 def _open_file(path: npc_io.PathLike) -> h5py.File | zarr.Group:
     """
@@ -81,6 +85,7 @@ def _open_file(path: npc_io.PathLike) -> h5py.File | zarr.Group:
     with contextlib.suppress(Exception):
         return zarr.open(store=u, mode="r")
     raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
+
 
 def _open_hdf5(path: upath.UPath, use_remfile: bool = True) -> h5py.File:
     if not path.protocol:
@@ -147,7 +152,7 @@ class FileAccessor:
         """
         Reuse existing FileAccessor for the same path if present in cache.
         """
-        # be careful not to access attributes created in __init__ before they exist 
+        # be careful not to access attributes created in __init__ before they exist
 
         # allow passing through if already a FileAccessor
         if isinstance(path, FileAccessor):
@@ -155,31 +160,37 @@ class FileAccessor:
                 "path input is already a FileAccessor instance: returning as-is"
             )
             return path
-        
+
         # skip caching if disabled
         if config.disable_cache:
             return super().__new__(cls)
-        
+
         # normalize path to get cache key
         # try lightweight version first:
         if isinstance(path, str):
-            cache_key = path.replace('\\', '/')
-        elif hasattr(path, 'as_posix'):
+            cache_key = path.replace("\\", "/")
+        elif hasattr(path, "as_posix"):
             cache_key = path.as_posix()
         else:
-            cache_key = npc_io.from_pathlike(path, **config.fsspec_storage_options).as_posix()
-        
+            cache_key = npc_io.from_pathlike(
+                path, **config.fsspec_storage_options
+            ).as_posix()
+
         with _cache_lock:
             # return cached instance if it exists and is open
             if cache_key in _accessor_cache:
                 instance = _accessor_cache[cache_key]
 
-                if '_accessor' not in instance.__dict__:
-                    logger.debug(f"cached instance for {cache_key} is not properly initialized, removing from cache")
+                if "_accessor" not in instance.__dict__:
+                    logger.debug(
+                        f"cached instance for {cache_key} is not properly initialized, removing from cache"
+                    )
                     del _accessor_cache[cache_key]
 
                 if instance._hdmf_backend == cls.HDMFBackend.ZARR:
-                    if (_is_open := getattr(instance._accessor.store, '_is_open', None)) is not None:
+                    if (
+                        _is_open := getattr(instance._accessor.store, "_is_open", None)
+                    ) is not None:
                         # zarr v3
                         is_readable = _is_open
                     else:
@@ -194,9 +205,11 @@ class FileAccessor:
                     instance._skip_init = True
                 else:
                     instance._skip_init = False
-                    logger.debug(f"cached instance for {cache_key} is stale, will recreate")
+                    logger.debug(
+                        f"cached instance for {cache_key} is stale, will recreate"
+                    )
                 return instance
-                
+
             # create new instance and cache
             logger.debug(f"creating new instance for {cache_key}")
             instance = super().__new__(cls)
@@ -208,7 +221,9 @@ class FileAccessor:
         path: npc_io.PathLike,
     ) -> None:
         # skip init if returned from cache
-        if self.__dict__.get("_skip_init"): # don't check attr directly: __getattr__ is overloaded
+        if self.__dict__.get(
+            "_skip_init"
+        ):  # don't check attr directly: __getattr__ is overloaded
             logger.debug("skipping init for cached instance")
             return None
         self._path = npc_io.from_pathlike(path)
@@ -272,7 +287,9 @@ class FileAccessor:
 
     def __getattr__(self, name) -> Any:
         if name == "_accessor":
-            raise AttributeError(f"{self.__class__.__name__} has no attribute '_accessor'")
+            raise AttributeError(
+                f"{self.__class__.__name__} has no attribute '_accessor'"
+            )
             # this is correct behavior, as _accessor should be provided by __getattribute__ before __getattr__ is called
             # - if we reach this point it means _accessor has not been set yet
         return getattr(self._accessor, name)

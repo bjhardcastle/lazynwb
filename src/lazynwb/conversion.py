@@ -130,7 +130,7 @@ def convert_nwb_tables(
     ...     pretty=True
     ... )
     """
-    output_format = output_format.lower().strip('.')
+    output_format = output_format.lower().strip(".")
     if output_format not in _OUTPUT_FORMATS:
         raise ValueError(
             f"Unsupported output format '{output_format}'. "
@@ -169,7 +169,10 @@ def convert_nwb_tables(
 
     for table_path in common_table_paths:
         output_path = _table_path_to_output_path(
-            output_dir, table_path, file_extension, full_path=full_path,
+            output_dir,
+            table_path,
+            file_extension,
+            full_path=full_path,
         )
         logger.info(f"Converting {table_path} -> {output_path.name}")
 
@@ -191,9 +194,7 @@ def convert_nwb_tables(
         write_func(output_path, **write_kwargs)
         output_paths[table_path] = output_path
 
-        logger.info(
-            f"Wrote {df.height} rows, {df.width} columns to {output_path.name}"
-        )
+        logger.info(f"Wrote {df.height} rows, {df.width} columns to {output_path.name}")
 
     logger.info(f"Successfully converted {len(output_paths)} tables to {output_format}")
     return output_paths
@@ -300,4 +301,3 @@ def _table_path_to_output_path(
     else:
         # For formats like delta that use directories
         return output_dir / clean_path
-

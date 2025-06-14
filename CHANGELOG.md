@@ -8,9 +8,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.55...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.56...HEAD)</small>
+
+### Added
+
+- Add copilot instructions ([90cb0af](https://github.com/bjhardcastle/lazynwb/commit/90cb0af0c9e610018d9b120b7ec739439482fa4a) by bjhardcastle).
+- Add conversion module - closes #8 ([6a9c4d5](https://github.com/bjhardcastle/lazynwb/commit/6a9c4d54a2ab536b47812148c79e297a8913d64c) by bjhardcastle).
+- Add utility function to get nwb file structure ([0e1d60d](https://github.com/bjhardcastle/lazynwb/commit/0e1d60d31b5cbd5f0dfb941cfd7b08f9a5047eca) by bjhardcastle).
+- Add debug logging messages ([dcbd5ec](https://github.com/bjhardcastle/lazynwb/commit/dcbd5ec44eec7b771b78f10508e933477ddc42e0) by bjhardcastle).
+- Add cache for `FileAccessor` - consolidate config for file IO ([594250b](https://github.com/bjhardcastle/lazynwb/commit/594250bb3b52b304a991cabfc1a191266f677eeb) by bjhardcastle).
+
+### Fixed
+
+- Fix imports ([fdea3a3](https://github.com/bjhardcastle/lazynwb/commit/fdea3a357066f20f5f4f8cbbcf88018951eff7e7) by bjhardcastle).
+- Fix internal nwb path function ([c318f6b](https://github.com/bjhardcastle/lazynwb/commit/c318f6bc65692369bbb5a0ff470f6db4591ad817) by bjhardcastle).
 
 <!-- insertion marker -->
+## [v0.2.56](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.56) - 2025-06-09
+
+<small>[Compare with v0.2.55](https://github.com/bjhardcastle/lazynwb/compare/v0.2.55...v0.2.56)</small>
+
 ## [v0.2.55](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.55) - 2025-06-03
 
 <small>[Compare with v0.2.54](https://github.com/bjhardcastle/lazynwb/compare/v0.2.54...v0.2.55)</small>
