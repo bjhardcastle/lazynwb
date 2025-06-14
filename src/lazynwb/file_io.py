@@ -169,7 +169,13 @@ class FileAccessor:
         if cache_key in _accessor_cache:
             instance = _accessor_cache[cache_key]
             if instance._hdmf_backend == cls.HDMFBackend.ZARR:
-                is_readable = instance._accessor.store.is_readable()
+                if (_is_open := getattr(instance._accessor.store, '_is_open', None)) is not None:
+                    # zarr v3
+                    is_readable = _is_open
+                else:
+                    # zarr v2
+                    is_readable = instance._accessor.store.is_readable()
+
             elif instance._hdmf_backend == cls.HDMFBackend.HDF5:
                 is_readable = bool(instance._accessor)
             if is_readable:

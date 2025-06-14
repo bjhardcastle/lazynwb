@@ -50,8 +50,8 @@ bump = [
     "git-changelog>=2.5.3",
 ]
 pynwb = [
-    "hdmf-zarr>=0.11.1",
-    "pynwb>=3.0.0",
+    "hdmf-zarr==0.11.0",
+    "pynwb==3.0.0",
 ]
 
 [tool.uv]

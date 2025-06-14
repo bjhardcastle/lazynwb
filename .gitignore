@@ -167,3 +167,5 @@ cython_debug/
 
 .sandbox.py
 .scratch/
+
+tests/files/

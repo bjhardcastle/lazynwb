@@ -7,6 +7,7 @@ import importlib.metadata
 import logging
 
 from lazynwb.base import *
+from lazynwb.conversion import *
 from lazynwb.file_io import *
 from lazynwb.lazyframe import *
 from lazynwb.tables import *

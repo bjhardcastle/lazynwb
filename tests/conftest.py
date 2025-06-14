@@ -18,15 +18,21 @@ from pynwb.misc import Units  # Uncommented: Ensure Units is imported
 import lazynwb
 
 CLEANUP_FILES = True
-OVERRIDE_DIR: None | pathlib.Path = None if CLEANUP_FILES else pathlib.Path(__file__).parent / "files"
+OVERRIDE_DIR: None | pathlib.Path = (
+    None if CLEANUP_FILES else pathlib.Path(__file__).parent / "files" / "nwb_files"
+)
+
 
 def pytest_collection_modifyitems(session, config, items: list[pytest.Function]):
     """Modify the order of tests"""
     # run this test last as it will close all FileAccessor instances which are reused for the whole session
-    cache_clearing_test = next((i for i in items if i.name == "test_file_accessor_clearing"), None)
+    cache_clearing_test = next(
+        (i for i in items if i.name == "test_file_accessor_clearing"), None
+    )
     if cache_clearing_test is not None:
         items.remove(cache_clearing_test)
         items[:] = items + [cache_clearing_test]
+
 
 def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
     """
