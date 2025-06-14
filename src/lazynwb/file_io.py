@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import enum
 import logging
+import threading
 import typing
 from collections.abc import Iterable
 from typing import Any
@@ -34,7 +35,7 @@ config = FileIOConfig()
 
 # cache for FileAccessor instances by canonical path
 _accessor_cache: dict[str, FileAccessor] = {}
-
+_cache_lock = threading.RLock() # RLock allows same thread to acquire multiple times
 
 def clear_cache() -> None:
     """
@@ -42,7 +43,8 @@ def clear_cache() -> None:
 
     Users can call this to reset cached h5py and zarr accessors.
     """
-    FileAccessor._clear_cache()
+    with _cache_lock:
+        FileAccessor._clear_cache()
 
 def _get_accessor(path: npc_io.PathLike) -> FileAccessor:
     if isinstance(path, Iterable) and not isinstance(path, str):
@@ -145,6 +147,8 @@ class FileAccessor:
         """
         Reuse existing FileAccessor for the same path if present in cache.
         """
+        # be careful not to access attributes created in __init__ before they exist 
+
         # allow passing through if already a FileAccessor
         if isinstance(path, FileAccessor):
             logger.debug(
@@ -156,42 +160,48 @@ class FileAccessor:
         if config.disable_cache:
             return super().__new__(cls)
         
-        # normalize path and build key
-        # try lightweight path conversion
+        # normalize path to get cache key
+        # try lightweight version first:
         if isinstance(path, str):
-            cache_key = path
+            cache_key = path.replace('\\', '/')
         elif hasattr(path, 'as_posix'):
             cache_key = path.as_posix()
         else:
             cache_key = npc_io.from_pathlike(path, **config.fsspec_storage_options).as_posix()
         
-        # return cached instance if it exists and is open
-        if cache_key in _accessor_cache:
-            instance = _accessor_cache[cache_key]
-            if instance._hdmf_backend == cls.HDMFBackend.ZARR:
-                if (_is_open := getattr(instance._accessor.store, '_is_open', None)) is not None:
-                    # zarr v3
-                    is_readable = _is_open
-                else:
-                    # zarr v2
-                    is_readable = instance._accessor.store.is_readable()
+        with _cache_lock:
+            # return cached instance if it exists and is open
+            if cache_key in _accessor_cache:
+                instance = _accessor_cache[cache_key]
 
-            elif instance._hdmf_backend == cls.HDMFBackend.HDF5:
-                is_readable = bool(instance._accessor)
-            if is_readable:
-                logger.debug(f"returning cached instance for {cache_key}")
-                # mark to skip __init__ for cached instance
-                instance._skip_init = True
-            else:
-                instance._skip_init = False
-                logger.debug(f"cached instance for {cache_key} is stale, will recreate")
+                if '_accessor' not in instance.__dict__:
+                    logger.debug(f"cached instance for {cache_key} is not properly initialized, removing from cache")
+                    del _accessor_cache[cache_key]
+
+                if instance._hdmf_backend == cls.HDMFBackend.ZARR:
+                    if (_is_open := getattr(instance._accessor.store, '_is_open', None)) is not None:
+                        # zarr v3
+                        is_readable = _is_open
+                    else:
+                        # zarr v2
+                        is_readable = instance._accessor.store.is_readable()
+
+                elif instance._hdmf_backend == cls.HDMFBackend.HDF5:
+                    is_readable = bool(instance._accessor)
+                if is_readable:
+                    logger.debug(f"returning cached instance for {cache_key}")
+                    # mark to skip __init__ for cached instance
+                    instance._skip_init = True
+                else:
+                    instance._skip_init = False
+                    logger.debug(f"cached instance for {cache_key} is stale, will recreate")
+                return instance
+                
+            # create new instance and cache
+            logger.debug(f"creating new instance for {cache_key}")
+            instance = super().__new__(cls)
+            _accessor_cache[cache_key] = instance
             return instance
-            
-        # create new instance and cache
-        logger.debug(f"creating new instance for {cache_key}")
-        instance = super().__new__(cls)
-        _accessor_cache[cache_key] = instance
-        return instance
 
     def __init__(
         self,
@@ -262,9 +272,9 @@ class FileAccessor:
 
     def __getattr__(self, name) -> Any:
         if name == "_accessor":
-            raise AttributeError(
-                "'_accessor' should be accessible directly - this is raised to avoid infinite recursion"
-            )
+            raise AttributeError(f"{self.__class__.__name__} has no attribute '_accessor'")
+            # this is correct behavior, as _accessor should be provided by __getattribute__ before __getattr__ is called
+            # - if we reach this point it means _accessor has not been set yet
         return getattr(self._accessor, name)
 
     def get(self, name: str, default: Any = None) -> Any:
