@@ -14,6 +14,7 @@ dependencies = [
     "tqdm>=4.66.2",
     "pandas>=2.0.0",
     "polars[pandas]>=1.26.0",
+    "pydantic>=2.11.6",
 ]
 version = "0.2.57"
 classifiers = [
