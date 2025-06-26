@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.56...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.57...HEAD)</small>
+
+### Added
+
+- Add pydantic to dependencies ([2d47dff](https://github.com/bjhardcastle/lazynwb/commit/2d47dff05c7c3520b5ae2618c9ab44017f5523be) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.57](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.57) - 2025-06-14
+
+<small>[Compare with v0.2.56](https://github.com/bjhardcastle/lazynwb/compare/v0.2.56...v0.2.57)</small>
 
 ### Added
 
@@ -23,7 +32,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Fix imports ([fdea3a3](https://github.com/bjhardcastle/lazynwb/commit/fdea3a357066f20f5f4f8cbbcf88018951eff7e7) by bjhardcastle).
 - Fix internal nwb path function ([c318f6b](https://github.com/bjhardcastle/lazynwb/commit/c318f6bc65692369bbb5a0ff470f6db4591ad817) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.56](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.56) - 2025-06-09
 
 <small>[Compare with v0.2.55](https://github.com/bjhardcastle/lazynwb/compare/v0.2.55...v0.2.56)</small>
