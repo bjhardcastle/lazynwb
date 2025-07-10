@@ -187,6 +187,24 @@ def test_scan_nwb_projection_pushdown(local_hdf5_path):
         set(projected_df.columns) == expected_columns
     ), f"LazyFrame Projection did not work correctly: {projected_df.columns=}, {expected_columns=}"
 
+def test_sql_context(local_hdf5_path):
+    """Test that scan_nwb can be used with SQL context."""
+    # Create a SQL context
+    sql_context = pl.SQLContext(eager=True)
+
+    # Register the NWB table as a SQL table
+    sql_context.register(
+        "trials",
+        lazynwb.scan_nwb(
+            source=local_hdf5_path, table_path="/intervals/trials", disable_progress=True
+        ),
+    )
+
+    result = sql_context.execute("SELECT * FROM trials WHERE start_time > 2.0")
+
+    assert not result.is_empty(), "SQL query returned an empty result set"
+    assert (result["start_time"] > 2.0).all(), "SQL query did not filter correctly"
+    
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

@@ -10,10 +10,11 @@ from collections.abc import Iterable
 from typing import Any, Literal
 
 import npc_io
+import polars as pl
 import tqdm
 
 import lazynwb.lazyframe
-import lazynwb.utils
+import lazynwb.file_io
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ def convert_nwb_tables(
     logger.info(f"Discovering tables in {len(nwb_sources)} NWB files...")
 
     # Find common table paths across all files using threadpool
-    common_table_paths = _find_common_table_paths(
+    common_table_paths = _find_common_paths(
         nwb_sources=nwb_sources,
         min_file_count=min_file_count,
         disable_progress=disable_progress,
@@ -200,10 +201,65 @@ def convert_nwb_tables(
     return output_paths
 
 
-def _find_common_table_paths(
+def get_sql_context(
+    nwb_sources: npc_io.PathLike | Iterable[npc_io.PathLike],
+    *,
+    full_path: bool = False,
+    min_file_count: int = 1,
+    exclude_array_columns: bool = False,
+    ignore_errors: bool = True,
+    disable_progress: bool = False,
+    **sqlcontext_kwargs: Any,
+) -> pl.SQLContext:
+
+    if isinstance(nwb_sources, (str, pathlib.Path)) or not isinstance(
+        nwb_sources, Iterable
+    ):
+        nwb_sources = (nwb_sources,)
+    nwb_sources = tuple(nwb_sources)
+
+    logger.info(f"Discovering tables in {len(nwb_sources)} NWB files...")
+
+    # Find common table paths across all files using threadpool
+    common_table_paths = _find_common_paths(
+        nwb_sources=nwb_sources,
+        min_file_count=min_file_count,
+        disable_progress=disable_progress,
+        include_arrays=True,  # Include arrays to be able to query them
+    )
+
+    if not common_table_paths:
+        logger.warning("No common table paths found across NWB files")
+        return {}
+
+    logger.info(
+        f"Found {len(common_table_paths)} common table paths: {sorted(common_table_paths)}"
+    )
+    sql_context = pl.SQLContext(**sqlcontext_kwargs)
+    for table_path in common_table_paths:
+        table_name = table_path if full_path else table_path.split("/")[-1]
+        
+        logger.info(f"Adding {table_path} as {table_name}")
+        
+        sql_context.register(
+            table_name,
+            lazynwb.lazyframe.scan_nwb(
+                source=nwb_sources,
+                table_path=table_path,
+                exclude_array_columns=exclude_array_columns,
+                ignore_errors=ignore_errors,
+                disable_progress=disable_progress,
+            ),
+        )
+
+    return sql_context
+
+
+def _find_common_paths(
     nwb_sources: tuple[npc_io.PathLike, ...],
     min_file_count: int,
     disable_progress: bool,
+    include_arrays: bool = False,
 ) -> set[str]:
     """Find table paths that appear in at least min_file_count files."""
 
@@ -212,9 +268,9 @@ def _find_common_table_paths(
     with concurrent.futures.ThreadPoolExecutor() as executor:
         for nwb_path in nwb_sources:
             future = executor.submit(
-                lazynwb.utils.get_internal_paths,
+                lazynwb.file_io.get_internal_paths,
                 nwb_path=nwb_path,
-                include_arrays=False,  # We only want table-like structures
+                include_arrays=include_arrays,  # We only want table-like structures
                 include_table_columns=False,
                 include_metadata=False,
                 include_specifications=False,
@@ -238,13 +294,18 @@ def _find_common_table_paths(
             nwb_path = future_to_path[future]
             try:
                 internal_paths = future.result()
+            except Exception as exc:
+                logger.warning(f"Error scanning {nwb_path}: {exc}")
+                continue
+            else:
                 # Filter for table-like paths (groups with attributes indicating they're tables)
                 table_paths = _filter_table_paths(internal_paths)
                 all_table_paths.extend(table_paths)
                 logger.debug(f"Found {len(table_paths)} table paths in {nwb_path}")
-            except Exception as exc:
-                logger.warning(f"Error scanning {nwb_path}: {exc}")
-                continue
+                if include_arrays:
+                    array_paths = _filter_array_paths({k:v for k, v in internal_paths.items() if k not in table_paths})
+                    all_table_paths.extend(array_paths)
+                    logger.debug(f"Found {len(array_paths)} array paths in {nwb_path}")
 
     # Count occurrences and filter by min_file_count
     path_counts = Counter(all_table_paths)
@@ -282,6 +343,42 @@ def _filter_table_paths(internal_paths: dict[str, Any]) -> list[str]:
 
     return table_paths
 
+def _filter_array_paths(internal_paths: dict[str, Any]) -> list[str]:
+    """Filter internal paths to identify array-like structures."""
+    array_paths = []
+
+    for path, accessor in internal_paths.items():
+        # Check if the accessor has array-like attributes
+        if path.endswith("/data") or path.endswith("/timestamps"):
+            continue
+        attrs = getattr(accessor, "attrs", {})
+        try:
+            if (
+            # required attributes for TimeSeries objects
+            (
+            (has_timestamps := 'timestamps' in accessor)
+                or 'rate' in getattr(accessor.get("starting_time", {}), "attrs", {})
+            )
+            or
+            # try to accommodate possible variants
+            (
+                'series' in attrs.get('neurodata_type', '').lower()
+                and 'data' in accessor
+            ) 
+            ):
+                if not has_timestamps:
+                    # TODO
+                    # without timestamps, the default TimeSeries object has two keys: 'data' and
+                    # 'starting_time' which is another Group.
+                    # get_df() interprets them as 'data': List[float], 'starting_time': float
+                    # it needs to be aware of this possibility and generate a timestamps column
+                    logger.warning(f"TimeSeries without timestamps are not currently supported. Skipping {path}")
+                    continue
+                array_paths.append(path)
+        except AttributeError:
+            continue
+        
+    return array_paths
 
 def _table_path_to_output_path(
     output_dir: pathlib.Path,

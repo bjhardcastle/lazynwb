@@ -111,7 +111,47 @@ def test_table_path_to_output_path():
         output_dir, "/processing/behavior/running_speed", ".json", full_path=False
     )
     assert result == output_dir / "running_speed.json"
+    
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    [
+        "local_hdf5_paths",
+    ],
+)
+def test_sql_context(nwb_fixture_name, request):
+    """Test polars SQLContext with NWB files."""
+    nwb_path_or_paths = request.getfixturevalue(nwb_fixture_name)
 
+    sql_context = lazynwb.get_sql_context(
+        nwb_sources=nwb_path_or_paths,
+        full_path=True,
+        min_file_count=1,
+        exclude_array_columns=False,
+        ignore_errors=True,
+        disable_progress=False,
+    )
+
+    # Check that the SQL context is not None
+    assert sql_context is not None
+
+    # Check that the expected tables are registered
+    expected_tables = [
+        "/intervals/trials",
+        "/intervals/epochs",
+        "/units",
+        "/processing/behavior/running_speed_with_timestamps", # rate not currently supported 
+    ]
+    tables = sql_context.tables()
+    for table in expected_tables:
+        assert table in tables, f"Table not found: {table}"
+    # Check that we can query a table
+    trials_df = sql_context.execute("SELECT * FROM `/intervals/trials`", eager=True)
+    assert not trials_df.is_empty(), "Trials table should not be empty"
+    
+    # Check that we can query a timeseries converted to table
+    ts_df = sql_context.execute("SELECT * FROM `/processing/behavior/running_speed_with_timestamps` LIMIT 10", eager=True)
+    assert not ts_df.is_empty(), "Timestamps table should not be empty"
+    
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
