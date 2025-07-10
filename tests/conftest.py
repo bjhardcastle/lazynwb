@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pytest
-from hdmf_zarr import NWBZarrIO
 from pynwb import NWBHDF5IO, NWBFile, TimeSeries
 from pynwb.epoch import TimeIntervals
 from pynwb.file import Subject
@@ -19,6 +18,7 @@ from pynwb.misc import Units  # Uncommented: Ensure Units is imported
 
 import lazynwb
 
+RESET_FILES = False
 CLEANUP_FILES = False
 OVERRIDE_DIR: None | pathlib.Path = (
     None if CLEANUP_FILES else pathlib.Path(__file__).parent / "files" / "nwb_files"
@@ -30,7 +30,7 @@ def _reset_nwb_files(dir_path: pathlib.Path):
     if dir_path.exists():
         shutil.rmtree(dir_path)
 
-if OVERRIDE_DIR is not None:
+if OVERRIDE_DIR is not None and RESET_FILES:
     _reset_nwb_files(OVERRIDE_DIR)
 
 
@@ -165,6 +165,8 @@ def local_hdf5_paths():
     for i in range(2):
         file_path = test_dir / f"test_hdf5_{i}.nwb"
         returned_paths.append(file_path)
+        if file_path.exists() and not RESET_FILES:
+            continue
 
         nwbfile_obj = NWBFile(
             session_description=f"Test hdf5 NWB file {i}",
@@ -197,14 +199,15 @@ def local_zarr_paths():
         pathlib.Path(tempfile.gettempdir()) / f"lazynwb_zarr_dir_{uuid.uuid4().hex}"
     )
     test_dir.mkdir(exist_ok=True, parents=True)
-    _reset_nwb_files(test_dir)
 
     # Create 2 Zarr files
     returned_paths = []
     for i in range(2):
         zarr_store_path = test_dir / f"test_zarr_{i}.nwb.zarr"
         returned_paths.append(zarr_store_path)
-
+        if zarr_store_path.exists() and not RESET_FILES:
+            continue
+        
         nwbfile_obj = NWBFile(
             session_description=f"Test Zarr NWB file {i}",
             identifier=str(uuid.uuid4()),
@@ -214,7 +217,7 @@ def local_zarr_paths():
         nwbfile_obj = _add_nwb_file_content(
             nwbfile_obj, unique_id_suffix=f"zarr_dir_{i}"
         )
-
+        from hdmf_zarr import NWBZarrIO
         with NWBZarrIO(str(zarr_store_path.absolute()), "w") as io:
             io.write(nwbfile_obj)
 
