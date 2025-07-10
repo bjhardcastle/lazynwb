@@ -453,7 +453,7 @@ def _get_table_data(
 
     # add identifiers to each row, so they can be linked back their source at a later time:
     identifier_column_data = {
-        NWB_PATH_COLUMN_NAME: [file._path.as_posix()] * table_length,
+        NWB_PATH_COLUMN_NAME: [file._path.resolve().as_posix()] * table_length,
         TABLE_PATH_COLUMN_NAME: [
             lazynwb.utils.normalize_internal_file_path(search_term)
         ]
