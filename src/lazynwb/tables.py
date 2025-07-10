@@ -919,6 +919,7 @@ def _get_table_schema(
                 schema.pop(column_name, None)
     return pl.Schema(schema)
 
+
 def insert_is_observed(
     intervals_frame: polars._typing.FrameType,
     units_frame: polars._typing.FrameType | None = None,

@@ -8,13 +8,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.57...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.58...HEAD)</small>
+
+### Added
+
+- Add sql_context ([21b68bc](https://github.com/bjhardcastle/lazynwb/commit/21b68bc82360b015c67cc7da9e83a3e68db52d49) by bjhardcastle).
+
+### Fixed
+
+- Fix getting internal paths ([19263b7](https://github.com/bjhardcastle/lazynwb/commit/19263b77396f6a4733d0363d0bc15e046fbfb9d8) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.58](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.58) - 2025-06-26
+
+<small>[Compare with v0.2.57](https://github.com/bjhardcastle/lazynwb/compare/v0.2.57...v0.2.58)</small>
 
 ### Added
 
 - Add pydantic to dependencies ([2d47dff](https://github.com/bjhardcastle/lazynwb/commit/2d47dff05c7c3520b5ae2618c9ab44017f5523be) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.57](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.57) - 2025-06-14
 
 <small>[Compare with v0.2.56](https://github.com/bjhardcastle/lazynwb/compare/v0.2.56...v0.2.57)</small>

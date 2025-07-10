@@ -297,7 +297,9 @@ class FileAccessor:
         return getattr(self._accessor, name)
 
     def get(self, name: str, default: Any = None) -> Any:
-        return self._accessor.get(lazynwb.utils.normalize_internal_file_path(name), default)
+        return self._accessor.get(
+            lazynwb.utils.normalize_internal_file_path(name), default
+        )
 
     def __getitem__(self, name) -> Any:
         return self._accessor[lazynwb.utils.normalize_internal_file_path(name)]
@@ -322,6 +324,7 @@ class FileAccessor:
                 self._accessor.close()
             elif self._hdmf_backend == self.HDMFBackend.ZARR:
                 self._accessor.store.close()
+
 
 def get_internal_paths(
     nwb_path: npc_io.PathLike,
@@ -434,6 +437,7 @@ def _traverse_internal_paths(
         except (AttributeError, IndexError, TypeError):
             results[group.name] = group
     return results
+
 
 if __name__ == "__main__":
     from npc_io import testmod

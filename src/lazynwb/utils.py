@@ -5,12 +5,6 @@ import logging
 import multiprocessing
 import os
 
-import h5py
-import npc_io
-import zarr
-
-import lazynwb.file_io
-
 logger = logging.getLogger(__name__)
 
 thread_pool_executor: concurrent.futures.ThreadPoolExecutor | None = None
@@ -42,7 +36,6 @@ def normalize_internal_file_path(path: str) -> str:
     - remove leading '/' if present
     """
     return path.removeprefix("/") or "/"  # ensure at least root path is returned
-
 
 
 if __name__ == "__main__":

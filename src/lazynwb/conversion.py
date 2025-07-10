@@ -13,8 +13,8 @@ import npc_io
 import polars as pl
 import tqdm
 
-import lazynwb.lazyframe
 import lazynwb.file_io
+import lazynwb.lazyframe
 
 logger = logging.getLogger(__name__)
 
@@ -238,9 +238,9 @@ def get_sql_context(
     sql_context = pl.SQLContext(**sqlcontext_kwargs)
     for table_path in common_table_paths:
         table_name = table_path if full_path else table_path.split("/")[-1]
-        
+
         logger.info(f"Adding {table_path} as {table_name}")
-        
+
         sql_context.register(
             table_name,
             lazynwb.lazyframe.scan_nwb(
@@ -303,7 +303,13 @@ def _find_common_paths(
                 all_table_paths.extend(table_paths)
                 logger.debug(f"Found {len(table_paths)} table paths in {nwb_path}")
                 if include_arrays:
-                    array_paths = _filter_array_paths({k:v for k, v in internal_paths.items() if k not in table_paths})
+                    array_paths = _filter_array_paths(
+                        {
+                            k: v
+                            for k, v in internal_paths.items()
+                            if k not in table_paths
+                        }
+                    )
                     all_table_paths.extend(array_paths)
                     logger.debug(f"Found {len(array_paths)} array paths in {nwb_path}")
 
@@ -343,6 +349,7 @@ def _filter_table_paths(internal_paths: dict[str, Any]) -> list[str]:
 
     return table_paths
 
+
 def _filter_array_paths(internal_paths: dict[str, Any]) -> list[str]:
     """Filter internal paths to identify array-like structures."""
     array_paths = []
@@ -354,17 +361,17 @@ def _filter_array_paths(internal_paths: dict[str, Any]) -> list[str]:
         attrs = getattr(accessor, "attrs", {})
         try:
             if (
-            # required attributes for TimeSeries objects
-            (
-            (has_timestamps := 'timestamps' in accessor)
-                or 'rate' in getattr(accessor.get("starting_time", {}), "attrs", {})
-            )
-            or
-            # try to accommodate possible variants
-            (
-                'series' in attrs.get('neurodata_type', '').lower()
-                and 'data' in accessor
-            ) 
+                # required attributes for TimeSeries objects
+                (
+                    (has_timestamps := "timestamps" in accessor)
+                    or "rate" in getattr(accessor.get("starting_time", {}), "attrs", {})
+                )
+                or
+                # try to accommodate possible variants
+                (
+                    "series" in attrs.get("neurodata_type", "").lower()
+                    and "data" in accessor
+                )
             ):
                 if not has_timestamps:
                     # TODO
@@ -372,13 +379,16 @@ def _filter_array_paths(internal_paths: dict[str, Any]) -> list[str]:
                     # 'starting_time' which is another Group.
                     # get_df() interprets them as 'data': List[float], 'starting_time': float
                     # it needs to be aware of this possibility and generate a timestamps column
-                    logger.warning(f"TimeSeries without timestamps are not currently supported. Skipping {path}")
+                    logger.warning(
+                        f"TimeSeries without timestamps are not currently supported. Skipping {path}"
+                    )
                     continue
                 array_paths.append(path)
         except AttributeError:
             continue
-        
+
     return array_paths
+
 
 def _table_path_to_output_path(
     output_dir: pathlib.Path,
