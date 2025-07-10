@@ -270,7 +270,7 @@ def _get_table_data(
         not exact_path
         and lazynwb.utils.normalize_internal_file_path(search_term) not in file
     ):
-        path_to_accessor = _get_internal_file_paths(file._accessor)
+        path_to_accessor = lazynwb.file_io.get_internal_paths(path)
         matches = difflib.get_close_matches(
             search_term, path_to_accessor.keys(), n=1, cutoff=0.3
         )
@@ -918,42 +918,6 @@ def _get_table_schema(
             if isinstance(schema[column_name], (pl.List, pl.Array)):
                 schema.pop(column_name, None)
     return pl.Schema(schema)
-
-
-def _get_internal_file_paths(
-    group: h5py.Group | zarr.Group | zarr.Array,
-    exclude_specifications: bool = True,
-    exclude_table_columns: bool = True,
-    exclude_metadata: bool = True,
-) -> dict[str, h5py.Dataset | zarr.Array]:
-    results: dict[str, h5py.Dataset | zarr.Array] = {}
-    if exclude_specifications and group.name == "/specifications":
-        return results
-    if not hasattr(group, "keys") or (
-        exclude_table_columns and "colnames" in getattr(group, "attrs", {})
-    ):
-        if exclude_metadata and (
-            group.name.count("/") == 1 or group.name.startswith("/general")
-        ):
-            return {}
-        else:
-            results[group.name] = group
-            return results
-    for subpath in group.keys():
-        try:
-            results = {
-                **results,
-                **_get_internal_file_paths(
-                    group[subpath],
-                    exclude_specifications=exclude_specifications,
-                    exclude_table_columns=exclude_table_columns,
-                    exclude_metadata=exclude_metadata,
-                ),
-            }
-        except (AttributeError, IndexError, TypeError):
-            results[group.name] = group
-    return results
-
 
 def insert_is_observed(
     intervals_frame: polars._typing.FrameType,

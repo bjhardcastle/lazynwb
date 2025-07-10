@@ -5,6 +5,22 @@ import pytest
 
 import lazynwb.file_io
 
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    [
+        "local_hdf5_path",
+        "local_zarr_path",
+    ],
+)
+def test_file_accessor(nwb_fixture_name, request):
+    """Test FileAccessor with various NWB file/store inputs."""
+    path = request.getfixturevalue(nwb_fixture_name)
+    accessor = lazynwb.file_io._get_accessor(path)
+    assert isinstance(accessor, lazynwb.file_io.FileAccessor)
+    assert "units" in accessor, "__contains__() failing, or NWB fixture has changed"
+    assert "/units" in accessor, "__contains__() failling to normalize path"
+    assert accessor.get("units") is not None, "get() should return an object"
+    assert next(iter(accessor), None) is not None, "Accessor should be iterable and yield at least one item"
 
 def test_file_accessor_caching(local_hdf5_path: pathlib.Path) -> None:
     """Test that FileAccessor instances are cached and reused."""

@@ -80,21 +80,21 @@ def test_normalize_internal_file_path():
     """Test normalize_internal_file_path function."""
     # Test path without leading slash
     assert (
-        lazynwb.utils.normalize_internal_file_path("units/spike_times")
-        == "/units/spike_times"
+        lazynwb.normalize_internal_file_path("units/spike_times")
+        == "units/spike_times"
     )
 
     # Test path with leading slash
     assert (
-        lazynwb.utils.normalize_internal_file_path("/units/spike_times")
-        == "/units/spike_times"
+        lazynwb.normalize_internal_file_path("/units/spike_times")
+    == "units/spike_times"
     )
 
     # Test empty path
-    assert lazynwb.utils.normalize_internal_file_path("") == "/"
+    assert lazynwb.normalize_internal_file_path("") == "/"
 
     # Test root path
-    assert lazynwb.utils.normalize_internal_file_path("/") == "/"
+    assert lazynwb.normalize_internal_file_path("/") == "/"
 
 
 if __name__ == "__main__":
