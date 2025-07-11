@@ -15,6 +15,7 @@ import tqdm
 
 import lazynwb.file_io
 import lazynwb.lazyframe
+import lazynwb.utils
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +238,7 @@ def get_sql_context(
     )
     sql_context = pl.SQLContext(**sqlcontext_kwargs)
     for table_path in common_table_paths:
-        table_name = table_path if full_path else table_path.split("/")[-1]
+        table_name = lazynwb.utils.normalize_internal_file_path(table_path) if full_path else table_path.split("/")[-1]
 
         logger.info(f"Adding {table_path} as {table_name}")
 
