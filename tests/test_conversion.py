@@ -136,20 +136,20 @@ def test_sql_context(nwb_fixture_name, request):
 
     # Check that the expected tables are registered
     expected_tables = [
-        "/intervals/trials",
-        "/intervals/epochs",
-        "/units",
-        "/processing/behavior/running_speed_with_timestamps", # rate not currently supported 
+        "intervals/trials",
+        "intervals/epochs",
+        "units",
+        "processing/behavior/running_speed_with_timestamps", # rate not currently supported 
     ]
     tables = sql_context.tables()
     for table in expected_tables:
         assert table in tables, f"Table not found: {table}"
     # Check that we can query a table
-    trials_df = sql_context.execute("SELECT * FROM `/intervals/trials`", eager=True)
+    trials_df = sql_context.execute("SELECT * FROM `intervals/trials`", eager=True)
     assert not trials_df.is_empty(), "Trials table should not be empty"
     
     # Check that we can query a timeseries converted to table
-    ts_df = sql_context.execute("SELECT * FROM `/processing/behavior/running_speed_with_timestamps` LIMIT 10", eager=True)
+    ts_df = sql_context.execute("SELECT * FROM `processing/behavior/running_speed_with_timestamps` LIMIT 10", eager=True)
     assert not ts_df.is_empty(), "Timestamps table should not be empty"
     
 
