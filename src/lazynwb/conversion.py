@@ -221,11 +221,15 @@ def get_sql_context(
         nwb_sources = (nwb_sources,)
     nwb_sources = tuple(nwb_sources)
 
-    logger.info(f"Discovering tables in {infer_schema_length or len(nwb_sources)} NWB files...")
+    logger.info(
+        f"Discovering tables in {infer_schema_length or len(nwb_sources)} NWB files..."
+    )
 
     # Find common table paths across all files using threadpool
     common_table_paths = _find_common_paths(
-        nwb_sources=nwb_sources[:infer_schema_length] if infer_schema_length else nwb_sources,
+        nwb_sources=(
+            nwb_sources[:infer_schema_length] if infer_schema_length else nwb_sources
+        ),
         min_file_count=min_file_count,
         disable_progress=disable_progress,
         include_arrays=True,  # Include arrays to be able to query them
@@ -240,14 +244,19 @@ def get_sql_context(
     )
     if not full_path:
         # Normalize paths to just the last part if full_path is False
-            common_table_paths = {
-                lazynwb.utils.normalize_internal_file_path(path) for path in common_table_paths
-            }
-            
+        common_table_paths = {
+            lazynwb.utils.normalize_internal_file_path(path)
+            for path in common_table_paths
+        }
+
     if table_names is not None:
         # Filter to only include specified table names
         norm_table_names = {
-            lazynwb.utils.normalize_internal_file_path(name) if full_path else name.split("/")[-1]
+            (
+                lazynwb.utils.normalize_internal_file_path(name)
+                if full_path
+                else name.split("/")[-1]
+            )
             for name in table_names
         }
         if not set(table_names).issubset(norm_table_names):
@@ -256,10 +265,14 @@ def get_sql_context(
                 f" ({full_path=} can be toggled to use just the last part of the path)"
             )
         common_table_paths = sorted(set(common_table_paths) & set(table_names))
-    
+
     sql_context = pl.SQLContext(**sqlcontext_kwargs)
     for table_path in sorted(common_table_paths):
-        table_name = lazynwb.utils.normalize_internal_file_path(table_path) if full_path else table_path.split("/")[-1]
+        table_name = (
+            lazynwb.utils.normalize_internal_file_path(table_path)
+            if full_path
+            else table_path.split("/")[-1]
+        )
 
         logger.info(f"Adding {table_path} as {table_name}")
 

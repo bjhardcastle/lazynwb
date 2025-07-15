@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.58...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.59...HEAD)</small>
+
+### Added
+
+- Add table filtering and schema inference length to sql_context ([8f1da15](https://github.com/bjhardcastle/lazynwb/commit/8f1da158411d350ef4175dedb1eb9ad887fd0356) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.59](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.59) - 2025-07-10
+
+<small>[Compare with v0.2.58](https://github.com/bjhardcastle/lazynwb/compare/v0.2.58...v0.2.59)</small>
 
 ### Added
 
@@ -18,7 +27,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Fix getting internal paths ([19263b7](https://github.com/bjhardcastle/lazynwb/commit/19263b77396f6a4733d0363d0bc15e046fbfb9d8) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.58](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.58) - 2025-06-26
 
 <small>[Compare with v0.2.57](https://github.com/bjhardcastle/lazynwb/compare/v0.2.57...v0.2.58)</small>
