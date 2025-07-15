@@ -152,14 +152,30 @@ def test_sql_context(nwb_fixture_name, request):
     ts_df = sql_context.execute("SELECT * FROM `processing/behavior/running_speed_with_timestamps` LIMIT 10", eager=True)
     assert not ts_df.is_empty(), "Timestamps table should not be empty"
     
+    # Check that table filtering works
+    sql_context = lazynwb.get_sql_context(
+            nwb_sources=nwb_path_or_paths,
+            full_path=False,
+            min_file_count=1,
+            exclude_array_columns=False,
+            ignore_errors=True,
+            disable_progress=False,
+            table_names=['units'],
+        )
+    assert sql_context.tables() == ["units"], "Only units table should be registered when using table_names filter"
+
+    # Check that inferred schema length works
+    sql_context = lazynwb.get_sql_context(
+        nwb_sources=nwb_path_or_paths,
+        full_path=False,
+        min_file_count=1,
+        exclude_array_columns=False,
+        ignore_errors=True,
+        disable_progress=False,
+        table_names=['units'],
+        infer_schema_length=1,
+    )
+    assert (actual := sql_context.execute("SELECT COUNT(DISTINCT _nwb_path) FROM units", eager=True).height) == 1, f"infer_schema_length should limit to one unique path, got {actual}"
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
-    # lazynwb.convert_nwb_tables(
-    #     (OVERRIDE_DIR.parent / "nwb_files").iterdir(),
-    #     output_dir=OVERRIDE_DIR,
-    #     output_format="parquet",
-    #     min_file_count=1,
-    #     disable_progress=False,
-    #     ignore_errors=False,
-    # )
+    pytest.main([__file__, "-v", '--pdb'])
