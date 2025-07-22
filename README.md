@@ -154,6 +154,3 @@ See instructions in https://github.com/bjhardcastle/lazynwb/CONTRIBUTING.md and 
 
 - hdf5 access seems to have a mutex lock that threads spend a long time waiting to
   acquire (with remfile)
-- seems to slow down over time in single-threaded loop
-    - on laptop, first 5 are fast (2-3 s per iteration) - successive iterations
-      are much slower (>60 s)
