@@ -205,6 +205,28 @@ def test_sql_context(local_hdf5_path):
     assert not result.is_empty(), "SQL query returned an empty result set"
     assert (result["start_time"] > 2.0).all(), "SQL query did not filter correctly"
     
+def test_empty_scan(local_hdf5_path):
+    """Ensure that filtering that returns no rows from a table doesn't break a query"""
+    empty_expr = pl.col('stop_time') > 99
+    trials = lazynwb.scan_nwb(
+        source=local_hdf5_path,
+        table_path="/intervals/trials",
+        disable_progress=True,
+    )
+    units = lazynwb.scan_nwb(
+        source=local_hdf5_path,
+        table_path="/units",
+        disable_progress=True,
+    )
+    assert trials.filter(empty_expr).collect().is_empty(), "This filtering should return an empty DataFrame for trials table"
+    assert not units.collect().is_empty(), "Units table should not be empty for this test"
+    lf = trials.filter(empty_expr).join(units, on=lazynwb.NWB_PATH_COLUMN_NAME, how="left")
+    assert lf.filter(empty_expr).collect().is_empty(), "Filtering should return an empty DataFrame"
+
+    lf = trials.join(units, on=lazynwb.NWB_PATH_COLUMN_NAME, how="left").filter(empty_expr)
+    assert lf.filter(empty_expr).collect().is_empty(), "Filtering should return an empty DataFrame, regardless of query order"
+    lf = units.join(trials, on=lazynwb.NWB_PATH_COLUMN_NAME, how="inner").filter(empty_expr)
+    assert lf.filter(empty_expr).collect().is_empty(), "Filtering should return an empty DataFrame, regardless of join method"
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
