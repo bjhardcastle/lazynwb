@@ -188,29 +188,29 @@ class FileAccessor:
                         f"cached instance for {cache_key} is not properly initialized, removing from cache"
                     )
                     del _accessor_cache[cache_key]
-
-                if instance._hdmf_backend == cls.HDMFBackend.ZARR:
-                    if (
-                        _is_open := getattr(instance._accessor.store, "_is_open", None)
-                    ) is not None:
-                        # zarr v3
-                        is_readable = _is_open
-                    else:
-                        # zarr v2
-                        is_readable = instance._accessor.store.is_readable()
-
-                elif instance._hdmf_backend == cls.HDMFBackend.HDF5:
-                    is_readable = bool(instance._accessor)
-                if is_readable:
-                    logger.debug(f"returning cached instance for {cache_key}")
-                    # mark to skip __init__ for cached instance
-                    instance._skip_init = True
                 else:
-                    instance._skip_init = False
-                    logger.debug(
-                        f"cached instance for {cache_key} is stale, will recreate"
-                    )
-                return instance
+                    if instance._hdmf_backend == cls.HDMFBackend.ZARR:
+                        if (
+                            _is_open := getattr(instance._accessor.store, "_is_open", None)
+                        ) is not None:
+                            # zarr v3
+                            is_readable = _is_open
+                        else:
+                            # zarr v2
+                            is_readable = instance._accessor.store.is_readable()
+
+                    elif instance._hdmf_backend == cls.HDMFBackend.HDF5:
+                        is_readable = bool(instance._accessor)
+                    if is_readable:
+                        logger.debug(f"returning cached instance for {cache_key}")
+                        # mark to skip __init__ for cached instance
+                        instance._skip_init = True
+                    else:
+                        instance._skip_init = False
+                        logger.debug(
+                            f"cached instance for {cache_key} is stale, will recreate"
+                        )
+                    return instance
 
             # create new instance and cache
             logger.debug(f"creating new instance for {cache_key}")
