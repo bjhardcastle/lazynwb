@@ -250,6 +250,11 @@ class FileAccessor:
         global _accessor_cache
         logger.debug("Closing all accessors in FileAccessor cache")
         for accessor in _accessor_cache.values():
+            if "_accessor" not in accessor.__dict__:
+                logger.debug(
+                    f"FileAccessor {accessor} has no _accessor attribute, skipping close"
+                )
+                continue
             if accessor._hdmf_backend == cls.HDMFBackend.HDF5:
                 accessor._accessor.close()
             elif accessor._hdmf_backend == cls.HDMFBackend.ZARR:
