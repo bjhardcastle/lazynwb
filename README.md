@@ -39,10 +39,10 @@ It also supports reading multiple NWB files in one operation, producing a
 concatenated table:
 
 ```python
-import lazynwb
-import polars as pl
+>>> import lazynwb
+>>> import polars as pl
 
-(
+>>> (
   lazynwb.scan_nwb(
     [nwb_path_0, nwb_path_1, ...],  # single path or iterable
     table_path='/units',             # or '/intervals/trials' etc
@@ -57,7 +57,7 @@ import polars as pl
   .select('unit_id', 'location', 'spike_times', '_nwb_path', '_table_row_index')
   # _nwb_path and _table_row_index are not columns in the NWB table: they're added to identify source of each row in a table that spans multiple NWBs
 )
->>> shape: (101, 4)
+shape: (101, 4)
 ┌─────────┬─────────────────────────────────┬─────────────────────────────────┬──────────────┐
 │ unit_id ┆ spike_times                     ┆ _nwb_path                       ┆ _table_index │
 │ ---     ┆ ---                             ┆ ---                             ┆ ---          │
@@ -79,8 +79,7 @@ import polars as pl
 
 ## 2. Quickly provide a summary of the metadata for all NWB files in a project
 ```python
-lazynwb.get_metadata_df(nwb_paths, as_polars=True)
->>>
+>>> lazynwb.get_metadata_df(nwb_paths, as_polars=True)
 ```Getting metadata: 100%|█████████████████████| 252/252 [00:17<00:00, 14.51file/s]
 shape: (252, 28)
 ┌────────────┬────────────┬───────────┬───────────┬───┬────────┬───────────┬───────────┬───────────┐
@@ -116,8 +115,8 @@ shape: (252, 28)
 
 ## 3. Quickly provide a summary of the contents of a single NWB file
 ```python
-lazynwb.get_internal_paths(nwb_paths[0])
->>> {
+>>> lazynwb.get_internal_paths(nwb_paths[0])
+{
   '/acquisition/frametimes_eye_camera/timestamps': <HDF5 dataset "timestamps": shape (267399,), type "<f8">,
   '/acquisition/frametimes_front_camera/timestamps': <HDF5 dataset "timestamps": shape (267204,), type "<f8">,
   '/acquisition/frametimes_side_camera/timestamps': <HDF5 dataset "timestamps": shape (267374,), type "<f8">,
@@ -144,7 +143,12 @@ lazynwb.get_internal_paths(nwb_paths[0])
   '/processing/behavior/running_speed/timestamps': <HDF5 dataset "timestamps": shape (251998,), type "<f8">
  }
 ```
-
+## 4. Get the common schema for a table in one or more NWB files
+```python
+>>> lazynwb.get_table_schema(nwb_paths, table_path="/intervals/trials")
+# uses polars (arrow) datatypes
+OrderedDict([('condition', String), ('id', Int64), ('start_time', Float64), ('stop_time', Float64), ('_nwb_path', String), ('_table_path', String), ('_table_index', UInt32)])
+```
 ---
 
 # Development
