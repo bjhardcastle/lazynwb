@@ -355,7 +355,7 @@ def _find_common_paths(
                     all_table_paths.extend(
                         [
                             k
-                            for k in ['/general', '/general/subject']
+                            for k in ["/general", "/general/subject"]
                             if k in internal_paths
                         ]
                     )

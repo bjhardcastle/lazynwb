@@ -8,13 +8,27 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.60...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.61...HEAD)</small>
+
+### Added
+
+- Add test for joining empty table ([fde523c](https://github.com/bjhardcastle/lazynwb/commit/fde523c10701e9cfcb0455194dc8dcb72715a52f) by bjhardcastle).
+- Add metadata tables to sql_context ([b9ffca8](https://github.com/bjhardcastle/lazynwb/commit/b9ffca8bfc1970653da1ca4bfad2550a5e6b3950) by bjhardcastle).
+
+### Fixed
+
+- Fix accessor ([7ed4176](https://github.com/bjhardcastle/lazynwb/commit/7ed41766e0d433e6bc6d3f78a9d70fa9535f744c) by bjhardcastle).
+- Fix deletion from accessor cache ([7420e84](https://github.com/bjhardcastle/lazynwb/commit/7420e846d44c0559c4e7f0a42ae2bf42cd98d459) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.61](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.61) - 2025-07-22
+
+<small>[Compare with v0.2.60](https://github.com/bjhardcastle/lazynwb/compare/v0.2.60...v0.2.61)</small>
 
 ### Added
 
 - Add example of getting schema ([57cbabe](https://github.com/bjhardcastle/lazynwb/commit/57cbabe57920514e9415b313f3e88f3d6cc5576a) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.60](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.60) - 2025-07-15
 
 <small>[Compare with v0.2.59](https://github.com/bjhardcastle/lazynwb/compare/v0.2.59...v0.2.60)</small>

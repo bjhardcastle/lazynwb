@@ -191,7 +191,9 @@ class FileAccessor:
                 else:
                     if instance._hdmf_backend == cls.HDMFBackend.ZARR:
                         if (
-                            _is_open := getattr(instance._accessor.store, "_is_open", None)
+                            _is_open := getattr(
+                                instance._accessor.store, "_is_open", None
+                            )
                         ) is not None:
                             # zarr v3
                             is_readable = _is_open
