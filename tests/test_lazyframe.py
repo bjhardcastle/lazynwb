@@ -8,7 +8,7 @@ import lazynwb
 import lazynwb.tables
 
 def test_polars_dtype_inference(local_hdf5_path):
-    schema = lazynwb.tables._get_table_schema(
+    schema = lazynwb.tables.get_table_schema(
         local_hdf5_path,
         table_path='units',
     )

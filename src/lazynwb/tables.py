@@ -840,7 +840,7 @@ def _get_table_schema_helper(
         return file_schema
 
 
-def _get_table_schema(
+def get_table_schema(
     file_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
     table_path: str,
     first_n_files_to_infer_schema: int | None = None,

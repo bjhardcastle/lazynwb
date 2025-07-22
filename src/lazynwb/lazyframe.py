@@ -73,7 +73,7 @@ def scan_nwb(
     source = tuple(source)  # type: ignore[arg-type]
 
     if not schema:
-        schema = lazynwb.tables._get_table_schema(
+        schema = lazynwb.tables.get_table_schema(
             file_paths=source,
             table_path=table_path,
             first_n_files_to_infer_schema=infer_schema_length,
