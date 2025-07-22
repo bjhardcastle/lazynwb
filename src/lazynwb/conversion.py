@@ -233,6 +233,7 @@ def get_sql_context(
         min_file_count=min_file_count,
         disable_progress=disable_progress,
         include_arrays=True,  # Include arrays to be able to query them
+        include_metadata=True,
     )
 
     if not common_table_paths:
@@ -296,6 +297,7 @@ def _find_common_paths(
     min_file_count: int,
     disable_progress: bool,
     include_arrays: bool = False,
+    include_metadata: bool = True,
 ) -> set[str]:
     """Find table paths that appear in at least min_file_count files."""
 
@@ -308,7 +310,7 @@ def _find_common_paths(
                 nwb_path=nwb_path,
                 include_arrays=include_arrays,  # We only want table-like structures
                 include_table_columns=False,
-                include_metadata=False,
+                include_metadata=True,
                 include_specifications=False,
                 parents=True,  # Include table groups themselves
             )
@@ -348,7 +350,15 @@ def _find_common_paths(
                     )
                     all_table_paths.extend(array_paths)
                     logger.debug(f"Found {len(array_paths)} array paths in {nwb_path}")
-
+                if include_metadata:
+                    # Include metadata paths as well
+                    all_table_paths.extend(
+                        [
+                            k
+                            for k in ['/general', '/general/subject']
+                            if k in internal_paths
+                        ]
+                    )
     # Count occurrences and filter by min_file_count
     path_counts = Counter(all_table_paths)
     common_paths = {

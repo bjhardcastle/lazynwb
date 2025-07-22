@@ -140,6 +140,8 @@ def test_sql_context(nwb_fixture_name, request):
         "intervals/epochs",
         "units",
         "processing/behavior/running_speed_with_timestamps", # rate not currently supported 
+        "general",
+        "general/subject",
     ]
     tables = sql_context.tables()
     for table in expected_tables:
