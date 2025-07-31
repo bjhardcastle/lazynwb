@@ -3,19 +3,18 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Iterator
 
-import npc_io
 import polars as pl
 import polars._typing
 import polars.io.plugins
 
-import lazynwb.file_io
 import lazynwb.tables
+import lazynwb.types_
 
 logger = logging.getLogger(__name__)
 
 
 def scan_nwb(
-    source: npc_io.PathLike | Iterable[npc_io.PathLike],
+    source: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     table_path: str,
     raise_on_missing: bool = False,
     ignore_errors: bool = False,
@@ -229,7 +228,7 @@ def scan_nwb(
 
 
 def read_nwb(
-    source: npc_io.PathLike | Iterable[npc_io.PathLike],
+    source: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     table_path: str,
     raise_on_missing: bool = False,
     ignore_errors: bool = False,

@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import importlib.metadata
 import logging
+import os
+import pathlib
 import threading
 from collections.abc import Iterable
 from typing import Any
 
 import h5py
-import npc_io
 import pydantic
 import remfile
 import upath
 import zarr
 
+import lazynwb.types_
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
@@ -49,14 +52,14 @@ def clear_cache() -> None:
         FileAccessor._clear_cache()
 
 
-def _get_accessor(path: npc_io.PathLike) -> FileAccessor:
+def _get_accessor(path: lazynwb.types_.PathLike) -> FileAccessor:
     if isinstance(path, Iterable) and not isinstance(path, str):
         raise ValueError(f"Expected a single path, but received an iterable: {path!r}")
     return FileAccessor(path)
 
 
 def _get_accessors(
-    paths: npc_io.PathLike | Iterable[npc_io.PathLike],
+    paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
 ) -> tuple[FileAccessor, ...]:
     if not isinstance(paths, Iterable) or isinstance(paths, str):
         paths = [paths]  # ensure we have an iterable of paths
@@ -73,11 +76,11 @@ def _s3_to_http(url: str) -> str:
         return url
 
 
-def _open_file(path: npc_io.PathLike) -> h5py.File | zarr.Group:
+def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     """
     open raw HDF5 or Zarr backend using global config
     """
-    p = npc_io.from_pathlike(path)
+    p = from_pathlike(path)
     u = upath.UPath(p, **config.fsspec_storage_options)
     key = u.as_posix()
     is_zarr = "zarr" in key
@@ -118,15 +121,15 @@ class FileAccessor:
     - file accessor remains open in read-only mode unless used as a context manager
 
     Examples:
-        >>> file = LazyFile('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/00865745-db58-495d-9c5e-e28424bb4b97/nwb/ecephys_721536_2024-05-16_12-32-31_experiment1_recording1.nwb')
+        >>> file = FileAccessor('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/00865745-db58-495d-9c5e-e28424bb4b97/nwb/ecephys_721536_2024-05-16_12-32-31_experiment1_recording1.nwb')
         >>> file.units
         <zarr.hierarchy.Group '/units' read-only>
         >>> file['units']
         <zarr.hierarchy.Group '/units' read-only>
         >>> file['units/spike_times']
-        <zarr.core.Array '/units/spike_times' (18185563,) float64 read-only>
-        >>> file['units/spike_times/index'][0]
-        6966
+        <zarr.core.Array '/units/spike_times' (3558797,) float64 read-only>
+        >>> file['units/spike_times_index'][0]
+        np.uint32(8895)
         >>> 'spike_times' in file['units']
         True
         >>> next(iter(file))
@@ -149,7 +152,7 @@ class FileAccessor:
 
     def __new__(
         cls,
-        path: npc_io.PathLike,
+        path: lazynwb.types_.PathLike,
     ) -> FileAccessor:
         """
         Reuse existing FileAccessor for the same path if present in cache.
@@ -174,7 +177,7 @@ class FileAccessor:
         elif hasattr(path, "as_posix"):
             cache_key = path.as_posix()
         else:
-            cache_key = npc_io.from_pathlike(
+            cache_key = from_pathlike(
                 path, **config.fsspec_storage_options
             ).as_posix()
 
@@ -222,7 +225,7 @@ class FileAccessor:
 
     def __init__(
         self,
-        path: npc_io.PathLike,
+        path: lazynwb.types_.PathLike,
     ) -> None:
         # skip init if returned from cache
         if self.__dict__.get(
@@ -230,7 +233,7 @@ class FileAccessor:
         ):  # don't check attr directly: __getattr__ is overloaded
             logger.debug("skipping init for cached instance")
             return None
-        self._path = npc_io.from_pathlike(path)
+        self._path = from_pathlike(path)
         logger.debug(f"opening file {self._path}")
         self._accessor = _open_file(self._path)
         self._hdmf_backend = self.get_hdmf_backend()
@@ -334,7 +337,7 @@ class FileAccessor:
 
 
 def get_internal_paths(
-    nwb_path: npc_io.PathLike,
+    nwb_path: lazynwb.types_.PathLike,
     include_arrays: bool = True,
     include_table_columns: bool = False,
     include_metadata: bool = False,
@@ -446,7 +449,50 @@ def _traverse_internal_paths(
     return results
 
 
-if __name__ == "__main__":
-    from npc_io import testmod
+def from_pathlike(pathlike: lazynwb.types_.PathLike, **fsspec_storage_options: Any) -> upath.UPath:
+    """Return a UPath object from a pathlike object, with optional fsspec storage
+    options.
 
-    testmod()
+    - if pathlike is already a UPath, it is returned as-is
+    - if pathlike is an S3 path, the `cache_type` is set to 'first' for HDF5 files
+      for faster opening
+
+    >>> from_pathlike('s3://aind-data-bucket/experiment2_Record Node 102#probeA.png')
+    S3Path('s3://aind-data-bucket/experiment2_Record Node 102#probeA.png')
+
+    >>> from_pathlike('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/4797cab2-9ea2-4747-8d15-5ba064837c1c/postprocessed/experiment1_Record Node 102#Neuropix-PXI-100.ProbeA-AP_recording1/template_metrics/params.json')
+    S3Path('s3://codeocean-s3datasetsbucket-1u41qdg42ur9/4797cab2-9ea2-4747-8d15-5ba064837c1c/postprocessed/experiment1_Record Node 102#Neuropix-PXI-100.ProbeA-AP_recording1/template_metrics/params.json')
+    """
+    if isinstance(pathlike, upath.UPath):
+        return pathlike
+    path: str = os.fsdecode(pathlike)
+    if importlib.metadata.version("universal-pathlib") < "0.2.0":
+        # UPath will do rsplit('#')[0] on path
+        if "#" in (p := pathlib.Path(path)).name:
+            return upath.UPath(path, **fsspec_storage_options).with_name(p.name)
+        if "#" in p.parent.as_posix():
+            if p.parent.as_posix().count("#") > 1:
+                raise ValueError(
+                    f"Path {p} contains multiple '#' in a parent dirs, which we don't have a fix for yet"
+                )
+            for parent in p.parents:
+                if "#" in parent.name:
+                    # we can't create or join the problematic `#`, so we have to 'discover' it
+                    new = upath.UPath(path, **fsspec_storage_options).with_name(parent.name)
+                    for part in p.relative_to(parent).parts:
+                        result = next(
+                            new.glob(part),
+                            None,
+                        )  # we can't create or join the problem-#, so we have to 'discover' it
+                        if result is None:
+                            raise FileNotFoundError(
+                                f"In attempting to handle a path containing '#', we couldn't find {path}"
+                            )
+                        new = result
+                    return new
+    return upath.UPath(path, **fsspec_storage_options)
+
+if __name__ == "__main__":
+    import doctest
+    
+    doctest.testmod(optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS)

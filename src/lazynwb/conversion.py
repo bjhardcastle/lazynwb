@@ -9,12 +9,12 @@ from collections import Counter
 from collections.abc import Iterable
 from typing import Any, Literal
 
-import npc_io
 import polars as pl
 import tqdm
 
 import lazynwb.file_io
 import lazynwb.lazyframe
+import lazynwb.types_
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ OutputFormat = Literal[
 
 
 def convert_nwb_tables(
-    nwb_sources: npc_io.PathLike | Iterable[npc_io.PathLike],
+    nwb_sources: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     output_dir: pathlib.Path | str,
     *,
     output_format: OutputFormat = "parquet",
@@ -203,7 +203,7 @@ def convert_nwb_tables(
 
 
 def get_sql_context(
-    nwb_sources: npc_io.PathLike | Iterable[npc_io.PathLike],
+    nwb_sources: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     *,
     full_path: bool = False,
     min_file_count: int = 1,
@@ -300,7 +300,7 @@ def get_sql_context(
 
 
 def _find_common_paths(
-    nwb_sources: tuple[npc_io.PathLike, ...],
+    nwb_sources: tuple[lazynwb.types_.PathLike, ...],
     min_file_count: int,
     disable_progress: bool,
     include_arrays: bool = False,

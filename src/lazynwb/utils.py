@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-import multiprocessing
 import os
 
 logger = logging.getLogger(__name__)
@@ -49,6 +48,6 @@ def normalize_internal_file_path(path: str) -> str:
 
 
 if __name__ == "__main__":
-    from npc_io import testmod
-
-    testmod()
+    import doctest
+    
+    doctest.testmod(optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS)

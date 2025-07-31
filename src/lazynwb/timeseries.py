@@ -7,12 +7,12 @@ import typing
 from typing import Literal
 
 import h5py
-import npc_io
 import numpy as np
 import zarr
 
 import lazynwb.exceptions
 import lazynwb.file_io
+import lazynwb.types_
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class TimeSeries:
-    _file_path: npc_io.PathLike
+    _file_path: lazynwb.types_.PathLike
     _table_path: str
 
     @property
@@ -115,7 +115,7 @@ class TimeSeries:
 
 @typing.overload
 def get_timeseries(
-    nwb_path: npc_io.PathLike,
+    nwb_path: lazynwb.types_.PathLike,
     search_term: str | None = None,
     exact_path: bool = False,
     match_all: Literal[True] = True,
@@ -124,7 +124,7 @@ def get_timeseries(
 
 @typing.overload
 def get_timeseries(
-    nwb_path: npc_io.PathLike,
+    nwb_path: lazynwb.types_.PathLike,
     search_term: str | None = None,
     exact_path: bool = False,
     match_all: Literal[False] = False,
@@ -132,7 +132,7 @@ def get_timeseries(
 
 
 def get_timeseries(
-    nwb_path: npc_io.PathLike,
+    nwb_path: lazynwb.types_.PathLike,
     search_term: str | None = None,
     exact_path: bool = False,
     match_all: bool = False,
@@ -210,6 +210,6 @@ def get_timeseries(
 
 
 if __name__ == "__main__":
-    from npc_io import testmod
-
-    testmod()
+    import doctest
+    
+    doctest.testmod(optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS)

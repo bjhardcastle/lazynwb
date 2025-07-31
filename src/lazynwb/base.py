@@ -9,7 +9,6 @@ import typing
 from collections.abc import Iterable
 from typing import Any, Literal, Protocol
 
-import npc_io
 import pandas as pd
 import polars as pl
 import tqdm
@@ -18,6 +17,7 @@ import upath
 import lazynwb.file_io
 import lazynwb.tables
 import lazynwb.timeseries
+import lazynwb.types_
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
@@ -70,9 +70,9 @@ class LazyNWB:
 
     def __init__(
         self,
-        path: npc_io.PathLike,
+        path: lazynwb.types_.PathLike,
     ) -> None:
-        self._file_path = npc_io.from_pathlike(path)
+        self._file_path = lazynwb.file_io.from_pathlike(path)
 
     @property
     def _file(self) -> lazynwb.file_io.FileAccessor:
@@ -318,9 +318,9 @@ class Subject:
 
     def __init__(
         self,
-        path: npc_io.PathLike,
+        path: lazynwb.types_.PathLike,
     ) -> None:
-        self._file_path = npc_io.from_pathlike(path)
+        self._file_path = lazynwb.file_io.from_pathlike(path)
 
     @property
     def _file(self) -> lazynwb.file_io.FileAccessor:
@@ -386,7 +386,7 @@ class Subject:
 
 @typing.overload
 def get_metadata_df(
-    nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
+    nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
     as_polars: Literal[False] = False,
 ) -> pd.DataFrame: ...
@@ -394,14 +394,14 @@ def get_metadata_df(
 
 @typing.overload
 def get_metadata_df(
-    nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
+    nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
     as_polars: Literal[True] = True,
 ) -> pl.DataFrame: ...
 
 
 def get_metadata_df(
-    nwb_path_or_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
+    nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
     as_polars: bool = False,
 ) -> pd.DataFrame:
@@ -412,7 +412,7 @@ def get_metadata_df(
     else:
         paths = tuple(nwb_path_or_paths)
 
-    def _get_metadata_df_helper(nwb_path: npc_io.PathLike) -> dict[str, Any]:
+    def _get_metadata_df_helper(nwb_path: lazynwb.types_.PathLike) -> dict[str, Any]:
         nwb = LazyNWB(nwb_path)
         return {
             **nwb._to_dict(),
@@ -451,6 +451,6 @@ def get_metadata_df(
 
 
 if __name__ == "__main__":
-    from npc_io import testmod
-
-    testmod()
+    import doctest
+    
+    doctest.testmod(optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS)

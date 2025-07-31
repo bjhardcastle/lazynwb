@@ -10,7 +10,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, TypeVar
 
 import h5py
-import npc_io
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -22,6 +21,7 @@ import zarr
 
 import lazynwb.exceptions
 import lazynwb.file_io
+import lazynwb.types_
 import lazynwb.utils
 
 pd.options.mode.copy_on_write = True
@@ -46,7 +46,7 @@ UNITS_TABLE_INDEX_COLUMN_NAME = "_units" + TABLE_INDEX_COLUMN_NAME
 
 @typing.overload
 def get_df(
-    nwb_data_sources: str | npc_io.PathLike | Iterable[str | npc_io.PathLike],
+    nwb_data_sources: str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike],
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -65,7 +65,7 @@ def get_df(
 
 @typing.overload
 def get_df(
-    nwb_data_sources: npc_io.PathLike | Iterable[npc_io.PathLike],
+    nwb_data_sources: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -83,7 +83,7 @@ def get_df(
 
 
 def get_df(
-    nwb_data_sources: str | npc_io.PathLike | Iterable[str | npc_io.PathLike],
+    nwb_data_sources: str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike],
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -175,7 +175,7 @@ def get_df(
                     include_column_names=include_column_names,
                     exclude_array_columns=exclude_array_columns,
                     table_row_indices=nwb_path_to_row_indices.get(
-                        npc_io.from_pathlike(path).as_posix()
+                        lazynwb.file_io.from_pathlike(path).as_posix()
                     ),
                     low_memory=low_memory,
                     as_polars=as_polars,
@@ -204,7 +204,7 @@ def get_df(
                 include_column_names=include_column_names,
                 exclude_array_columns=exclude_array_columns,
                 table_row_indices=nwb_path_to_row_indices.get(
-                    npc_io.from_pathlike(path).as_posix()
+                    lazynwb.file_io.from_pathlike(path).as_posix()
                 ),
                 low_memory=low_memory,
                 as_polars=as_polars,
@@ -227,7 +227,7 @@ def get_df(
                     raise
                 else:
                     logger.warning(
-                        f"Table {search_term!r} not found in {npc_io.from_pathlike(future_to_path[future]).as_posix()}"
+                        f"Table {search_term!r} not found in {lazynwb.file_io.from_pathlike(future_to_path[future]).as_posix()}"
                     )
                     continue
             except Exception:
@@ -235,7 +235,7 @@ def get_df(
                     raise
                 else:
                     logger.exception(
-                        f"Error getting DataFrame for {npc_io.from_pathlike(future_to_path[future]).as_posix()}:"
+                        f"Error getting DataFrame for {lazynwb.file_io.from_pathlike(future_to_path[future]).as_posix()}:"
                     )
                     continue
     if not as_polars:
@@ -259,7 +259,7 @@ def _is_timeseries_with_rate(group_keys: Iterable[str]) -> bool:
 
 
 def _get_table_data(
-    path: npc_io.PathLike,
+    path: lazynwb.types_.PathLike,
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -587,7 +587,7 @@ def _get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
 
 
 def _array_column_helper(
-    nwb_path: npc_io.PathLike,
+    nwb_path: lazynwb.types_.PathLike,
     table_path: str,
     column_name: str,
     table_row_indices: Sequence[int],
@@ -704,7 +704,7 @@ def merge_array_column(
         except lazynwb.exceptions.ColumnError as exc:
             if not missing_ok:
                 logger.error(
-                    f"error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
+                    f"error getting indexed column data for {lazynwb.file_io.from_pathlike(future_to_path[future])}:"
                 )
                 raise
             if not missing_column_already_warned:
@@ -715,7 +715,7 @@ def merge_array_column(
             continue
         except:
             logger.error(
-                f"error getting indexed column data for {npc_io.from_pathlike(future_to_path[future])}:"
+                f"error getting indexed column data for {lazynwb.file_io.from_pathlike(future_to_path[future])}:"
             )
             raise
     if not column_data:
@@ -736,7 +736,7 @@ def merge_array_column(
 
 
 def _get_table_column_accessors(
-    file_path: npc_io.PathLike,
+    file_path: lazynwb.types_.PathLike,
     table_path: str,
     use_thread_pool: bool = False,
 ) -> dict[str, zarr.Array | h5py.Dataset]:
@@ -812,7 +812,7 @@ def _get_polars_dtype(
 
 
 def _get_table_length(
-    file_path: npc_io.PathLike,
+    file_path: lazynwb.types_.PathLike,
     table_path: str,
 ) -> int:
     for _, column in _get_table_column_accessors(file_path, table_path).items():
@@ -833,7 +833,7 @@ def _get_path_to_row_indices(df: pl.DataFrame) -> dict[str, list[int]]:
 
 
 def _get_table_schema_helper(
-    file_path: npc_io.PathLike, table_path: str, raise_on_missing: bool
+    file_path: lazynwb.types_.PathLike, table_path: str, raise_on_missing: bool
 ) -> dict[str, Any] | None:
     try:
         column_accessors = _get_table_column_accessors(file_path, table_path)
@@ -879,7 +879,7 @@ def _get_table_schema_helper(
 
 
 def get_table_schema(
-    file_paths: npc_io.PathLike | Iterable[npc_io.PathLike],
+    file_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     table_path: str,
     first_n_files_to_infer_schema: int | None = None,
     exclude_array_columns: bool = False,
@@ -1224,7 +1224,7 @@ def get_spike_times_in_intervals(
         intervals_df_row_indices = None  # all rows will be used when table fetched from NWB, but `filter` can be applied
 
     def _get_intervals_table_path(
-        nwb_path: npc_io.PathLike,
+        nwb_path: lazynwb.types_.PathLike,
         intervals_df: str | FrameType,
     ) -> str:
         if isinstance(intervals_df, str):
@@ -1291,7 +1291,7 @@ def get_spike_times_in_intervals(
                 result = future.result()
             except Exception as exc:
                 logger.error(
-                    f"error getting spike times for {npc_io.from_pathlike(future_to_nwb_path[future])}: {exc!r}"
+                    f"error getting spike times for {lazynwb.file_io.from_pathlike(future_to_nwb_path[future])}: {exc!r}"
                 )
             else:
                 results.append(result)
@@ -1322,6 +1322,7 @@ def get_spike_times_in_intervals(
 
 
 if __name__ == "__main__":
-    from npc_io import testmod
+    import doctest
+    
+    doctest.testmod(optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS)
 
-    testmod()
