@@ -69,6 +69,10 @@ def test_shortcuts(local_hdf5_path, table_shortcut: str):
     assert not df.is_empty(), f"DataFrame fetched with {table_shortcut=} should not be empty"
     assert df['_table_path'].first() == expected_path, f"Table path should be full path, not {table_shortcut=}"
 
+def test_general(local_hdf5_path):
+    df = lazynwb.get_df(local_hdf5_path, "/general", as_polars=True)
+    assert not df.is_empty(), f"'general' table should provide metadata from /general and top-level of file"
+    assert 'session_start_time' in df.columns, f"'general' table should provide metadata from /general and top-level of file"
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

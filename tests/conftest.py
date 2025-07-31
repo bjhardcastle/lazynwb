@@ -173,6 +173,9 @@ def local_hdf5_paths():
             identifier=str(uuid.uuid4()),
             session_start_time=datetime.now(tz=timezone.utc),
             keywords=["test", "experiment", "lazynwb"],
+            experimenter=["User A", "User B"],
+            institution="Test Institution",
+            file_create_date=datetime.now(tz=timezone.utc),
         )
         # Populate the NWBFile with content using the helper function
         nwbfile_obj = _add_nwb_file_content(

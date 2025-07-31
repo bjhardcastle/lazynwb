@@ -738,6 +738,18 @@ def _get_table_column_accessors(
     else:
         for column_name in table:
             names_to_columns[column_name] = table.get(column_name)
+    if lazynwb.utils.normalize_internal_file_path(table_path) == 'general':
+        # add metadata that lives at top-level of file
+        root = lazynwb.file_io._get_accessor(file_path)
+        for p in (
+            'session_start_time',
+            'session_description',
+            'identifier',
+            'timestamps_reference_time',
+            'file_create_date',
+        ):
+            names_to_columns[p] = root.get(p)
+
     logger.debug(
         f"retrieved {len(names_to_columns)} column accessors from {file_path!r}/{table_path} in {time.time() - t0:.2f} s ({use_thread_pool=})"
     )
