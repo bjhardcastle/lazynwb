@@ -228,6 +228,16 @@ def test_empty_scan(local_hdf5_path):
     lf = units.join(trials, on=lazynwb.NWB_PATH_COLUMN_NAME, how="inner").filter(empty_expr)
     assert lf.filter(empty_expr).collect().is_empty(), "Filtering should return an empty DataFrame, regardless of join method"
 
+def test_timeseries_with_rate(local_hdf5_path):
+    # without timestamps, the default TimeSeries object has two keys: 'data' and
+    # 'starting_time' which is another Group.
+    # get_df() interprets them as 'data': List[float], 'starting_time': float
+    # it needs to be aware of this possibility and generate a timestamps column
+    lf = lazynwb.scan_nwb(local_hdf5_path, "processing/behavior/running_speed_with_rate")
+    schema = lf.collect_schema()
+    assert 'timestamps' in schema, f"'trials' table should provide a 'timestamps' column"
+    assert 'timestamps' in lf.collect().columns, f"'trials' table should provide a 'timestamps' column"
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     pytest.main([__file__])
