@@ -249,12 +249,14 @@ def get_df(
     )
     return df
 
+
 def _is_timeseries_with_rate(group_keys: Iterable[str]) -> bool:
     return (
-        'data' in group_keys
-        and 'starting_time' in group_keys
-        and 'timestamps' not in group_keys
+        "data" in group_keys
+        and "starting_time" in group_keys
+        and "timestamps" not in group_keys
     )
+
 
 def _get_table_data(
     path: npc_io.PathLike,
@@ -382,8 +384,9 @@ def _get_table_data(
             multi_dim_column_names.append(column_name)
             continue
 
-
-        if column_name == 'starting_time' and  _is_timeseries_with_rate(non_indexed_column_names):
+        if column_name == "starting_time" and _is_timeseries_with_rate(
+            non_indexed_column_names
+        ):
             # without timestamps, the default TimeSeries object has two keys: 'data' and
             # 'starting_time' which is another Group.
             # we need to generate a timestamps column to make it usable:
@@ -863,11 +866,11 @@ def _get_table_schema_helper(
             if not hasattr(dataset, "dtype"):
                 # e.g. Group in h5py or zarr
                 continue
-            if name == 'starting_time' and _is_timeseries_with_rate(
+            if name == "starting_time" and _is_timeseries_with_rate(
                 column_accessors.keys()
             ):
                 # this is a TimeSeries object with start/rate: we'll generate timestamps
-                file_schema['timestamps'] = pl.List(pl.Float64)
+                file_schema["timestamps"] = pl.List(pl.Float64)
                 continue
             file_schema[name] = _get_polars_dtype(
                 dataset, name, column_accessors.keys(), is_metadata=is_metadata

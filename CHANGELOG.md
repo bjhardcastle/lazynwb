@@ -8,14 +8,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.62...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.63...HEAD)</small>
+
+<!-- insertion marker -->
+## [v0.2.63](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.63) - 2025-07-31
+
+<small>[Compare with v0.2.62](https://github.com/bjhardcastle/lazynwb/compare/v0.2.62...v0.2.63)</small>
 
 ### Added
 
 - Add top-level metadata to 'general' table ([fe05b72](https://github.com/bjhardcastle/lazynwb/commit/fe05b72252a958b8aae6056990ed6fc989df2528) by bjhardcastle).
 - Add shortcuts to tables ([b41dcf4](https://github.com/bjhardcastle/lazynwb/commit/b41dcf455c9cd531a9cf8ece654ce3b96273ae29) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.62](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.62) - 2025-07-22
 
 <small>[Compare with v0.2.61](https://github.com/bjhardcastle/lazynwb/compare/v0.2.61...v0.2.62)</small>
