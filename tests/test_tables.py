@@ -61,7 +61,15 @@ def test_contents(local_hdf5_path, table_name):
         check_like=True,
     )
 
+@pytest.mark.parametrize("table_shortcut", ['trials', 'epochs', 'session'])
+def test_shortcuts(local_hdf5_path, table_shortcut: str):
+    """Test that table shortcuts work as expected."""
+    expected_path = lazynwb.TABLE_SHORTCUTS[table_shortcut]
+    df = lazynwb.get_df(local_hdf5_path, table_shortcut, as_polars=True)
+    assert not df.is_empty(), f"DataFrame fetched with {table_shortcut=} should not be empty"
+    assert df['_table_path'].first() == expected_path, f"Table path should be full path, not {table_shortcut=}"
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    pytest.main([__file__, '--pdb'])
+    pytest.main([__file__])

@@ -156,15 +156,12 @@ def get_df(
             )
 
     # speedup known table locations:
-    if search_term == "trials":
-        search_term = "/intervals/trials"
+    if search_term in lazynwb.utils.TABLE_SHORTCUTS:
+        search_term = lazynwb.utils.TABLE_SHORTCUTS[search_term]
         exact_path = True
 
     if nwb_path_to_row_indices is None:
         nwb_path_to_row_indices = {}
-
-    def _get_path(file) -> str:
-        return npc_io.from_pathlike(file).as_posix()
 
     results: list[dict] = []
     if not parallel or len(paths) == 1:  # don't use a pool for a single file

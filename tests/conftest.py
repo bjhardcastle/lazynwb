@@ -18,7 +18,7 @@ from pynwb.misc import Units  # Uncommented: Ensure Units is imported
 
 import lazynwb
 
-RESET_FILES = False
+RESET_FILES = True  
 CLEANUP_FILES = False
 OVERRIDE_DIR: None | pathlib.Path = (
     None if CLEANUP_FILES else pathlib.Path(__file__).parent / "files" / "nwb_files"
@@ -172,6 +172,7 @@ def local_hdf5_paths():
             session_description=f"Test hdf5 NWB file {i}",
             identifier=str(uuid.uuid4()),
             session_start_time=datetime.now(tz=timezone.utc),
+            keywords=["test", "experiment", "lazynwb"],
         )
         # Populate the NWBFile with content using the helper function
         nwbfile_obj = _add_nwb_file_content(

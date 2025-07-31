@@ -7,6 +7,15 @@ import os
 
 logger = logging.getLogger(__name__)
 
+TABLE_SHORTCUTS = {
+    "trials": "intervals/trials",
+    "epochs": "intervals/epochs",
+    "electrodes": "general/extracellular_ephys/electrodes",
+    "optophysiology": "general/optophysiology",
+    "session": "general",
+}
+    
+
 thread_pool_executor: concurrent.futures.ThreadPoolExecutor | None = None
 process_pool_executor: concurrent.futures.ProcessPoolExecutor | None = None
 
@@ -35,8 +44,8 @@ def normalize_internal_file_path(path: str) -> str:
 
     - remove leading '/' if present
     """
-    return path.removeprefix("/") or "/"  # ensure at least root path is returned
-
+    path = path.removeprefix("/") or "/"  # ensure at least root path is returned
+    return TABLE_SHORTCUTS.get(path, path)
 
 if __name__ == "__main__":
     from npc_io import testmod

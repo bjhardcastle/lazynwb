@@ -212,6 +212,7 @@ def get_sql_context(
     disable_progress: bool = False,
     infer_schema_length: int | None = None,
     table_names: Iterable[str] | None = None,
+    rename_general_metadata: bool = True,
     **sqlcontext_kwargs: Any,
 ) -> pl.SQLContext:
 
@@ -247,6 +248,13 @@ def get_sql_context(
         # Normalize paths to just the last part if full_path is False
         common_table_paths = {
             lazynwb.utils.normalize_internal_file_path(path)
+            for path in common_table_paths
+        }
+
+    if rename_general_metadata:
+        renaming_map = {'general': 'session'}
+        common_table_paths = {
+            renaming_map.get(path, path)
             for path in common_table_paths
         }
 
