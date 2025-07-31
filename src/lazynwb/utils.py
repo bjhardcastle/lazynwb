@@ -14,7 +14,7 @@ TABLE_SHORTCUTS = {
     "optophysiology": "general/optophysiology",
     "session": "general",
 }
-    
+
 
 thread_pool_executor: concurrent.futures.ThreadPoolExecutor | None = None
 process_pool_executor: concurrent.futures.ProcessPoolExecutor | None = None
@@ -46,6 +46,7 @@ def normalize_internal_file_path(path: str) -> str:
     """
     path = path.removeprefix("/") or "/"  # ensure at least root path is returned
     return TABLE_SHORTCUTS.get(path, path)
+
 
 if __name__ == "__main__":
     from npc_io import testmod

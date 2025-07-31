@@ -252,10 +252,9 @@ def get_sql_context(
         }
 
     if rename_general_metadata:
-        renaming_map = {'general': 'session'}
+        renaming_map = {"general": "session"}
         common_table_paths = {
-            renaming_map.get(path, path)
-            for path in common_table_paths
+            renaming_map.get(path, path) for path in common_table_paths
         }
 
     if table_names is not None:

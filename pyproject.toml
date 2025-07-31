@@ -16,7 +16,7 @@ dependencies = [
     "polars[pandas]>=1.26.0",
     "pydantic>=2.11.6",
 ]
-version = "0.2.62"
+version = "0.2.63"
 classifiers = [
     "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",

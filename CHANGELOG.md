@@ -8,7 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.61...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.62...HEAD)</small>
+
+### Added
+
+- Add top-level metadata to 'general' table ([fe05b72](https://github.com/bjhardcastle/lazynwb/commit/fe05b72252a958b8aae6056990ed6fc989df2528) by bjhardcastle).
+- Add shortcuts to tables ([b41dcf4](https://github.com/bjhardcastle/lazynwb/commit/b41dcf455c9cd531a9cf8ece654ce3b96273ae29) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.62](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.62) - 2025-07-22
+
+<small>[Compare with v0.2.61](https://github.com/bjhardcastle/lazynwb/compare/v0.2.61...v0.2.62)</small>
 
 ### Added
 
@@ -20,7 +30,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Fix accessor ([7ed4176](https://github.com/bjhardcastle/lazynwb/commit/7ed41766e0d433e6bc6d3f78a9d70fa9535f744c) by bjhardcastle).
 - Fix deletion from accessor cache ([7420e84](https://github.com/bjhardcastle/lazynwb/commit/7420e846d44c0559c4e7f0a42ae2bf42cd98d459) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.61](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.61) - 2025-07-22
 
 <small>[Compare with v0.2.60](https://github.com/bjhardcastle/lazynwb/compare/v0.2.60...v0.2.61)</small>
