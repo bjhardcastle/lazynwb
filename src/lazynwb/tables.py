@@ -375,6 +375,16 @@ def _get_table_data(
             )
             multi_dim_column_names.append(column_name)
             continue
+        if column_name == 'starting_time' and  {'data', 'starting_time'}.issubset(non_indexed_column_names):
+            # without timestamps, the default TimeSeries object has two keys: 'data' and
+            # 'starting_time' which is another Group.
+            # we need to generate a timestamps column to make it usable:
+            starting_time = column_accessors[column_name][()]
+            rate = column_accessors[column_name].attrs['rate']
+            n_timestamps = column_accessors['data'].shape[0]
+            column_data['timestamps'] = np.linspace(starting_time, starting_time + n_timestamps / rate, num=n_timestamps)
+            # TODO: lazyframes should have a plan for this rather than a materialized array
+            continue
         if column_accessors[column_name].dtype.kind in ("S", "O"):
             if not column_accessors[column_name].shape:
                 column_data[column_name] = column_accessors[column_name].asstr()[()]

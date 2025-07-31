@@ -139,7 +139,8 @@ def test_sql_context(nwb_fixture_name, request):
         "intervals/trials",
         "intervals/epochs",
         "units",
-        "processing/behavior/running_speed_with_timestamps", # rate not currently supported 
+        "processing/behavior/running_speed_with_timestamps",
+        "processing/behavior/running_speed_with_rate",
         "general",
         "general/subject",
     ]

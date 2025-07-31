@@ -427,16 +427,6 @@ def _filter_array_paths(internal_paths: dict[str, Any]) -> list[str]:
                     and "data" in accessor
                 )
             ):
-                if not has_timestamps:
-                    # TODO
-                    # without timestamps, the default TimeSeries object has two keys: 'data' and
-                    # 'starting_time' which is another Group.
-                    # get_df() interprets them as 'data': List[float], 'starting_time': float
-                    # it needs to be aware of this possibility and generate a timestamps column
-                    logger.warning(
-                        f"TimeSeries without timestamps are not currently supported. Skipping {path}"
-                    )
-                    continue
                 array_paths.append(path)
         except AttributeError:
             continue
