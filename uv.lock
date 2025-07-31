@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.9"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -571,7 +571,7 @@ wheels = [
 
 [[package]]
 name = "lazynwb"
-version = "0.2.64"
+version = "0.2.65"
 source = { editable = "." }
 dependencies = [
     { name = "h5py" },

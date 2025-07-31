@@ -177,9 +177,7 @@ class FileAccessor:
         elif hasattr(path, "as_posix"):
             cache_key = path.as_posix()
         else:
-            cache_key = from_pathlike(
-                path, **config.fsspec_storage_options
-            ).as_posix()
+            cache_key = from_pathlike(path, **config.fsspec_storage_options).as_posix()
 
         with _cache_lock:
             # return cached instance if it exists and is open
@@ -449,7 +447,9 @@ def _traverse_internal_paths(
     return results
 
 
-def from_pathlike(pathlike: lazynwb.types_.PathLike, **fsspec_storage_options: Any) -> upath.UPath:
+def from_pathlike(
+    pathlike: lazynwb.types_.PathLike, **fsspec_storage_options: Any
+) -> upath.UPath:
     """Return a UPath object from a pathlike object, with optional fsspec storage
     options.
 
@@ -478,7 +478,9 @@ def from_pathlike(pathlike: lazynwb.types_.PathLike, **fsspec_storage_options: A
             for parent in p.parents:
                 if "#" in parent.name:
                     # we can't create or join the problematic `#`, so we have to 'discover' it
-                    new = upath.UPath(path, **fsspec_storage_options).with_name(parent.name)
+                    new = upath.UPath(path, **fsspec_storage_options).with_name(
+                        parent.name
+                    )
                     for part in p.relative_to(parent).parts:
                         result = next(
                             new.glob(part),
@@ -492,7 +494,8 @@ def from_pathlike(pathlike: lazynwb.types_.PathLike, **fsspec_storage_options: A
                     return new
     return upath.UPath(path, **fsspec_storage_options)
 
+
 if __name__ == "__main__":
     import doctest
-    
+
     doctest.testmod(optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS)

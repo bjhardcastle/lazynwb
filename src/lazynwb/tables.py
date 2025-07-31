@@ -46,7 +46,9 @@ UNITS_TABLE_INDEX_COLUMN_NAME = "_units" + TABLE_INDEX_COLUMN_NAME
 
 @typing.overload
 def get_df(
-    nwb_data_sources: str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike],
+    nwb_data_sources: (
+        str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike]
+    ),
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -83,7 +85,9 @@ def get_df(
 
 
 def get_df(
-    nwb_data_sources: str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike],
+    nwb_data_sources: (
+        str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike]
+    ),
     search_term: str,
     exact_path: bool = False,
     include_column_names: str | Iterable[str] | None = None,
@@ -1323,6 +1327,5 @@ def get_spike_times_in_intervals(
 
 if __name__ == "__main__":
     import doctest
-    
-    doctest.testmod(optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS)
 
+    doctest.testmod(optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS)

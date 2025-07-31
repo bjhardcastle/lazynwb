@@ -8,9 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.63...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.64...HEAD)</small>
+
+### Removed
+
+- Remove npc_io for compatibility with 3.12 ([67d0536](https://github.com/bjhardcastle/lazynwb/commit/67d0536c28c6aae4f44c9f3043d2c3336ab913e6) by bjhardcastle).
 
 <!-- insertion marker -->
+## [v0.2.64](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.64) - 2025-07-31
+
+<small>[Compare with v0.2.63](https://github.com/bjhardcastle/lazynwb/compare/v0.2.63...v0.2.64)</small>
+
 ## [v0.2.63](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.63) - 2025-07-31
 
 <small>[Compare with v0.2.62](https://github.com/bjhardcastle/lazynwb/compare/v0.2.62...v0.2.63)</small>
