@@ -208,6 +208,7 @@ def get_sql_context(
     full_path: bool = False,
     min_file_count: int = 1,
     exclude_array_columns: bool = False,
+    exclude_timeseries: bool = False,
     ignore_errors: bool = True,
     disable_progress: bool = False,
     infer_schema_length: int | None = None,
@@ -233,7 +234,7 @@ def get_sql_context(
         ),
         min_file_count=min_file_count,
         disable_progress=disable_progress,
-        include_arrays=True,  # Include arrays to be able to query them
+        include_timeseries=not exclude_timeseries,
         include_metadata=True,
     )
 
@@ -303,7 +304,7 @@ def _find_common_paths(
     nwb_sources: tuple[lazynwb.types_.PathLike, ...],
     min_file_count: int,
     disable_progress: bool,
-    include_arrays: bool = False,
+    include_timeseries: bool = False,
     include_metadata: bool = True,
 ) -> set[str]:
     """Find table paths that appear in at least min_file_count files."""
@@ -315,7 +316,7 @@ def _find_common_paths(
             future = executor.submit(
                 lazynwb.file_io.get_internal_paths,
                 nwb_path=nwb_path,
-                include_arrays=include_arrays,  # We only want table-like structures
+                include_arrays=include_timeseries,  # We only want table-like structures
                 include_table_columns=False,
                 include_metadata=True,
                 include_specifications=False,
@@ -347,8 +348,8 @@ def _find_common_paths(
                 table_paths = _filter_table_paths(internal_paths)
                 all_table_paths.extend(table_paths)
                 logger.debug(f"Found {len(table_paths)} table paths in {nwb_path}")
-                if include_arrays:
-                    array_paths = _filter_array_paths(
+                if include_timeseries:
+                    array_paths = _filter_timeseries_paths(
                         {
                             k: v
                             for k, v in internal_paths.items()
@@ -403,12 +404,12 @@ def _filter_table_paths(internal_paths: dict[str, Any]) -> list[str]:
     return table_paths
 
 
-def _filter_array_paths(internal_paths: dict[str, Any]) -> list[str]:
-    """Filter internal paths to identify array-like structures."""
-    array_paths = []
+def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
+    """Filter internal paths to identify TimeSeries-like structures."""
+    timeseries_paths = []
 
     for path, accessor in internal_paths.items():
-        # Check if the accessor has array-like attributes
+        # Check if the accessor has TimeSeries-like attributes
         if path.endswith("/data") or path.endswith("/timestamps"):
             continue
         attrs = getattr(accessor, "attrs", {})
@@ -426,11 +427,11 @@ def _filter_array_paths(internal_paths: dict[str, Any]) -> list[str]:
                     and "data" in accessor
                 )
             ):
-                array_paths.append(path)
+                timeseries_paths.append(path)
         except AttributeError:
             continue
 
-    return array_paths
+    return timeseries_paths
 
 
 def _table_path_to_output_path(
