@@ -108,6 +108,11 @@ def _open_hdf5(path: upath.UPath, use_remfile: bool = True) -> h5py.File:
         file = path.open(mode="rb", cache_type="first")
     return h5py.File(file, mode="r")
 
+def is_group(accessor) -> bool:
+    """
+    Check if the given accessor is a group (e.g. h5py.Group or zarr.Group).
+    """
+    return hasattr(accessor, 'keys')
 
 class FileAccessor:
     """
@@ -399,7 +404,6 @@ def _traverse_internal_paths(
             results[group.name] = group
         else:
             return {}
-    is_dataset = hasattr(group, "keys") and len(group) > 0
     shape = getattr(group, "shape", None)
     is_scalar = shape == () or shape == (1,)
     is_array = shape is not None and not is_scalar
@@ -428,7 +432,7 @@ def _traverse_internal_paths(
         pass
     if is_table and not include_table_columns:
         return results
-    if not is_dataset:
+    if not is_group(group) and len(group) > 0:
         return results
     for subpath in group.keys():
         try:

@@ -412,12 +412,15 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
         # Check if the accessor has TimeSeries-like attributes
         if path.endswith("/data") or path.endswith("/timestamps"):
             continue
+        if not lazynwb.file_io.is_group(accessor):
+            continue
         attrs = getattr(accessor, "attrs", {})
+        
         try:
             if (
                 # required attributes for TimeSeries objects
                 (
-                    (has_timestamps := "timestamps" in accessor)
+                    "timestamps" in accessor
                     or "rate" in getattr(accessor.get("starting_time", {}), "attrs", {})
                 )
                 or
