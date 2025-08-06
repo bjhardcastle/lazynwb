@@ -8,13 +8,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.65...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.66...HEAD)</small>
+
+<!-- insertion marker -->
+## [v0.2.66](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.66) - 2025-08-03
+
+<small>[Compare with v0.2.65](https://github.com/bjhardcastle/lazynwb/compare/v0.2.65...v0.2.66)</small>
 
 ### Added
 
 - Add `exclude_timeseries` parameter on sql_context ([83b4b3e](https://github.com/bjhardcastle/lazynwb/commit/83b4b3efa04e6577d906eae99c661b37e5658435) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.65](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.65) - 2025-07-31
 
 <small>[Compare with v0.2.64](https://github.com/bjhardcastle/lazynwb/compare/v0.2.64...v0.2.65)</small>

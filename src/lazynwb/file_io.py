@@ -108,11 +108,13 @@ def _open_hdf5(path: upath.UPath, use_remfile: bool = True) -> h5py.File:
         file = path.open(mode="rb", cache_type="first")
     return h5py.File(file, mode="r")
 
+
 def is_group(accessor) -> bool:
     """
     Check if the given accessor is a group (e.g. h5py.Group or zarr.Group).
     """
-    return hasattr(accessor, 'keys')
+    return hasattr(accessor, "keys")
+
 
 class FileAccessor:
     """

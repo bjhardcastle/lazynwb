@@ -749,7 +749,7 @@ def _get_table_column_accessors(
     h5py.Dataset objects. Note that the data from each column is not read into memory.
 
     Optionally use a thread pool to speed up retrieval of the columns - faster for zarr files.
-    
+
     Parameters
     ----------
     file_path : lazynwb.types_.PathLike
@@ -795,11 +795,15 @@ def _get_table_column_accessors(
     )
     if skip_references:
         known_references = {
-            'timeseries': 'TimeSeriesReferenceVectorData',
+            "timeseries": "TimeSeriesReferenceVectorData",
         }
         for name, neurodata_type in known_references.items():
-            if (accessor := names_to_columns.get(name)) is not None and accessor.attrs.get('neurodata_type') == neurodata_type:
-                logger.debug(f"Skipping reference column {name!r} with neurodata_type {neurodata_type!r}")
+            if (
+                accessor := names_to_columns.get(name)
+            ) is not None and accessor.attrs.get("neurodata_type") == neurodata_type:
+                logger.debug(
+                    f"Skipping reference column {name!r} with neurodata_type {neurodata_type!r}"
+                )
                 del names_to_columns[name]
     else:
         raise NotImplementedError(

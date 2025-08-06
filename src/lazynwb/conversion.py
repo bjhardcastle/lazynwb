@@ -415,7 +415,7 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
         if not lazynwb.file_io.is_group(accessor):
             continue
         attrs = getattr(accessor, "attrs", {})
-        
+
         try:
             if (
                 # required attributes for TimeSeries objects
