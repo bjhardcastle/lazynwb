@@ -743,11 +743,24 @@ def _get_table_column_accessors(
     file_path: lazynwb.types_.PathLike,
     table_path: str,
     use_thread_pool: bool = False,
+    skip_references: bool = True,
 ) -> dict[str, zarr.Array | h5py.Dataset]:
     """Get the accessor objects for each column of an NWB table, as a dict of zarr.Array or
     h5py.Dataset objects. Note that the data from each column is not read into memory.
 
     Optionally use a thread pool to speed up retrieval of the columns - faster for zarr files.
+    
+    Parameters
+    ----------
+    file_path : lazynwb.types_.PathLike
+        Path to the NWB file to read from.
+    table_path : str
+        Path to the table within the NWB file, e.g. '/intervals/trials'
+    use_thread_pool : bool, default False
+        If True, a thread pool will be used to retrieve the columns for speed.
+    skip_references : bool, default True
+        If True, columns that include references to other objects within the NWB file (e.g. TimeSeriesReferenceVectorData) will be skipped.
+        These columns are added for convenience but are convoluted to interpret and impact performance when reading data from the cloud.
     """
     names_to_columns: dict[str, zarr.Array | h5py.Dataset] = {}
     t0 = time.time()
@@ -780,6 +793,18 @@ def _get_table_column_accessors(
     logger.debug(
         f"retrieved {len(names_to_columns)} column accessors from {file_path!r}/{table_path} in {time.time() - t0:.2f} s ({use_thread_pool=})"
     )
+    if skip_references:
+        known_references = {
+            'timeseries': 'TimeSeriesReferenceVectorData',
+        }
+        for name, neurodata_type in known_references.items():
+            if (accessor := names_to_columns.get(name)) is not None and accessor.attrs.get('neurodata_type') == neurodata_type:
+                logger.debug(f"Skipping reference column {name!r} with neurodata_type {neurodata_type!r}")
+                del names_to_columns[name]
+    else:
+        raise NotImplementedError(
+            "Keeping references is not implemented yet: see https://pynwb.readthedocs.io/en/stable/pynwb.base.html#pynwb.base.TimeSeriesReferenceVectorData"
+        )
     return names_to_columns
 
 
@@ -867,8 +892,7 @@ def _get_table_schema_helper(
             ) and name.endswith("_index"):
                 # skip the index columns
                 continue
-            if not hasattr(dataset, "dtype"):
-                # e.g. Group in h5py or zarr
+            if lazynwb.file_io.is_group(dataset):
                 continue
             if name == "starting_time" and _is_timeseries_with_rate(
                 column_accessors.keys()
