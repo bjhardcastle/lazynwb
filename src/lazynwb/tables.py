@@ -261,11 +261,21 @@ def _is_timeseries_with_rate(group_keys: Iterable[str]) -> bool:
         and "timestamps" not in group_keys
     )
 
+
 def _is_metadata(column_accessors: dict[str, zarr.Array | h5py.Dataset]) -> bool:
     """Check if the group is a bunch of metadata, as opposed to a table with columns."""
-    no_multi_dim_columns = all(v.ndim <= 1 for v in column_accessors.values() if hasattr(v, "dtype"))
-    some_scalar_columns = any(v.ndim == 0 for v in column_accessors.values() if hasattr(v, "dtype"))
-    return no_multi_dim_columns and some_scalar_columns and not _is_timeseries_with_rate(column_accessors.keys())
+    no_multi_dim_columns = all(
+        v.ndim <= 1 for v in column_accessors.values() if hasattr(v, "dtype")
+    )
+    some_scalar_columns = any(
+        v.ndim == 0 for v in column_accessors.values() if hasattr(v, "dtype")
+    )
+    return (
+        no_multi_dim_columns
+        and some_scalar_columns
+        and not _is_timeseries_with_rate(column_accessors.keys())
+    )
+
 
 def _get_table_data(
     path: lazynwb.types_.PathLike,

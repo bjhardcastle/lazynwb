@@ -16,7 +16,7 @@ dependencies = [
     "pydantic>=2.11.6",
     "universal-pathlib>=0.1.4",
 ]
-version = "0.2.70"
+version = "0.2.71"
 classifiers = [
     "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",
