@@ -92,6 +92,7 @@ def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
     # Columns 'spike_times', 'waveform_mean', 'obs_intervals' are standard in pynwb.misc.Units.
     # nwbfile.add_unit will add data to the nwbfile.units table created above.
     num_units = 4
+    nwbfile.units.add_column(name="structure", description="brain region")
     for i in range(num_units):
         # Spike times for this unit (ragged array)
         spike_times_data = np.sort(np.random.uniform(0, 12, np.random.randint(30, 60)))
@@ -104,6 +105,7 @@ def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
             obs_intervals_data = np.array([[2.1, 7.5]])
 
         nwbfile.add_unit(
+            structure='VISp',
             spike_times=spike_times_data,
             waveform_mean=waveform_mean_data,
             obs_intervals=obs_intervals_data,
