@@ -805,6 +805,7 @@ def _get_table_column_accessors(
                     f"Skipping reference column {name!r} with neurodata_type {neurodata_type!r}"
                 )
                 del names_to_columns[name]
+                del names_to_columns[f'{name}_index']
     else:
         raise NotImplementedError(
             "Keeping references is not implemented yet: see https://pynwb.readthedocs.io/en/stable/pynwb.base.html#pynwb.base.TimeSeriesReferenceVectorData"
