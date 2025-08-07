@@ -799,7 +799,7 @@ def _get_table_column_accessors(
         names_to_columns = {
             k: v for k, v in names_to_columns.items() if not lazynwb.file_io.is_group(v)
         }
-        
+
     logger.debug(
         f"retrieved {len(names_to_columns)} column accessors from {file_path!r}/{table_path} in {time.time() - t0:.2f} s ({use_thread_pool=})"
     )
@@ -815,7 +815,7 @@ def _get_table_column_accessors(
                     f"Skipping reference column {name!r} with neurodata_type {neurodata_type!r}"
                 )
                 del names_to_columns[name]
-                del names_to_columns[f'{name}_index']
+                del names_to_columns[f"{name}_index"]
     else:
         raise NotImplementedError(
             "Keeping references is not implemented yet: see https://pynwb.readthedocs.io/en/stable/pynwb.base.html#pynwb.base.TimeSeriesReferenceVectorData"
