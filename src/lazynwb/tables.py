@@ -789,7 +789,17 @@ def _get_table_column_accessors(
             "file_create_date",
         ):
             names_to_columns[p] = root.get(p)
-
+        # add anything that lives in general/metadata
+        for p in root.get("general/metadata", {}).keys():
+            if p not in names_to_columns:
+                value = root.get(f"general/metadata/{p}")
+                if not lazynwb.file_io.is_group(value):
+                    names_to_columns[p] = value
+        # ensure we don't include any groups from general
+        names_to_columns = {
+            k: v for k, v in names_to_columns.items() if not lazynwb.file_io.is_group(v)
+        }
+        
     logger.debug(
         f"retrieved {len(names_to_columns)} column accessors from {file_path!r}/{table_path} in {time.time() - t0:.2f} s ({use_thread_pool=})"
     )
