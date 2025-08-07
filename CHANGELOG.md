@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.68...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.69...HEAD)</small>
+
+### Added
+
+- Add metadata to test units table ([4e3cd08](https://github.com/bjhardcastle/lazynwb/commit/4e3cd0856175f1e24c829787604f7eb43869874f) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.69](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.69) - 2025-08-07
+
+<small>[Compare with v0.2.68](https://github.com/bjhardcastle/lazynwb/compare/v0.2.68...v0.2.69)</small>
 
 ### Fixed
 
 - Fix getting table length for metadata tables ([99828bb](https://github.com/bjhardcastle/lazynwb/commit/99828bbaa234d63b7fd6a4bd43e1e44d83ed802c) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.68](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.68) - 2025-08-07
 
 <small>[Compare with v0.2.67](https://github.com/bjhardcastle/lazynwb/compare/v0.2.67...v0.2.68)</small>
