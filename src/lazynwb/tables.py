@@ -859,12 +859,18 @@ def _get_table_length(
     file_path: lazynwb.types_.PathLike,
     table_path: str,
 ) -> int:
-    for _, column in _get_table_column_accessors(file_path, table_path).items():
-        if column.ndim == 1:
-            return column.shape[0]
-    raise NotImplementedError(
-        f"Could not determine length of table {table_path} in {file_path!r}: all columns are ndim arrays"
-    )
+    table_accessors = _get_table_column_accessors(file_path, table_path)
+    # first cycle through columns as if this is a regular DynamicTable:
+    for name, accessor in table_accessors.items():
+        if _is_nominally_indexed_column(name, table_accessors.keys()):
+            return table_accessors[f"{name}_index"].shape[0]
+        if accessor.ndim == 1: # regular column
+            return accessor.shape[0]
+        if accessor.ndim == 0: # metadata table
+            return 1
+    # at this point we have only ndim arrays, so we can either assume that the first dimension
+    # represents observations (e.g. timepoints in TimeSeries.data) or raise an error:
+    return accessor.shape[0]
 
 
 def _get_path_to_row_indices(df: pl.DataFrame) -> dict[str, list[int]]:
