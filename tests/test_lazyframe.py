@@ -238,6 +238,10 @@ def test_timeseries_with_rate(local_hdf5_path):
     assert 'timestamps' in schema, f"'trials' table should provide a 'timestamps' column"
     assert 'timestamps' in lf.collect().columns, f"'trials' table should provide a 'timestamps' column"
 
+def test_unique_count(local_hdf5_paths):
+    df = lazynwb.scan_nwb(local_hdf5_paths, 'units').select('structure').unique().collect()
+    assert len(df) == 1, f"Unique count should return a single row for the 'structure' column - check internal columns (underscore prefix) aren't being counted: {df=}"
+    
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     pytest.main([__file__])

@@ -171,7 +171,7 @@ def scan_nwb(
                 f"Yielding {table_path!r} df with {df.height} rows and {df.width} columns"
             )
 
-            df = _apply_schema(df, schema=schema)
+            df = _apply_schema(df, schema=schema).select(with_columns or schema.keys())
             yield df[:n_rows] if n_rows is not None and n_rows < df.height else df
 
         else:
@@ -218,7 +218,7 @@ def scan_nwb(
                             how="inner",
                         ),
                         schema=schema,
-                    )
+                    ).select(with_columns or schema.keys()) # internals paths are returned if either i) they're explicitly requested, ii) no columns are explicitly requested
                 )
                 i += batch_size
 
