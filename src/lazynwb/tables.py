@@ -864,9 +864,9 @@ def _get_table_length(
     for name, accessor in table_accessors.items():
         if _is_nominally_indexed_column(name, table_accessors.keys()):
             return table_accessors[f"{name}_index"].shape[0]
-        if accessor.ndim == 1: # regular column
+        if accessor.ndim == 1:  # regular column
             return accessor.shape[0]
-        if accessor.ndim == 0: # metadata table
+        if accessor.ndim == 0:  # metadata table
             return 1
     # at this point we have only ndim arrays, so we can either assume that the first dimension
     # represents observations (e.g. timepoints in TimeSeries.data) or raise an error:
