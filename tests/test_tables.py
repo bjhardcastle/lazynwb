@@ -90,7 +90,7 @@ def test_timeseries_with_rate(nwb_fixture_name, request):
     # it needs to be aware of this possibility and generate a timestamps column
     df = lazynwb.get_df(nwb_path_or_paths, "processing/behavior/running_speed_with_rate", as_polars=True)
     assert 'timestamps' in df.columns, f"'trials' table should provide a 'timestamps' column"
-    assert isinstance(df.schema['timestamps'], pl.List), f"'timestamps' column should be a List type, not {df.schema['timestamps']}"
+    assert isinstance(df.schema['timestamps'], pl.Float64), f"'timestamps' column should be a float type, not {df.schema['timestamps']}"
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
