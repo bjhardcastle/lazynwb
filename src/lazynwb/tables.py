@@ -301,7 +301,7 @@ def _get_table_data(
             use_thread_pool=False,
         )
     )
-    is_metadata_table = any(
+    is_metadata_table = all(
         v.shape == () for v in column_accessors.values() if hasattr(v, "dtype")
     )
 
