@@ -3,6 +3,7 @@ import logging
 import pytest
 
 import pandas as pd
+import polars as pl
 import lazynwb
 import pynwb
 
@@ -74,13 +75,22 @@ def test_general(local_hdf5_path):
     assert not df.is_empty(), f"'general' table should provide metadata from /general and top-level of file"
     assert 'session_start_time' in df.columns, f"'general' table should provide metadata from /general and top-level of file"
 
-def test_timeseries_with_rate(local_hdf5_path):
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    [
+        "local_hdf5_path",
+        "local_hdf5_paths",
+    ],
+)
+def test_timeseries_with_rate(nwb_fixture_name, request):
+    nwb_path_or_paths = request.getfixturevalue(nwb_fixture_name)
     # without timestamps, the default TimeSeries object has two keys: 'data' and
     # 'starting_time' which is another Group.
     # get_df() interprets them as 'data': List[float], 'starting_time': float
     # it needs to be aware of this possibility and generate a timestamps column
-    df = lazynwb.get_df(local_hdf5_path, "processing/behavior/running_speed_with_rate", as_polars=True)
+    df = lazynwb.get_df(nwb_path_or_paths, "processing/behavior/running_speed_with_rate", as_polars=True)
     assert 'timestamps' in df.columns, f"'trials' table should provide a 'timestamps' column"
+    assert isinstance(df.schema['timestamps'], pl.List), f"'timestamps' column should be a List type, not {df.schema['timestamps']}"
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

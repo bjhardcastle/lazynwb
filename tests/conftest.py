@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import pathlib
+import random
 import shutil
 import tempfile
 import uuid
@@ -61,7 +62,7 @@ def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
     nwbfile.create_processing_module(
         name="behavior", description="processed behavioral data"
     )
-    num_samples = 120
+    num_samples = 120 + random.randint(1, 10)  # Randomize number of samples
     timestamps = np.linspace(0, 12, num_samples)  # 12 seconds of data
     running_speed_data = np.cos(timestamps) * 0.5 + 0.5  # Dummy speed data (0 to 1 m/s)
     running_speed_ts_0 = TimeSeries(
