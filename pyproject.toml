@@ -15,6 +15,8 @@ dependencies = [
     "polars[pandas]>=1.26.0",
     "pydantic>=2.11.6",
     "universal-pathlib>=0.1.4",
+    "dotenv>=0.9.9",
+    "s3fs>=2025.7.0",
 ]
 version = "0.2.71"
 classifiers = [
