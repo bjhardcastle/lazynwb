@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.70...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.71...HEAD)</small>
+
+<!-- insertion marker -->
+## [v0.2.71](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.71) - 2025-08-07
+
+<small>[Compare with v0.2.70](https://github.com/bjhardcastle/lazynwb/compare/v0.2.70...v0.2.71)</small>
 
 ### Fixed
 
@@ -16,7 +21,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Fix detection of metadata tables ([636e3a5](https://github.com/bjhardcastle/lazynwb/commit/636e3a50c7a602f5a59f6309c2d73a19855c9b87) by bjhardcastle).
 - Fix detection of metadata table ([c59ec7b](https://github.com/bjhardcastle/lazynwb/commit/c59ec7bec55e009bb9df16dae4f3128b971d1d2c) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.70](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.70) - 2025-08-07
 
 <small>[Compare with v0.2.69](https://github.com/bjhardcastle/lazynwb/compare/v0.2.69...v0.2.70)</small>
