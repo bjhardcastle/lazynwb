@@ -903,7 +903,7 @@ wheels = [
 
 [[package]]
 name = "lazynwb"
-version = "0.2.72"
+version = "0.2.73"
 source = { editable = "." }
 dependencies = [
     { name = "dotenv" },

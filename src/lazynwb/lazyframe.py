@@ -72,7 +72,7 @@ def scan_nwb(
     source = tuple(source)  # type: ignore[arg-type]
     if not source:
         raise ValueError("No NWB source files provided.")
-    
+
     if not schema:
         schema = lazynwb.tables.get_table_schema(
             file_paths=source,

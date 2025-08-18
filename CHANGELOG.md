@@ -8,9 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.71...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.72...HEAD)</small>
+
+### Added
+
+- Add check for non-empty file list ([0516832](https://github.com/bjhardcastle/lazynwb/commit/0516832d51e4873de07be1b34e9db681254bba5e) by bjhardcastle).
+
+### Fixed
+
+- Fix zarr version, update polars ([931690a](https://github.com/bjhardcastle/lazynwb/commit/931690aa18d6f2b8350f0a0583b0e7e0f7a30dbc) by bjhardcastle).
 
 <!-- insertion marker -->
+## [v0.2.72](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.72) - 2025-08-13
+
+<small>[Compare with v0.2.71](https://github.com/bjhardcastle/lazynwb/compare/v0.2.71...v0.2.72)</small>
+
 ## [v0.2.71](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.71) - 2025-08-07
 
 <small>[Compare with v0.2.70](https://github.com/bjhardcastle/lazynwb/compare/v0.2.70...v0.2.71)</small>
