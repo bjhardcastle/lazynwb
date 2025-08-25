@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.72...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.73...HEAD)</small>
+
+### Fixed
+
+- Fix numcodecs compatibility with zarr<3.0 ([42cfadf](https://github.com/bjhardcastle/lazynwb/commit/42cfadfcd11abdb6d0da3e44ae83dc646a237392) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.73](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.73) - 2025-08-18
+
+<small>[Compare with v0.2.72](https://github.com/bjhardcastle/lazynwb/compare/v0.2.72...v0.2.73)</small>
 
 ### Added
 
@@ -18,7 +27,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Fix zarr version, update polars ([931690a](https://github.com/bjhardcastle/lazynwb/commit/931690aa18d6f2b8350f0a0583b0e7e0f7a30dbc) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.72](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.72) - 2025-08-13
 
 <small>[Compare with v0.2.71](https://github.com/bjhardcastle/lazynwb/compare/v0.2.71...v0.2.72)</small>
