@@ -908,6 +908,9 @@ source = { editable = "." }
 dependencies = [
     { name = "dotenv" },
     { name = "h5py" },
+    { name = "numcodecs", version = "0.12.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "numcodecs", version = "0.13.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "numcodecs", version = "0.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas" },
     { name = "polars", extra = ["pandas"] },
     { name = "pydantic" },
@@ -947,6 +950,7 @@ testing = [
 requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "h5py", specifier = ">=3.10.0" },
+    { name = "numcodecs", specifier = "<0.16" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "polars", extras = ["pandas"], specifier = ">1.32.0" },
     { name = "pydantic", specifier = ">=2.11.6" },

@@ -8,7 +8,8 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "h5py>=3.10.0",
-    "zarr>=2.17.0,<3.0",
+    "zarr>=2.17.0,<3.0", 
+    "numcodecs<0.16", # for zarr<3.0 https://github.com/zarr-developers/numcodecs/issues/721
     "remfile>=0.1.10",
     "tqdm>=4.66.2",
     "pandas>=2.0.0",
