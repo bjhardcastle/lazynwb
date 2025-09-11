@@ -947,7 +947,7 @@ def _get_table_schema_helper(
                 column_accessors.keys()
             ):
                 # this is a TimeSeries object with start/rate: we'll generate timestamps
-                file_schema["timestamps"] = pl.List(pl.Float64)
+                file_schema["timestamps"] = pl.Float64
                 continue
             if is_timeseries and (shape := dataset.shape)[0] != (len_data := column_accessors["data"].shape[0]):
                 logger.debug(
