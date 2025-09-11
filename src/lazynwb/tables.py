@@ -414,7 +414,7 @@ def _get_table_data(
             )
             multi_dim_column_names.append(column_name)
             continue
-        if is_timeseries and timeseries_len != (shape := column_accessors[column_name].shape)[0]:
+        if is_timeseries and (shape := column_accessors[column_name].shape) and timeseries_len != shape[0]:
             logger.debug(
                 f"skipping column {column_name!r} with shape {shape} from TimeSeries table: length does not match data length {timeseries_len}"
             )
@@ -949,7 +949,7 @@ def _get_table_schema_helper(
                 # this is a TimeSeries object with start/rate: we'll generate timestamps
                 file_schema["timestamps"] = pl.Float64
                 continue
-            if is_timeseries and (shape := dataset.shape)[0] != (len_data := column_accessors["data"].shape[0]):
+            if is_timeseries and (shape := dataset.shape) and shape[0] != (len_data := column_accessors["data"].shape[0]):
                 logger.debug(
                     f"skipping column {name!r} with shape {shape} from TimeSeries table: length does not match data length {len_data}"
                 )
