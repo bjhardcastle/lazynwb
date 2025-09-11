@@ -27,7 +27,7 @@ Accessing individual columns as arrays, on the other hand, means we no longer ha
 of a DataFrame.
 
 Ideally, we would filter our table based on metrics in some columns, then access the larger
-columns for the filtered subset of rows, seemlessly with a single command.
+columns for the filtered subset of rows, seamlessly with a single command.
 
 To this end, `lazynwb.scan_nwb()` provides a
 [`polars.LazyFrame()`](https://docs.pola.rs/api/python/stable/reference/lazyframe/index.html)
