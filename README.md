@@ -18,9 +18,9 @@ As of 2025 and `pynwb==3.0`, there are a couple of ways to access data stored in
 -  get the `pandas` dataframe for the table and access the desired column
 -  or access specific columns as arrays from disk
 
-The schema for the  `units` table includes columns for list or nested-list type data, including
-`spike_times`, and `waveform_mean` and `waveform_sd` which can be large for Neuropixels probes and
-often not needed for analysis. Reading the entire table into memory may be unnecessary and,
+The NWB schema for the `units` table includes columns for list-like or nested data, such as
+`spike_times`, `waveform_mean`, `waveform_sd`, which can become large for Neuropixels probes and
+often not needed in their entirety for analysis. Reading the entire table into memory may be unnecessary and,
 especially when reading from NWBs stored in the cloud, can be slow.
 
 Accessing individual columns as arrays, on the other hand, means we no longer have the convenience
