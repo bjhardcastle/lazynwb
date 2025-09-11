@@ -8,13 +8,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.73...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.74...HEAD)</small>
+
+### Fixed
+
+- Fix checking dataset shape when empty ([3a825c5](https://github.com/bjhardcastle/lazynwb/commit/3a825c56973091422c2cf4b0c05c0a4cecec9c27) by bjhardcastle).
+- Fix generated timestamp type ([68584ee](https://github.com/bjhardcastle/lazynwb/commit/68584ee3b6ef0c9183571fb2b3d00a30d31b5549) by bjhardcastle).
+- Fix typo ([b7d110c](https://github.com/bjhardcastle/lazynwb/commit/b7d110cc34192ebd8295f1f1d76276cee4956074) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.74](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.74) - 2025-08-25
+
+<small>[Compare with v0.2.73](https://github.com/bjhardcastle/lazynwb/compare/v0.2.73...v0.2.74)</small>
 
 ### Fixed
 
 - Fix numcodecs compatibility with zarr<3.0 ([42cfadf](https://github.com/bjhardcastle/lazynwb/commit/42cfadfcd11abdb6d0da3e44ae83dc646a237392) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.73](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.73) - 2025-08-18
 
 <small>[Compare with v0.2.72](https://github.com/bjhardcastle/lazynwb/compare/v0.2.72...v0.2.73)</small>

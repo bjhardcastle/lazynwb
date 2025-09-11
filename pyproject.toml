@@ -19,7 +19,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "s3fs>=2025.7.0",
 ]
-version = "0.2.74"
+version = "0.2.75"
 classifiers = [
     "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",

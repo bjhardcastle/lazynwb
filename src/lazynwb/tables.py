@@ -253,14 +253,12 @@ def get_df(
     )
     return df
 
+
 def _is_timeseries(group_keys: Iterable[str]) -> bool:
-    return (
-        "data" in group_keys
-        and (
-            "timestamps" in group_keys
-            or "starting_time" in group_keys
-        )
+    return "data" in group_keys and (
+        "timestamps" in group_keys or "starting_time" in group_keys
     )
+
 
 def _is_timeseries_with_rate(group_keys: Iterable[str]) -> bool:
     return (
@@ -326,12 +324,12 @@ def _get_table_data(
     )
     is_metadata_table = _is_metadata(column_accessors)
     is_timeseries = _is_timeseries(column_accessors)
-    
+
     if is_timeseries:
         timeseries_len = column_accessors["data"].shape[0]
     else:
         timeseries_len = None
-    
+
     if isinstance(exclude_column_names, str):
         exclude_column_names = (exclude_column_names,)
     elif exclude_column_names is not None:
@@ -414,7 +412,11 @@ def _get_table_data(
             )
             multi_dim_column_names.append(column_name)
             continue
-        if is_timeseries and (shape := column_accessors[column_name].shape) and timeseries_len != shape[0]:
+        if (
+            is_timeseries
+            and (shape := column_accessors[column_name].shape)
+            and timeseries_len != shape[0]
+        ):
             logger.debug(
                 f"skipping column {column_name!r} with shape {shape} from TimeSeries table: length does not match data length {timeseries_len}"
             )
@@ -459,7 +461,10 @@ def _get_table_data(
             f"materializing indexed columns for {file._path}/{search_term}: {data_column_names}"
         )
         for column_name in data_column_names:
-            if is_timeseries and timeseries_len != (shape := column_accessors[column_name].shape)[0]:
+            if (
+                is_timeseries
+                and timeseries_len != (shape := column_accessors[column_name].shape)[0]
+            ):
                 logger.debug(
                     f"skipping column {column_name!r} with shape {shape} from TimeSeries table: length does not match data length {timeseries_len}"
                 )
@@ -934,7 +939,7 @@ def _get_table_schema_helper(
         file_schema = {}
         is_metadata = _is_metadata(column_accessors)
         is_timeseries = _is_timeseries(column_accessors.keys())
-        
+
         for name, dataset in column_accessors.items():
             if _is_nominally_indexed_column(
                 name, column_accessors.keys()
@@ -949,7 +954,11 @@ def _get_table_schema_helper(
                 # this is a TimeSeries object with start/rate: we'll generate timestamps
                 file_schema["timestamps"] = pl.Float64
                 continue
-            if is_timeseries and (shape := dataset.shape) and shape[0] != (len_data := column_accessors["data"].shape[0]):
+            if (
+                is_timeseries
+                and (shape := dataset.shape)
+                and shape[0] != (len_data := column_accessors["data"].shape[0])
+            ):
                 logger.debug(
                     f"skipping column {name!r} with shape {shape} from TimeSeries table: length does not match data length {len_data}"
                 )
