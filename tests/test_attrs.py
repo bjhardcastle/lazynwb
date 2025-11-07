@@ -88,7 +88,7 @@ def test_get_sub_attrs(local_hdf5_path: pathlib.Path) -> None:
 
     assert isinstance(all_attrs, dict)
     # Should have at least the parent path
-    assert "/units" in all_attrs
+    assert "units" in all_attrs
 
 
 def test_get_sub_attrs_root(local_hdf5_path: pathlib.Path) -> None:
@@ -144,9 +144,9 @@ def test_consolidate_attrs_single_file(local_hdf5_path: pathlib.Path) -> None:
     )
 
     assert isinstance(consolidated, dict)
-    assert "/units" in consolidated
+    assert "units" in consolidated
     # Each attribute should have at least 'common' key
-    for attr_dict in consolidated["/units"].values():
+    for attr_dict in consolidated["units"].values():
         assert "common" in attr_dict
 
 
@@ -163,7 +163,7 @@ def test_consolidate_attrs_multiple_files(
     )
 
     assert isinstance(consolidated, dict)
-    assert "/units" in consolidated
+    assert "units" in consolidated
     # Each attribute should have at least 'common' key
     for attr_dict in consolidated["/units"].values():
         assert "common" in attr_dict
@@ -188,10 +188,10 @@ def test_consolidate_attrs_structure(local_hdf5_paths: list[pathlib.Path]) -> No
     # Check outer structure
     assert isinstance(consolidated, dict)
     assert len(consolidated) == 1
-    assert "/units" in consolidated
+    assert "units" in consolidated
 
     # Check inner structure
-    attrs_dict = consolidated["/units"]
+    attrs_dict = consolidated["units"]
     assert isinstance(attrs_dict, dict)
 
     # Each attribute should have the correct structure
