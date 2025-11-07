@@ -8,6 +8,7 @@ import logging
 
 import dotenv
 
+from lazynwb.attrs import *
 from lazynwb.base import *
 from lazynwb.conversion import *
 from lazynwb.file_io import *

@@ -19,12 +19,12 @@ from pynwb.misc import Units  # Uncommented: Ensure Units is imported
 
 import lazynwb
 
-RESET_FILES = True  
+RESET_FILES = False
 CLEANUP_FILES = False
 OVERRIDE_DIR: None | pathlib.Path = (
     None if CLEANUP_FILES else pathlib.Path(__file__).parent / "files" / "nwb_files"
 )
-        
+
 def _reset_nwb_files(dir_path: pathlib.Path):
     lazynwb.clear_cache()
     gc.collect()
@@ -214,7 +214,7 @@ def local_zarr_paths():
         returned_paths.append(zarr_store_path)
         if zarr_store_path.exists() and not RESET_FILES:
             continue
-        
+
         nwbfile_obj = NWBFile(
             session_description=f"Test Zarr NWB file {i}",
             identifier=str(uuid.uuid4()),
