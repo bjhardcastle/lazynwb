@@ -165,7 +165,7 @@ def test_consolidate_attrs_multiple_files(
     assert isinstance(consolidated, dict)
     assert "units" in consolidated
     # Each attribute should have at least 'common' key
-    for attr_dict in consolidated["/units"].values():
+    for attr_dict in consolidated["units"].values():
         assert "common" in attr_dict
 
 
