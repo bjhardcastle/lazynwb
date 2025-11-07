@@ -75,12 +75,12 @@ def _to_json_compatible(value: object) -> object:
     # Handle bytes
     if isinstance(value, bytes):
         try:
-            return value.decode('utf-8')
+            return value.decode("utf-8")
         except UnicodeDecodeError:
             return value.hex()
 
     # Handle h5py references
-    if hasattr(value, 'id') or str(type(value)).startswith("<class 'h5py"):
+    if hasattr(value, "id") or str(type(value)).startswith("<class 'h5py"):
         return str(value)
 
     # Handle zarr references

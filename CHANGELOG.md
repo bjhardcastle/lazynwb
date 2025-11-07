@@ -8,7 +8,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.74...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.75...HEAD)</small>
+
+### Added
+
+- Add functions for getting table/column attrs Closes #10 ([0e43e0e](https://github.com/bjhardcastle/lazynwb/commit/0e43e0e852954213b174c4843fdd59b505abad90) by bjhardcastle).
+
+### Fixed
+
+- Fix tests ([de34d45](https://github.com/bjhardcastle/lazynwb/commit/de34d453c2d854729af2fb8541eb750195f01358) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.75](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.75) - 2025-09-11
+
+<small>[Compare with v0.2.74](https://github.com/bjhardcastle/lazynwb/compare/v0.2.74...v0.2.75)</small>
 
 ### Fixed
 
@@ -16,7 +29,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Fix generated timestamp type ([68584ee](https://github.com/bjhardcastle/lazynwb/commit/68584ee3b6ef0c9183571fb2b3d00a30d31b5549) by bjhardcastle).
 - Fix typo ([b7d110c](https://github.com/bjhardcastle/lazynwb/commit/b7d110cc34192ebd8295f1f1d76276cee4956074) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.74](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.74) - 2025-08-25
 
 <small>[Compare with v0.2.73](https://github.com/bjhardcastle/lazynwb/compare/v0.2.73...v0.2.74)</small>
