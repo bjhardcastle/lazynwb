@@ -181,8 +181,8 @@ class FileAccessor:
         # try lightweight version first:
         if isinstance(path, str):
             cache_key = path.replace("\\", "/")
-        elif hasattr(path, "as_posix"):
-            cache_key = path.as_posix()
+        elif (as_posix := getattr(path, "as_posix", None)):
+            cache_key = as_posix
         else:
             cache_key = from_pathlike(path, **config.fsspec_storage_options).as_posix()
 
