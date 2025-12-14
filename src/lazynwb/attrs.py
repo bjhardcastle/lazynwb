@@ -23,34 +23,25 @@ import lazynwb.utils
 logger = logging.getLogger(__name__)
 
 
-class AttrsDict(TypedDict, total=False):
-    """
-    A TypedDict representing attributes for an internal path.
-
-    Maps attribute names to dicts containing 'common' values and per-file variations.
-    """
-
-    common: Any
-
 
 # Per-FileAccessor attrs caches: {FileAccessor._path: {internal_path: {attr_name: {...}}}}
-_attrs_cache: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+_attrs_cache: dict[str, dict[str, dict[str, dict[str, Any]] | None]] = {}
 _attrs_cache_lock = threading.RLock()
 
 
 def _get_cache_key(file_accessor: lazynwb.file_io.FileAccessor) -> str:
-    """Get a cache key from a FileAccessor's path."""
+    """Get normalized cache key for a FileAccessor."""
     return file_accessor._path.as_posix()
 
 
 def _get_attrs_from_accessor(
     obj: h5py.Dataset | h5py.Group | zarr.Array | zarr.Group,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Extract all attributes from an h5py or zarr object, converting to JSON-compatible types."""
-    try:
-        attrs = dict(obj.attrs) if hasattr(obj, "attrs") else {}
-    except (AttributeError, ValueError):
-        attrs = {}
+    attrs = getattr(obj, "attrs", None)
+    if attrs is None:
+        return None
+    attrs = dict(attrs)
 
     # Convert to JSON-compatible types
     converted: dict[str, Any] = {}
@@ -96,24 +87,12 @@ def _to_json_compatible(value: object) -> object:
 
 
 def _filter_attrs(
-    attrs: dict[str, Any],
+    attrs: dict[str, Any] | None,
     exclude_private: bool = True,
+    exclude_empty_fields: bool = False,
 ) -> dict[str, Any]:
-    """
-    Filter attributes based on user preferences.
-
-    Parameters
-    ----------
-    attrs : dict[str, Any]
-        Attributes dictionary to filter.
-    exclude_private : bool, default True
-        If True, exclude attributes starting with underscore or dot, 'id' field, and 'target'.
-
-    Returns
-    -------
-    dict[str, Any]
-        Filtered attributes dictionary.
-    """
+    if attrs is None:
+        return {}
     filtered = attrs.copy()
     if exclude_private:
         filtered = {
@@ -125,6 +104,8 @@ def _filter_attrs(
         filtered.pop("object_id", None)
         filtered.pop("namespace", None)
         filtered.pop("target", None)
+    if exclude_empty_fields:
+        filtered = {k: v for k, v in filtered.items() if v not in (None, {}, [], "", "no description")}
     return filtered
 
 
@@ -132,6 +113,7 @@ def get_attrs(
     nwb_path: lazynwb.types_.PathLike,
     internal_path: str,
     exclude_private: bool = True,
+    exclude_empty_fields: bool = False,
 ) -> dict[str, Any]:
     """
     Retrieve all attributes for a single internal path in an NWB file (cached).
@@ -144,12 +126,15 @@ def get_attrs(
         Internal path within the NWB file (e.g., '/units', '/units/spike_times',
         '/general/subject').
     exclude_private : bool, default True
-        If True, exclude attributes starting with underscore and the 'id' field.
+        If True, exclude attributes starting with underscore or period, and the 'id' attr.
+    exclude_empty_fields : bool, default False
+        If True, exclude attributes with empty values (None, empty dict, empty list, empty string, "no description").
 
     Returns
     -------
     dict[str, Any]
         Dictionary mapping attribute names to their values.
+        path has no attributes.
 
     Examples
     --------
@@ -170,24 +155,17 @@ def get_attrs(
             if internal_path in _attrs_cache[cache_key]:
                 cached_attrs = _attrs_cache[cache_key][internal_path]
                 # Return filtered view of cached attrs
-                return _filter_attrs(cached_attrs, exclude_private)
+                return _filter_attrs(cached_attrs, exclude_private=exclude_private, exclude_empty_fields=exclude_empty_fields)
 
         # Cache miss: retrieve from file
-        try:
-            obj = file_accessor.get(internal_path)
-            if obj is None:
-                attrs = {}
-            else:
-                attrs = _get_attrs_from_accessor(obj)
-        except (KeyError, AttributeError, TypeError):
-            attrs = {}
+        attrs: dict | None = _get_attrs_from_accessor(file_accessor[internal_path])
 
-        # Store in cache
+        # Store in cache (even if None, to avoid repeat lookup)
         if cache_key not in _attrs_cache:
             _attrs_cache[cache_key] = {}
         _attrs_cache[cache_key][internal_path] = attrs
 
-        return _filter_attrs(attrs, exclude_private)
+        return _filter_attrs(attrs, exclude_private=exclude_private, exclude_empty_fields=exclude_empty_fields)
 
 
 def _post_process_attrs(
@@ -252,8 +230,7 @@ def get_sub_attrs(
     """
     Retrieve all attributes for all objects under a parent path (optimized).
 
-    Recursively traverses the file structure from the parent path and collects attributes
-    for each group and dataset encountered. Results are cached.
+    Recursively traverses the file structure from the parent path and collects attributes for each group and dataset encountered. Results are cached.
 
     Parameters
     ----------
@@ -262,7 +239,7 @@ def get_sub_attrs(
     parent_path : str, default "/"
         Parent path to start traversal from (e.g., '/units', '/general').
     exclude_private : bool, default True
-        If True, exclude attributes starting with underscore and the 'id' field.
+        If True, exclude attributes starting with underscore or period, and the 'id' attr.
     exclude_empty : bool, default True
         If True, exclude paths with empty attribute dicts.
 
@@ -309,7 +286,7 @@ def get_sub_attrs(
             else:
                 attrs = _attrs_cache[cache_key][current_path]
 
-        result[current_path] = _filter_attrs(attrs, exclude_private)
+        result[current_path] = _filter_attrs(attrs, exclude_private=exclude_private, exclude_empty_fields=exclude_empty)
 
         # Recurse into children
         if lazynwb.file_io.is_group(obj):
@@ -400,7 +377,7 @@ def consolidate_attrs(
     internal_path : str
         Internal path to get attributes for (e.g., '/units', '/units/spike_times').
     exclude_private : bool, default True
-        If True, exclude attributes starting with underscore and the 'id' field.
+        If True, exclude attributes starting with underscore or period, and the 'id' attr.
 
     Returns
     -------
