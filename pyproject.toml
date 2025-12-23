@@ -19,6 +19,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "s3fs>=2025.7.0",
     "requests>=2.32.4",
+    "obstore>=0.8.2",
 ]
 version = "0.2.77"
 classifiers = [
