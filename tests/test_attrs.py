@@ -30,13 +30,12 @@ def test_get_attrs(nwb_fixture_name: str, request: pytest.FixtureRequest) -> Non
 
 
 def test_get_attrs_nonexistent(local_hdf5_path: pathlib.Path) -> None:
-    """Test that nonexistent path returns empty dict."""
-    attrs = lazynwb.attrs.get_attrs(
-        nwb_path=local_hdf5_path,
-        internal_path="/nonexistent/path",
-    )
-    assert isinstance(attrs, dict)
-    assert len(attrs) == 0
+    """Test that nonexistent path raises KeyError."""
+    with pytest.raises(KeyError):
+        lazynwb.attrs.get_attrs(
+            nwb_path=local_hdf5_path,
+            internal_path="/nonexistent/path",
+        )
 
 
 def test_get_attrs_filtering(local_hdf5_path: pathlib.Path) -> None:
