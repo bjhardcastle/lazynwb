@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from typing import Any
 
 import h5py
+import obstore.fsspec
 import pydantic
 import remfile
 import upath
@@ -27,7 +28,8 @@ class FileIOConfig(pydantic.BaseModel):
     Global configuration for file I/O behavior.
     """
 
-    use_remfile: bool = True
+    use_remfile: bool = False
+    use_obstore: bool = True
     fsspec_storage_options: dict[str, Any] = {
         "anon": False,
     }
@@ -86,13 +88,17 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     is_zarr = "zarr" in key
     if not is_zarr:
         with contextlib.suppress(Exception):
-            return _open_hdf5(u, use_remfile=config.use_remfile)
+            return _open_hdf5(u, use_remfile=config.use_remfile, use_obstore=config.use_obstore)
     with contextlib.suppress(Exception):
-        return zarr.open(store=u, mode="r")
+        if config.use_obstore and u.protocol and u.protocol != "file":
+            store = obstore.store.from_url(key.split('//')[-1].split('/')[0], **config.fsspec_storage_options)
+            return zarr.open(store, mode="r")
+        else:
+            return zarr.open(u, mode="r")
     raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
 
 
-def _open_hdf5(path: upath.UPath, use_remfile: bool = True) -> h5py.File:
+def _open_hdf5(path: upath.UPath, use_obstore: bool = True, use_remfile: bool = False) -> h5py.File:
     if not path.protocol:
         # local path: open the file with h5py directly
         return h5py.File(path.as_posix(), mode="r")
@@ -104,6 +110,11 @@ def _open_hdf5(path: upath.UPath, use_remfile: bool = True) -> h5py.File:
             logger.warning(
                 f"remfile failed to open {path}, falling back to fsspec: {exc!r}"
             )
+    if use_obstore:
+        file = obstore.fsspec.BufferedFile(
+            fs=obstore.fsspec.FsspecStore(path.protocol), # type: ignore[call-overload]
+            path=path.as_posix(),
+        )
     if file is None:
         file = path.open(mode="rb", cache_type="first")
     return h5py.File(file, mode="r")
