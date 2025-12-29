@@ -11,6 +11,7 @@ import dotenv
 from lazynwb.attrs import *
 from lazynwb.base import *
 from lazynwb.conversion import *
+from lazynwb.dandi import *
 from lazynwb.file_io import *
 from lazynwb.lazyframe import *
 from lazynwb.tables import *
