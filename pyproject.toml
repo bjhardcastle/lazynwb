@@ -20,7 +20,7 @@ dependencies = [
     "s3fs>=2025.7.0",
     "requests>=2.32.4",
 ]
-version = "0.2.76"
+version = "0.2.77"
 classifiers = [
     "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",

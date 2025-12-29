@@ -26,9 +26,7 @@ def _get_session() -> requests.Session:
     return session
 
 
-def _get_most_recent_dandiset_version(
-    dandiset_id: str
-) -> str:
+def _get_most_recent_dandiset_version(dandiset_id: str) -> str:
     """Get the latest version string for a dandiset."""
     session = _get_session()
     path = f"{DANDI_API_BASE}/dandisets/{dandiset_id}/"

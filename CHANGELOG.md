@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.75...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.76...HEAD)</small>
+
+### Added
+
+- Add module for accessing dandisets ([7ad14ad](https://github.com/bjhardcastle/lazynwb/commit/7ad14ad893a6d8f5dec6d940e9249678809c916b) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.76](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.76) - 2025-11-07
+
+<small>[Compare with v0.2.75](https://github.com/bjhardcastle/lazynwb/compare/v0.2.75...v0.2.76)</small>
 
 ### Added
 
@@ -18,7 +27,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Fix tests ([de34d45](https://github.com/bjhardcastle/lazynwb/commit/de34d453c2d854729af2fb8541eb750195f01358) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.75](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.75) - 2025-09-11
 
 <small>[Compare with v0.2.74](https://github.com/bjhardcastle/lazynwb/compare/v0.2.74...v0.2.75)</small>

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Iterable
-from typing import Any, TypedDict
+from typing import Any
 
 import h5py
 import zarr
@@ -21,7 +21,6 @@ import lazynwb.types_
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
-
 
 
 # Per-FileAccessor attrs caches: {FileAccessor._path: {internal_path: {attr_name: {...}}}}
@@ -105,7 +104,11 @@ def _filter_attrs(
         filtered.pop("namespace", None)
         filtered.pop("target", None)
     if exclude_empty_fields:
-        filtered = {k: v for k, v in filtered.items() if v not in (None, {}, [], "", "no description")}
+        filtered = {
+            k: v
+            for k, v in filtered.items()
+            if v not in (None, {}, [], "", "no description")
+        }
     return filtered
 
 
@@ -155,7 +158,11 @@ def get_attrs(
             if internal_path in _attrs_cache[cache_key]:
                 cached_attrs = _attrs_cache[cache_key][internal_path]
                 # Return filtered view of cached attrs
-                return _filter_attrs(cached_attrs, exclude_private=exclude_private, exclude_empty_fields=exclude_empty_fields)
+                return _filter_attrs(
+                    cached_attrs,
+                    exclude_private=exclude_private,
+                    exclude_empty_fields=exclude_empty_fields,
+                )
 
         # Cache miss: retrieve from file
         attrs: dict | None = _get_attrs_from_accessor(file_accessor[internal_path])
@@ -165,7 +172,11 @@ def get_attrs(
             _attrs_cache[cache_key] = {}
         _attrs_cache[cache_key][internal_path] = attrs
 
-        return _filter_attrs(attrs, exclude_private=exclude_private, exclude_empty_fields=exclude_empty_fields)
+        return _filter_attrs(
+            attrs,
+            exclude_private=exclude_private,
+            exclude_empty_fields=exclude_empty_fields,
+        )
 
 
 def _post_process_attrs(
@@ -286,7 +297,9 @@ def get_sub_attrs(
             else:
                 attrs = _attrs_cache[cache_key][current_path]
 
-        result[current_path] = _filter_attrs(attrs, exclude_private=exclude_private, exclude_empty_fields=exclude_empty)
+        result[current_path] = _filter_attrs(
+            attrs, exclude_private=exclude_private, exclude_empty_fields=exclude_empty
+        )
 
         # Recurse into children
         if lazynwb.file_io.is_group(obj):
