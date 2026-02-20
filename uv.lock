@@ -910,6 +910,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+pynwb = [
+    { name = "hdmf-zarr" },
+    { name = "pynwb" },
+]
+
+[package.dev-dependencies]
 bump = [
     { name = "bump-my-version" },
     { name = "git-changelog" },
@@ -919,14 +925,11 @@ linting = [
     { name = "isort" },
     { name = "ruff" },
 ]
-pynwb = [
-    { name = "hdmf-zarr" },
-    { name = "pynwb" },
-]
 task-runner = [
     { name = "poethepoet" },
 ]
 testing = [
+    { name = "lazynwb", extra = ["pynwb"] },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -934,32 +937,41 @@ testing = [
 
 [package.metadata]
 requires-dist = [
-    { name = "black", marker = "extra == 'linting'", specifier = ">=25.1.0" },
-    { name = "bump-my-version", marker = "extra == 'bump'", specifier = ">=1.1.1" },
     { name = "dotenv", specifier = ">=0.9.9" },
-    { name = "git-changelog", marker = "extra == 'bump'", specifier = ">=2.5.3" },
     { name = "h5py", specifier = ">=3.10.0" },
     { name = "hdmf-zarr", marker = "extra == 'pynwb'", specifier = "==0.11.0" },
-    { name = "isort", marker = "extra == 'linting'", specifier = ">=6.0.1" },
-    { name = "mypy", marker = "extra == 'testing'", specifier = ">=1.4.1" },
     { name = "numcodecs", specifier = "<0.16" },
     { name = "obstore", specifier = ">=0.8.2" },
     { name = "pandas", specifier = ">=2.0.0" },
-    { name = "poethepoet", marker = "extra == 'task-runner'", specifier = ">=0.33.1" },
     { name = "polars", extras = ["pandas"], specifier = ">1.32.0" },
     { name = "pydantic", specifier = ">=2.11.6" },
     { name = "pynwb", marker = "extra == 'pynwb'", specifier = "==3.0.0" },
-    { name = "pytest", marker = "extra == 'testing'", specifier = ">=7.4.0" },
-    { name = "pytest-cov", marker = "extra == 'testing'", specifier = ">=4.1.0" },
     { name = "remfile", specifier = ">=0.1.10" },
     { name = "requests", specifier = ">=2.32.4" },
-    { name = "ruff", marker = "extra == 'linting'", specifier = ">=0.11.2" },
     { name = "s3fs", specifier = ">=2025.7.0" },
     { name = "tqdm", specifier = ">=4.66.2" },
     { name = "universal-pathlib", specifier = ">=0.1.4" },
     { name = "zarr", specifier = ">=2.17.0,<3.0" },
 ]
-provides-extras = ["task-runner", "linting", "testing", "bump", "pynwb"]
+provides-extras = ["pynwb"]
+
+[package.metadata.requires-dev]
+bump = [
+    { name = "bump-my-version", specifier = ">=1.1.1" },
+    { name = "git-changelog", specifier = ">=2.5.3" },
+]
+linting = [
+    { name = "black", specifier = ">=25.1.0" },
+    { name = "isort", specifier = ">=6.0.1" },
+    { name = "ruff", specifier = ">=0.11.2" },
+]
+task-runner = [{ name = "poethepoet", specifier = ">=0.33.1" }]
+testing = [
+    { name = "lazynwb", extras = ["pynwb"] },
+    { name = "mypy", specifier = ">=1.4.1" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+]
 
 [[package]]
 name = "markdown-it-py"
