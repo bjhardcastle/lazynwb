@@ -194,7 +194,7 @@ def get_timeseries(
     else:
         path_to_accessor = {
             _format(k): TimeSeries(_file_path=nwb_path, _table_path=_format(k))
-            for k in lazynwb.utils._traverse_internal_paths(file._file)
+            for k in lazynwb.file_io.get_internal_paths(nwb_path)
             if k.split("/")[-1] in ("data", "timestamps")
             and (not search_term or search_term in k)
             # regular timeseries will be a dir with /data and optional /timestamps
