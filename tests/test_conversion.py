@@ -16,11 +16,15 @@ OVERRIDE_DIR: None | pathlib.Path = (
     else pathlib.Path(__file__).parent / "files" / "converted_tables"
 )
 
-@pytest.mark.xfail(reason="Fails with zarr v2: zarr v3 not supported by hdmf-zarr")
 @pytest.mark.parametrize(
     "nwb_fixture_name",
     [
-        "local_zarr_paths", # will not pass until hdmf-zarr supports zarr v3
+        pytest.param(
+            "local_zarr_paths",
+            marks=pytest.mark.xfail(
+                reason="Fails with zarr v2: zarr v3 not supported by hdmf-zarr"
+            ),
+        ),
         "local_hdf5_paths",
     ],
 )
