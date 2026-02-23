@@ -19,12 +19,7 @@ OVERRIDE_DIR: None | pathlib.Path = (
 @pytest.mark.parametrize(
     "nwb_fixture_name",
     [
-        pytest.param(
-            "local_zarr_paths",
-            marks=pytest.mark.xfail(
-                reason="Fails with zarr v2: zarr v3 not supported by hdmf-zarr"
-            ),
-        ),
+        "local_zarr_paths",
         "local_hdf5_paths",
     ],
 )

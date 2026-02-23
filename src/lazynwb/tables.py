@@ -472,11 +472,15 @@ def _get_table_data(
             if column_accessors[column_name].dtype.kind in ("S", "O"):
                 try:
                     data_column_accessor = column_accessors[column_name].asstr()
-                except (AttributeError, TypeError):
-                    # - no way to tell apart hdf5 reference columns, but if the above fails, we cast to
+                except TypeError:
+                    # no way to tell apart hdf5 reference columns, but if the above fails, we cast to
                     # string differently, resulting in '<HDF5 object reference>'
-                    # - zarr Array as no attribute 'asstr'
                     data_column_accessor = column_accessors[column_name].astype(str)
+                except AttributeError:
+                    # zarr Array has no attribute 'asstr', and .astype(str) creates
+                    # a wrapper that fails on chunk decoding - read directly instead
+                    # (zarr already returns strings for object-dtype arrays)
+                    data_column_accessor = column_accessors[column_name]
             else:
                 data_column_accessor = column_accessors[column_name]
             column_data[column_name] = _get_indexed_column_data(
