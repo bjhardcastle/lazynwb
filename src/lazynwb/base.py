@@ -288,7 +288,7 @@ class LazyNWB:
         return {
             **self._to_dict(),
             **self.subject._to_dict(),
-            "paths": list(lazynwb.utils._traverse_internal_paths(self._file).keys()),
+            "paths": list(lazynwb.file_io.get_internal_paths(self._file._path).keys()),
         }
 
 
