@@ -98,6 +98,9 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
 
 
+_OBSTORE_PROTOCOLS = frozenset({"s3", "gs", "gcs", "az", "abfs"})
+
+
 def _open_hdf5(path: upath.UPath, use_obstore: bool = True, use_remfile: bool = False) -> h5py.File:
     if not path.protocol:
         # local path: open the file with h5py directly
@@ -110,11 +113,14 @@ def _open_hdf5(path: upath.UPath, use_obstore: bool = True, use_remfile: bool = 
             logger.warning(
                 f"remfile failed to open {path}, falling back to fsspec: {exc!r}"
             )
-    if use_obstore:
+    if use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
         file = obstore.fsspec.BufferedFile(
             fs=obstore.fsspec.FsspecStore(path.protocol), # type: ignore[call-overload]
             path=path.as_posix(),
         )
+    if file is None and path.protocol in ("http", "https"):
+        # obstore doesn't support http/https; remfile handles byte-range requests well for these
+        file = remfile.File(url=path.as_posix())
     if file is None:
         file = path.open(mode="rb", cache_type="first")
     return h5py.File(file, mode="r")
