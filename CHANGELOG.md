@@ -8,13 +8,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.76...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.77...HEAD)</small>
+
+### Added
+
+- Add 'electrodes' property to TimeSeries ([bde966d](https://github.com/bjhardcastle/lazynwb/commit/bde966d896bfc2e611799349424b9098313dc6b3) by Josh Siegle).
+- Add obstore ([436f393](https://github.com/bjhardcastle/lazynwb/commit/436f393ec8a93dd4344a08cf143a4cf3a6a8f782) by bjhardcastle).
+
+### Fixed
+
+- Fix conversion from zarr files ([ddab788](https://github.com/bjhardcastle/lazynwb/commit/ddab7885b96c3073da86ef9711ce930c16b62b3f) by bjhardcastle).
+- Fix access to http paths with obstore ([14374bf](https://github.com/bjhardcastle/lazynwb/commit/14374bf04bfef1e80aef0c85bd54b8ed5f29e012) by bjhardcastle).
+- Fix internal path function location ([d6ca9ec](https://github.com/bjhardcastle/lazynwb/commit/d6ca9ec035712c4f4e2bb4dd64ae64d4b3c4bb64) by bjhardcastle).
+- Fix optional dependency groups ([1be9506](https://github.com/bjhardcastle/lazynwb/commit/1be95061e40c35d0a217070b7d6e95324776a6fb) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.77](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.77) - 2025-12-29
+
+<small>[Compare with v0.2.76](https://github.com/bjhardcastle/lazynwb/compare/v0.2.76...v0.2.77)</small>
 
 ### Added
 
 - Add module for accessing dandisets ([7ad14ad](https://github.com/bjhardcastle/lazynwb/commit/7ad14ad893a6d8f5dec6d940e9249678809c916b) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.76](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.76) - 2025-11-07
 
 <small>[Compare with v0.2.75](https://github.com/bjhardcastle/lazynwb/compare/v0.2.75...v0.2.76)</small>

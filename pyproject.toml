@@ -21,7 +21,7 @@ dependencies = [
     "requests>=2.32.4",
     "obstore>=0.8.2",
 ]
-version = "0.2.78"
+version = "0.2.79"
 classifiers = [
     "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",

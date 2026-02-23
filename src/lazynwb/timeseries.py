@@ -66,9 +66,7 @@ class TimeSeries:
                 raise lazynwb.exceptions.InternalPathError(
                     f"{self._table_path} not found in file"
                 ) from None
-            raise AttributeError(
-                f"{self._table_path} has no electrode data"
-            )
+            raise AttributeError(f"{self._table_path} has no electrode data")
 
     @property
     def conversion(self) -> float | None:

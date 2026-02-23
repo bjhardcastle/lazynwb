@@ -88,10 +88,14 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     is_zarr = "zarr" in key
     if not is_zarr:
         with contextlib.suppress(Exception):
-            return _open_hdf5(u, use_remfile=config.use_remfile, use_obstore=config.use_obstore)
+            return _open_hdf5(
+                u, use_remfile=config.use_remfile, use_obstore=config.use_obstore
+            )
     with contextlib.suppress(Exception):
         if config.use_obstore and u.protocol and u.protocol != "file":
-            store = obstore.store.from_url(key.split('//')[-1].split('/')[0], **config.fsspec_storage_options)
+            store = obstore.store.from_url(
+                key.split("//")[-1].split("/")[0], **config.fsspec_storage_options
+            )
             return zarr.open(store, mode="r")
         else:
             return zarr.open(u, mode="r")
@@ -101,7 +105,9 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
 _OBSTORE_PROTOCOLS = frozenset({"s3", "gs", "gcs", "az", "abfs"})
 
 
-def _open_hdf5(path: upath.UPath, use_obstore: bool = True, use_remfile: bool = False) -> h5py.File:
+def _open_hdf5(
+    path: upath.UPath, use_obstore: bool = True, use_remfile: bool = False
+) -> h5py.File:
     if not path.protocol:
         # local path: open the file with h5py directly
         return h5py.File(path.as_posix(), mode="r")
@@ -115,7 +121,7 @@ def _open_hdf5(path: upath.UPath, use_obstore: bool = True, use_remfile: bool = 
             )
     if use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
         file = obstore.fsspec.BufferedFile(
-            fs=obstore.fsspec.FsspecStore(path.protocol), # type: ignore[call-overload]
+            fs=obstore.fsspec.FsspecStore(path.protocol),  # type: ignore[call-overload]
             path=path.as_posix(),
         )
     if file is None and path.protocol in ("http", "https"):

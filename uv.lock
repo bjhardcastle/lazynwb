@@ -887,7 +887,7 @@ wheels = [
 
 [[package]]
 name = "lazynwb"
-version = "0.2.77"
+version = "0.2.79"
 source = { editable = "." }
 dependencies = [
     { name = "dotenv" },
