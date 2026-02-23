@@ -58,6 +58,19 @@ class TimeSeries:
             return (np.arange(len(self.data)) / rate) + starting_time
 
     @property
+    def electrodes(self) -> h5py.Dataset | zarr.Array:
+        try:
+            return self._file[f"{self._table_path}/electrodes"]
+        except KeyError:
+            if self._table_path not in self._file:
+                raise lazynwb.exceptions.InternalPathError(
+                    f"{self._table_path} not found in file"
+                ) from None
+            raise AttributeError(
+                f"{self._table_path} has no electrode data"
+            )
+
+    @property
     def conversion(self) -> float | None:
         return self.data.attrs.get("conversion", None)
 
