@@ -391,7 +391,7 @@ def _filter_table_paths(internal_paths: dict[str, Any]) -> list[str]:
                 "/trials",
                 "/epochs",
             ]
-        ):
+        ) and lazynwb.file_io.is_group(accessor):
             table_paths.append(path)
             continue
 

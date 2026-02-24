@@ -3,9 +3,15 @@ from __future__ import annotations
 import contextlib
 import pathlib
 import tempfile
+import uuid
+from datetime import datetime, timezone
 
+import numpy as np
 import polars as pl
 import pytest
+from pynwb import NWBHDF5IO, NWBFile
+from pynwb.device import Device
+from pynwb.ecephys import ElectricalSeries, LFP
 
 import lazynwb
 
@@ -178,6 +184,75 @@ def test_sql_context(nwb_fixture_name, request):
         infer_schema_length=1,
     )
     assert (actual := sql_context.execute("SELECT COUNT(DISTINCT _nwb_path) FROM units", eager=True).height) == 1, f"infer_schema_length should limit to one unique path, got {actual}"
+
+def test_convert_nwb_tables_skips_electrical_series_electrodes_array():
+    """Regression test: ElectricalSeries.electrodes is a DynamicTableRegion array (not a
+    group/table). Paths like /processing/ecephys/LFP/.../electrodes must not be treated as
+    tables, otherwise _get_table_column_accessors raises AttributeError when calling .get()
+    on the array.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        nwb_path = pathlib.Path(tmp) / "ecephys.nwb"
+
+        nwbfile = NWBFile(
+            session_description="ecephys test",
+            identifier=str(uuid.uuid4()),
+            session_start_time=datetime.now(tz=timezone.utc),
+        )
+
+        device = nwbfile.create_device(name="probe0", description="silicon probe")
+        electrode_group = nwbfile.create_electrode_group(
+            name="shank0", description="shank 0", location="CA1", device=device
+        )
+        n_channels = 4
+        for i in range(n_channels):
+            nwbfile.add_electrode(
+                group=electrode_group,
+                location="CA1",
+                filtering="none",
+            )
+
+        electrode_region = nwbfile.create_electrode_table_region(
+            list(range(n_channels)), "all electrodes"
+        )
+        n_samples = 10
+        lfp_data = np.zeros((n_samples, n_channels))
+        es = ElectricalSeries(
+            name="ElectricalSeries46113-LFP",
+            data=lfp_data,
+            electrodes=electrode_region,
+            timestamps=np.linspace(0, 1, n_samples),
+        )
+        lfp = LFP(electrical_series=es)
+        ecephys_module = nwbfile.create_processing_module(
+            name="ecephys", description="ecephys"
+        )
+        ecephys_module.add(lfp)
+
+        with NWBHDF5IO(str(nwb_path), "w") as io:
+            io.write(nwbfile)
+
+        output_dir = pathlib.Path(tmp) / "out"
+        try:
+            # Should not raise AttributeError: 'Array' object has no attribute 'get'
+            output_paths = lazynwb.convert_nwb_tables(
+                nwb_sources=[nwb_path],
+                output_dir=output_dir,
+                output_format="parquet",
+                min_file_count=1,
+                disable_progress=True,
+            )
+        finally:
+            lazynwb.clear_cache()  # release file handles before temp dir cleanup (Windows)
+
+        # The /electrodes table should be converted; the .../electrodes DynamicTableRegion should not
+        assert any("electrodes" in k for k in output_paths), (
+            "Expected root electrodes table to be converted"
+        )
+        assert not any(
+            "LFP" in k and "electrodes" in k for k in output_paths
+        ), "ElectricalSeries.electrodes array should not appear as a converted table"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", '--pdb'])

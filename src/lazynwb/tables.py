@@ -809,6 +809,10 @@ def _get_table_column_accessors(
     names_to_columns: dict[str, zarr.Array | h5py.Dataset] = {}
     t0 = time.time()
     table = lazynwb.file_io._get_accessor(file_path)[table_path]
+    if not lazynwb.file_io.is_group(table):
+        raise lazynwb.exceptions.InternalPathError(
+            f"{table_path!r} is not a group/table (found {type(table).__name__})"
+        )
     if use_thread_pool:
         future_to_column = {
             lazynwb.utils.get_threadpool_executor().submit(
