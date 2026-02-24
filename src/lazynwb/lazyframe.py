@@ -92,9 +92,14 @@ def scan_nwb(
     ) -> pl.DataFrame:
         """
         Apply the schema to the DataFrame, converting columns to the specified types.
+        Uses strict=False so that NaN values in float columns cast to a nullable integer
+        schema become null rather than raising an error (e.g. brain_region_id stored as
+        f64 with NaN in some files, i64 in others).
         """
-        return pl.DataFrame(
-            df, schema={column: schema[column] for column in df.columns}
+        return df.with_columns(
+            pl.col(col).cast(schema[col], strict=False)
+            for col in df.columns
+            if col in schema and df.schema[col] != schema[col]
         )
 
     def source_generator(

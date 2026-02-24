@@ -1,9 +1,16 @@
 import logging
+import pathlib
+import tempfile
+import uuid
+from datetime import datetime, timezone
 
 import polars as pl
 import pytest
 
 import h5py
+from pynwb import NWBHDF5IO, NWBFile
+from pynwb.epoch import TimeIntervals
+
 import lazynwb
 import lazynwb.tables
 
@@ -242,6 +249,75 @@ def test_unique_count(local_hdf5_paths):
     df = lazynwb.scan_nwb(local_hdf5_paths, 'units').select('structure').unique().collect()
     assert len(df) == 1, f"Unique count should return a single row for the 'structure' column - check internal columns (underscore prefix) aren't being counted: {df=}"
     
+def test_scan_nwb_nan_int_column_becomes_nullable_int():
+    """Regression test: a column stored as f64 with NaN in some files (because HDF5 cannot
+    represent NaN in integer types) must cast to nullable i64, not raise a ComputeError.
+    The schema is inferred as i64 (most common across files); _apply_schema uses strict=False
+    so NaN values become null rather than causing a cast failure.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        paths = []
+
+        # Two files where brain_region_id is an integer → HDF5 stores as i64
+        for i in range(2):
+            nwb = NWBFile(
+                session_description=f"test {i}",
+                identifier=str(uuid.uuid4()),
+                session_start_time=datetime.now(tz=timezone.utc),
+            )
+            trials = TimeIntervals(name="trials")
+            trials.add_column(name="brain_region_id", description="integer brain region id")
+            trials.add_row(start_time=0.0, stop_time=1.0, brain_region_id=42)
+            trials.add_row(start_time=1.0, stop_time=2.0, brain_region_id=7)
+            nwb.trials = trials
+            path = tmp / f"file{i}.nwb"
+            paths.append(path)
+            with NWBHDF5IO(str(path), "w") as io:
+                io.write(nwb)
+
+        # One file where brain_region_id contains NaN → HDF5 must store as f64
+        nwb = NWBFile(
+            session_description="test with NaN",
+            identifier=str(uuid.uuid4()),
+            session_start_time=datetime.now(tz=timezone.utc),
+        )
+        trials = TimeIntervals(name="trials")
+        trials.add_column(name="brain_region_id", description="integer brain region id")
+        trials.add_row(start_time=0.0, stop_time=1.0, brain_region_id=float("nan"))
+        trials.add_row(start_time=1.0, stop_time=2.0, brain_region_id=15.0)
+        nwb.trials = trials
+        paths.append(tmp / "file_nan.nwb")
+        with NWBHDF5IO(str(paths[-1]), "w") as io:
+            io.write(nwb)
+
+        # Verify the NaN file actually stores the column as float in HDF5
+        with h5py.File(paths[-1], "r") as f:
+            assert f["/intervals/trials/brain_region_id"].dtype.kind == "f", (
+                "Prerequisite: HDF5 should store NaN column as float"
+            )
+
+        try:
+            df = lazynwb.read_nwb(
+                source=paths,
+                table_path="/intervals/trials",
+                disable_progress=True,
+            )
+        finally:
+            lazynwb.clear_cache()
+
+        # Schema must be nullable integer, not float — NaN → null, no ComputeError
+        assert df.schema["brain_region_id"] == pl.Int64, (
+            f"Expected nullable Int64, got {df.schema['brain_region_id']}"
+        )
+        assert df["brain_region_id"].null_count() == 1, (
+            f"Expected exactly 1 null (from NaN), got {df['brain_region_id'].null_count()}"
+        )
+        assert set(df["brain_region_id"].drop_nulls().to_list()) == {42, 7, 15}, (
+            "Integer values should be preserved"
+        )
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     pytest.main([__file__])
