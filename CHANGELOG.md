@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.79...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.80...HEAD)</small>
+
+### Fixed
+
+- Fix numerical parent types for tables with occasional nans ([c5195e7](https://github.com/bjhardcastle/lazynwb/commit/c5195e74e264d2575103ddfc5eb68ccc45a6b788) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.80](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.80) - 2026-02-24
+
+<small>[Compare with v0.2.79](https://github.com/bjhardcastle/lazynwb/compare/v0.2.79...v0.2.80)</small>
 
 ### Fixed
 
 - Fix zarr conversion ([80f96da](https://github.com/bjhardcastle/lazynwb/commit/80f96da210b76aef6dd5d9ebcde92b4f559b5297) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.79](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.79) - 2026-02-23
 
 <small>[Compare with v0.2.77](https://github.com/bjhardcastle/lazynwb/compare/v0.2.77...v0.2.79)</small>
