@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.77...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.79...HEAD)</small>
+
+### Fixed
+
+- Fix zarr conversion ([80f96da](https://github.com/bjhardcastle/lazynwb/commit/80f96da210b76aef6dd5d9ebcde92b4f559b5297) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.79](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.79) - 2026-02-23
+
+<small>[Compare with v0.2.77](https://github.com/bjhardcastle/lazynwb/compare/v0.2.77...v0.2.79)</small>
 
 ### Added
 
@@ -22,7 +31,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Fix internal path function location ([d6ca9ec](https://github.com/bjhardcastle/lazynwb/commit/d6ca9ec035712c4f4e2bb4dd64ae64d4b3c4bb64) by bjhardcastle).
 - Fix optional dependency groups ([1be9506](https://github.com/bjhardcastle/lazynwb/commit/1be95061e40c35d0a217070b7d6e95324776a6fb) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.77](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.77) - 2025-12-29
 
 <small>[Compare with v0.2.76](https://github.com/bjhardcastle/lazynwb/compare/v0.2.76...v0.2.77)</small>
