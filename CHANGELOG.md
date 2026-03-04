@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.81...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.82...HEAD)</small>
+
+### Added
+
+- Add __getattr__ to TimeSeries for extension attribute access ([e76b745](https://github.com/bjhardcastle/lazynwb/commit/e76b74527bb1184ae4e86658bc8b576557a44409) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.82](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.82) - 2026-03-04
+
+<small>[Compare with v0.2.81](https://github.com/bjhardcastle/lazynwb/compare/v0.2.81...v0.2.82)</small>
 
 ### Fixed
 
 - Fix test ([7361fcf](https://github.com/bjhardcastle/lazynwb/commit/7361fcfef57d1d18fe8e17ebb33d27640788298b) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.81](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.81) - 2026-02-24
 
 <small>[Compare with v0.2.80](https://github.com/bjhardcastle/lazynwb/compare/v0.2.80...v0.2.81)</small>
