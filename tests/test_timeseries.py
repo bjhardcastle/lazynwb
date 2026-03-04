@@ -51,6 +51,18 @@ def test_contents(local_hdf5_path):
     assert np.array_equal(test, reference), "Timeseries data mismatch"
 
 
+def test_getattr_missing_attribute(local_hdf5_path):
+    """Test that accessing a nonexistent attribute raises AttributeError."""
+    ts = lazynwb.get_timeseries(local_hdf5_path, "/processing/behavior/running_speed_with_timestamps", exact_path=True)
+    with pytest.raises(AttributeError):
+        _ = ts.nonexistent_attribute
+
+def test_getattr_private_attribute(local_hdf5_path):
+    """Test that accessing an undefined private attribute raises AttributeError immediately."""
+    ts = lazynwb.get_timeseries(local_hdf5_path, "/processing/behavior/running_speed_with_timestamps", exact_path=True)
+    with pytest.raises(AttributeError):
+        _ = ts._nonexistent
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     pytest.main([__file__])

@@ -123,6 +123,16 @@ class TimeSeries:
     def unit(self):
         return self.data.attrs.get("unit", None)
 
+    def __getattr__(self, name: str) -> h5py.Dataset | zarr.Array:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        try:
+            return self._file[f"{self._table_path}/{name}"]
+        except KeyError:
+            raise AttributeError(
+                f"'{self._table_path}' has no attribute '{name}'"
+            ) from None
+
 
 @typing.overload
 def get_timeseries(
