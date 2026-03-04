@@ -121,7 +121,7 @@ def _open_hdf5(
             )
     if use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
         file = obstore.fsspec.BufferedFile(
-            fs=obstore.fsspec.FsspecStore(path.protocol),  # type: ignore[call-overload]
+            fs=obstore.fsspec.FsspecStore(path.protocol, **config.fsspec_storage_options),  # type: ignore[call-overload]
             path=path.as_posix(),
         )
     if file is None and path.protocol in ("http", "https"):
