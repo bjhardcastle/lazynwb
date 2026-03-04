@@ -21,7 +21,6 @@ def get_large_hdf5_url() -> str:
 def get_small_zarr_url() -> str:
     return 's3://codeocean-s3datasetsbucket-1u41qdg42ur9/00865745-db58-495d-9c5e-e28424bb4b97/nwb/ecephys_721536_2024-05-16_12-32-31_experiment1_recording1.nwb'
 
-@pytest.mark.xfail(reason="Removed dandi helper function")
 @pytest.fixture
 def url(request: pytest.FixtureRequest) -> str:
     if request.param == 'large_hdf5':
