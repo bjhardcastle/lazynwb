@@ -8,153 +8,421 @@
 [![CI/CD](https://img.shields.io/github/actions/workflow/status/bjhardcastle/lazynwb/publish.yml?label=CI/CD&logo=github)](https://github.com/bjhardcastle/lazynwb/actions/workflows/publish.yml)
 [![GitHub issues](https://img.shields.io/github/issues/bjhardcastle/lazynwb?logo=github)](https://github.com/bjhardcastle/lazynwb/issues)
 
+Efficient read-only access to tables, time series and metadata across multiple local or cloud-hosted NWB files simultaneously, without loading entire files into memory.
 
-# Purpose
-
-## 1. Make NWB table access faster and/or consume less memory by reading only the data required, when it's needed
-
-As of 2025 and `pynwb==3.0`, there are a couple of ways to access data stored in an NWB file as a
-`DynamicTable` (e.g. `trials`, `units`):
--  get the `pandas` dataframe for the table and access the desired column
--  or access specific columns as arrays from disk
-
-The NWB schema for the `units` table includes columns for list-like or nested data, such as
-`spike_times`, `waveform_mean`, `waveform_sd`, which can become large for Neuropixels probes and
-often not needed in their entirety for analysis. Reading the entire table into memory may be unnecessary and,
-especially when reading from NWBs stored in the cloud, can be slow.
-
-Accessing individual columns as arrays, on the other hand, means we no longer have the convenience
-of a DataFrame.
-
-Ideally, we would filter our table based on metrics in some columns, then access the larger
-columns for the filtered subset of rows, seamlessly with a single command.
-
-To this end, `lazynwb.scan_nwb()` provides a
-[`polars.LazyFrame()`](https://docs.pola.rs/api/python/stable/reference/lazyframe/index.html)
-interface to NWB tables, which
-supports both predicate pushdown and
-projection of columns. 
-
-It also supports reading multiple NWB files in one operation, producing a
-concatenated table:
-
-```python
->>> import lazynwb
->>> import polars as pl
-
->>> (
-  lazynwb.scan_nwb(
-    [nwb_path_0, nwb_path_1, ...],  # single path or iterable
-    table_path='/units',             # or '/intervals/trials' etc
-  )
-  .filter(
-    pl.col('activity_drift') <= 0.2,
-    pl.col('amplitude_cutoff') <= 0.1,
-    pl.col('presence_ratio') >= 0.7,
-    pl.col('isi_violations_ratio') <= 0.5,
-    pl.col('decoder_label') != 'noise',
-  )
-  .select('unit_id', 'location', 'spike_times', '_nwb_path', '_table_row_index')
-  # _nwb_path and _table_row_index are not columns in the NWB table: they're added to identify source of each row in a table that spans multiple NWBs
-)
-shape: (101, 4)
-┌─────────┬─────────────────────────────────┬─────────────────────────────────┬──────────────┐
-│ unit_id ┆ spike_times                     ┆ _nwb_path                       ┆ _table_index │
-│ ---     ┆ ---                             ┆ ---                             ┆ ---          │
-│ i64     ┆ list[f64]                       ┆ str                             ┆ u32          │
-╞═════════╪═════════════════════════════════╪═════════════════════════════════╪══════════════╡
-│ 193     ┆ [2722.628735, 2723.620493, … 4… ┆ /data/ecephys_702960_2024-03-1… ┆ 5            │
-│ 23      ┆ [1784.801304, 1784.804037, … 3… ┆ /data/ecephys_725805_2024-07-1… ┆ 4            │
-│ 0       ┆ [9.2712e6, 9.2712e6, … 9.2731e… ┆ /data/ecephys_737812_2024-08-0… ┆ 0            │
-│ 300     ┆ [9.2713e6, 9.2714e6, … 9.2731e… ┆ /data/ecephys_737812_2024-08-0… ┆ 6            │
-│ 19      ┆ [6115.424355, 6116.428649, … 7… ┆ /data/ecephys_702960_2024-03-1… ┆ 5            │
-│ …       ┆ …                               ┆ …                               ┆ …            │
-│ 437     ┆ [581.476385, 598.829113, … 331… ┆ /data/ecephys_666859_2023-06-1… ┆ 40           │
-│ 439     ┆ [929.656482, 1134.993272, … 33… ┆ /data/ecephys_666859_2023-06-1… ┆ 41           │
-│ 446     ┆ [626.940861, 661.785209, … 331… ┆ /data/ecephys_666859_2023-06-1… ┆ 42           │
-│ 449     ┆ [618.939192, 618.991564, … 331… ┆ /data/ecephys_666859_2023-06-1… ┆ 43           │
-│ 609     ┆ [594.415999, 646.51812, … 3312… ┆ /data/ecephys_666859_2023-06-1… ┆ 44           │
-└─────────┴─────────────────────────────────┴─────────────────────────────────┴──────────────┘
+```
+pip install lazynwb
 ```
 
-## 2. Quickly provide a summary of the metadata for all NWB files in a project
-```python
->>> lazynwb.get_metadata_df(nwb_paths, as_polars=True)
-```Getting metadata: 100%|█████████████████████| 252/252 [00:17<00:00, 14.51file/s]
-shape: (252, 28)
-┌────────────┬────────────┬───────────┬───────────┬───┬────────┬───────────┬───────────┬───────────┐
-│ identifier ┆ session_st ┆ session_i ┆ session_d ┆ … ┆ weight ┆ strain    ┆ date_of_b ┆ _nwb_path │
-│ ---        ┆ art_time   ┆ d         ┆ escriptio ┆   ┆ ---    ┆ ---       ┆ irth      ┆ ---       │
-│ str        ┆ ---        ┆ ---       ┆ n         ┆   ┆ null   ┆ str       ┆ ---       ┆ str       │
-│            ┆ datetime[μ ┆ str       ┆ ---       ┆   ┆        ┆           ┆ datetime[ ┆           │
-│            ┆ s, UTC]    ┆           ┆ str       ┆   ┆        ┆           ┆ μs, UTC]  ┆           │
-╞════════════╪════════════╪═══════════╪═══════════╪═══╪════════╪═══════════╪═══════════╪═══════════╡
-│ 0514cf12-2 ┆ 2024-08-07 ┆ 713655_20 ┆ ecephys   ┆ … ┆ null   ┆ Sst-IRES- ┆ 2023-11-2 ┆ /data/dyn │
-│ 41f-4ab2-a ┆ 19:03:44   ┆ 24-08-07  ┆ session   ┆   ┆        ┆ Cre;Ai32  ┆ 3         ┆ amicrouti │
-│ ce9-1c2619 ┆ UTC        ┆           ┆ (day 3)   ┆   ┆        ┆           ┆ 08:00:00  ┆ ng_datacu │
-│ …          ┆            ┆           ┆ with b…   ┆   ┆        ┆           ┆ UTC       ┆ be_…      │
-│ 5c032dff-e ┆ 2024-12-06 ┆ 743199_20 ┆ ecephys   ┆ … ┆ null   ┆ VGAT-ChR2 ┆ 2024-05-1 ┆ /data/dyn │
-│ 04f-4884-9 ┆ 19:06:17   ┆ 24-12-06  ┆ session   ┆   ┆        ┆ -YFP      ┆ 8         ┆ amicrouti │
-│ 85d-055ac7 ┆ UTC        ┆           ┆ (day 4)   ┆   ┆        ┆           ┆ 07:00:00  ┆ ng_datacu │
-│ …          ┆            ┆           ┆ with b…   ┆   ┆        ┆           ┆ UTC       ┆ be_…      │
-│ 4a7e9fdb-4 ┆ 2022-09-27 ┆ 636397_20 ┆ ecephys   ┆ … ┆ null   ┆ C57BL6J(N ┆ 2022-06-0 ┆ /data/dyn │
-│ fab-4052-a ┆ 18:36:50   ┆ 22-09-27  ┆ session   ┆   ┆        ┆ P)        ┆ 2         ┆ amicrouti │
-│ 7fc-f2d109 ┆ UTC        ┆           ┆ (day 2)   ┆   ┆        ┆           ┆ 07:00:00  ┆ ng_datacu │
-│ …          ┆            ┆           ┆ with b…   ┆   ┆        ┆           ┆ UTC       ┆ be_…      │
-│ 9b4aab77-5 ┆ 2025-01-16 ┆ 744279_20 ┆ ecephys   ┆ … ┆ null   ┆ Sst-IRES- ┆ 2024-05-2 ┆ /data/dyn │
-│ 021-43f3-9 ┆ 22:01:37   ┆ 25-01-16  ┆ session   ┆   ┆        ┆ Cre;Ai32  ┆ 5         ┆ amicrouti │
-│ f18-b13291 ┆ UTC        ┆           ┆ (day 4)   ┆   ┆        ┆           ┆ 07:00:00  ┆ ng_datacu │
-│ …          ┆            ┆           ┆ with b…   ┆   ┆        ┆           ┆ UTC       ┆ be_…      │
-│ b0ba34cb-4 ┆ 2024-04-22 ┆ 706401_20 ┆ ecephys   ┆ … ┆ null   ┆ Sst-IRES- ┆ 2023-10-0 ┆ /data/dyn │
-...
-│ 971-495d-b ┆ 19:18:59   ┆ 25-03-18  ┆ session   ┆   ┆        ┆ -YFP      ┆ 6         ┆ amicrouti │
-│ 6ed-dc7b08 ┆ UTC        ┆           ┆ (day 1)   ┆   ┆        ┆           ┆ 07:00:00  ┆ ng_datacu │
-│ …          ┆            ┆           ┆ withou…   ┆   ┆        ┆           ┆ UTC       ┆ be_…      │
-└────────────┴────────────┴───────────┴───────────┴───┴────────┴───────────┴───────────┴───────────┘
-```
-
-## 3. Quickly provide a summary of the contents of a single NWB file
-```python
->>> lazynwb.get_internal_paths(nwb_paths[0])
-{
-  '/acquisition/frametimes_eye_camera/timestamps': <HDF5 dataset "timestamps": shape (267399,), type "<f8">,
-  '/acquisition/frametimes_front_camera/timestamps': <HDF5 dataset "timestamps": shape (267204,), type "<f8">,
-  '/acquisition/frametimes_side_camera/timestamps': <HDF5 dataset "timestamps": shape (267374,), type "<f8">,
-  '/acquisition/lick_sensor_events/data': <HDF5 dataset "data": shape (2734,), type "<f8">,
-  '/acquisition/lick_sensor_events/timestamps': <HDF5 dataset "timestamps": shape (2734,), type "<f8">,
-  '/intervals/aud_rf_mapping_trials': <HDF5 group "/intervals/aud_rf_mapping_trials" (10 members)>,
-  '/intervals/epochs': <HDF5 group "/intervals/epochs" (9 members)>,
-  '/intervals/performance': <HDF5 group "/intervals/performance" (21 members)>,
-  '/intervals/trials': <HDF5 group "/intervals/trials" (48 members)>,
-  '/intervals/vis_rf_mapping_trials': <HDF5 group "/intervals/vis_rf_mapping_trials" (12 members)>,
-  '/processing/behavior/dlc_eye_camera': <HDF5 group "/processing/behavior/dlc_eye_camera" (110 members)>,
-  '/processing/behavior/eye_tracking': <HDF5 group "/processing/behavior/eye_tracking" (26 members)>,
-  '/processing/behavior/facemap_front_camera/data': <HDF5 dataset "data": shape (267204, 500), type "<f4">,
-  '/processing/behavior/facemap_front_camera/timestamps': <HDF5 dataset "timestamps": shape (267204,), type "<f8">,
-  '/processing/behavior/facemap_side_camera/data': <HDF5 dataset "data": shape (267374, 500), type "<f4">,
-  '/processing/behavior/facemap_side_camera/timestamps': <HDF5 dataset "timestamps": shape (267374,), type "<f8">,
-  '/processing/behavior/licks/data': <HDF5 dataset "data": shape (2707,), type "<f8">,
-  '/processing/behavior/licks/timestamps': <HDF5 dataset "timestamps": shape (2707,), type "<f8">,
-  '/processing/behavior/lp_front_camera': <HDF5 group "/processing/behavior/lp_front_camera" (57 members)>,
-  '/processing/behavior/lp_side_camera': <HDF5 group "/processing/behavior/lp_side_camera" (57 members)>,
-  '/processing/behavior/quiescent_interval_violations/timestamps': <HDF5 dataset "timestamps": shape (131,), type "<f8">,
-  '/processing/behavior/rewards/timestamps': <HDF5 dataset "timestamps": shape (130,), type "<f8">,
-  '/processing/behavior/running_speed/data': <HDF5 dataset "data": shape (251998,), type "<f8">,
-  '/processing/behavior/running_speed/timestamps': <HDF5 dataset "timestamps": shape (251998,), type "<f8">
- }
-```
-## 4. Get the common schema for a table in one or more NWB files
-```python
->>> lazynwb.get_table_schema(nwb_paths, table_path="/intervals/trials")
-# uses polars (arrow) datatypes
-OrderedDict([('condition', String), ('id', Int64), ('start_time', Float64), ('stop_time', Float64), ('_nwb_path', String), ('_table_path', String), ('_table_index', UInt32)])
-```
 ---
 
-# Development
-See instructions in https://github.com/bjhardcastle/lazynwb/CONTRIBUTING.md and the original template: https://github.com/bjhardcastle/copier-pdm-npc/blob/main/README.md
+## Why lazynwb
 
-## notes
+With `pynwb`, each container type has its own access pattern - dot attributes,
+dictionary keys, and method calls get mixed together depending on where the data
+lives in the file:
 
-- hdf5 access seems to have a mutex lock that threads spend a long time waiting to
-  acquire (with remfile)
+```python
+# pynwb
+from pynwb import NWBHDF5IO
+io = NWBHDF5IO('my_file.nwb', 'r')
+nwb = io.read()
+
+nwb.units.to_dataframe()
+nwb.trials.to_dataframe()
+nwb.processing['behavior']['eye_tracking'].to_dataframe()
+nwb.processing['ophys']['Fluorescence']['RoiResponseSeries'].data[:]
+```
+
+You need to know whether something is a property, a dict-like container,
+or a DynamicTable, and chain the right combination for each.
+
+With `lazynwb`, every table is accessed the same way - by its internal path:
+
+```python
+# lazynwb
+import lazynwb
+
+lazynwb.get_df('my_file.nwb', '/units')
+lazynwb.get_df('my_file.nwb', '/intervals/trials')
+lazynwb.get_df('my_file.nwb', '/processing/behavior/eye_tracking')
+```
+
+And for time series data:
+```python
+ts = lazynwb.get_timeseries('my_file.nwb', '/processing/ophys/Fluorescence/RoiResponseSeries')
+ts.data[:]
+```
+
+No need to know the container class or chain attribute lookups. The same path
+works for any file, any backend (HDF5 or Zarr), local or remote, and extends to
+reading across multiple files in one call.
+
+`lazynwb` can also read only the columns and rows you request, rather than loading the entire table into memory first. This matters for tables with list- or array- like columns, like the `units` table, 
+where `spike_times` and `waveform_mean` can be very large compared to other single-value metrics columns.
+
+---
+
+## Quick start
+
+```python
+import lazynwb
+
+# read the trials table as a pandas DataFrame
+df = lazynwb.get_df('my_file.nwb', '/intervals/trials')
+```
+
+Use `get_internal_paths` to find available paths if you're not sure what's in a file:
+```python
+lazynwb.get_internal_paths('my_file.nwb')
+```
+
+---
+
+## Reading tables
+
+### As a pandas or polars DataFrame (`get_df`)
+
+Returns a pandas DataFrame by default:
+```python
+df = lazynwb.get_df('my_file.nwb', '/units')
+```
+
+Return a polars DataFrame instead:
+```python
+df = lazynwb.get_df('my_file.nwb', '/units', as_polars=True)
+```
+
+Select specific columns:
+```python
+df = lazynwb.get_df('my_file.nwb', '/units', include_column_names=['unit_id', 'location'])
+```
+
+Exclude specific columns:
+```python
+df = lazynwb.get_df('my_file.nwb', '/units', exclude_column_names=['waveform_mean'])
+```
+
+Large array columns like `spike_times` and `waveform_mean` are excluded by default
+(`exclude_array_columns=True`). Include them explicitly:
+```python
+df = lazynwb.get_df('my_file.nwb', '/units', exclude_array_columns=False)
+```
+
+Read a table across multiple files into a single DataFrame:
+```python
+df = lazynwb.get_df(
+    ['file_1.nwb', 'file_2.nwb', 'file_3.nwb'],
+    '/intervals/trials',
+)
+```
+
+Each row gets `_nwb_path`, `_table_path` and `_table_index` columns to identify its
+source file and original row index.
+
+### As a Polars LazyFrame (`scan_nwb`)
+
+`scan_nwb` returns a `polars.LazyFrame` that reads data on demand. Only the
+columns and rows you actually use are fetched from disk or the network, which
+makes it useful for large files or files on cloud storage.
+
+```python
+import lazynwb
+import polars as pl
+
+lf = lazynwb.scan_nwb('my_file.nwb', '/units')
+
+# filter rows and select columns - only the needed data is read
+df = (
+    lf
+    .filter(pl.col('presence_ratio') >= 0.9)
+    .select('unit_id', 'location', 'spike_times')
+    .collect()
+)
+```
+
+Read across multiple files:
+```python
+lf = lazynwb.scan_nwb(
+    ['file_1.nwb', 'file_2.nwb'],
+    '/units',
+)
+df = (
+    lf
+    .filter(
+        pl.col('amplitude_cutoff') <= 0.1,
+        pl.col('isi_violations_ratio') <= 0.5,
+    )
+    .select('unit_id', 'location', 'spike_times', '_nwb_path')
+    .collect()
+)
+```
+
+Control schema inference when files have slightly different column types:
+```python
+lf = lazynwb.scan_nwb(
+    nwb_paths,
+    '/units',
+    infer_schema_length=5,               # only read first 5 files for schema
+    schema_overrides={'unit_id': pl.Int64},  # force a column type
+)
+```
+
+There's also `read_nwb`, which is the same as `scan_nwb(...).collect()`:
+```python
+df = lazynwb.read_nwb(nwb_paths, '/units')  # returns pl.DataFrame
+```
+
+### Using `LazyNWB` (PyNWB-like interface)
+
+Access tables and metadata from a single file with familiar attribute names:
+```python
+nwb = lazynwb.LazyNWB('my_file.nwb')
+
+# tables (returned as pandas DataFrames)
+nwb.trials
+nwb.units
+nwb.epochs
+nwb.electrodes
+
+# metadata
+nwb.session_id
+nwb.session_start_time
+nwb.session_description
+nwb.identifier
+nwb.experiment_description
+nwb.experimenter
+nwb.lab
+nwb.institution
+nwb.keywords
+```
+
+Subject metadata:
+```python
+nwb.subject.age
+nwb.subject.sex
+nwb.subject.species
+nwb.subject.genotype
+nwb.subject.subject_id
+nwb.subject.strain
+nwb.subject.date_of_birth
+```
+
+Get a table as polars:
+```python
+df = nwb.get_df('/units', as_polars=True)
+```
+
+Get a summary of everything in the file:
+```python
+nwb.describe()
+# {'identifier': '...', 'session_id': '...', ..., 'paths': ['/acquisition/...', '/units', ...]}
+```
+
+---
+
+## Time series
+
+Get a single time series by searching for a name:
+```python
+ts = lazynwb.get_timeseries('my_file.nwb', search_term='running_speed')
+
+ts.data          # h5py.Dataset or zarr.Array (lazy - not loaded until sliced)
+ts.timestamps    # h5py.Dataset or zarr.Array
+ts.unit          # e.g. 'cm/s'
+ts.rate          # sampling rate, if available
+ts.description
+```
+
+Get a time series by exact internal path:
+```python
+ts = lazynwb.get_timeseries('my_file.nwb', exact_path=True, search_term='/acquisition/lick_sensor_events')
+```
+
+Get all time series in the file:
+```python
+all_ts = lazynwb.get_timeseries('my_file.nwb', match_all=True)
+# dict: {'/acquisition/lick_sensor_events': TimeSeries(...), '/processing/behavior/running_speed': TimeSeries(...), ...}
+```
+
+Also available on a `LazyNWB` object:
+```python
+nwb = lazynwb.LazyNWB('my_file.nwb')
+ts = nwb.get_timeseries('running_speed')
+```
+
+---
+
+## Metadata across files
+
+Get session and subject metadata for many files at once:
+```python
+df = lazynwb.get_metadata_df(nwb_paths)  # pandas DataFrame
+```
+```python
+df = lazynwb.get_metadata_df(nwb_paths, as_polars=True)  # polars DataFrame
+```
+
+Returns columns including `identifier`, `session_id`, `session_start_time`,
+`session_description`, `subject_id`, `age`, `sex`, `species`, `genotype`,
+`strain`, `date_of_birth`, `_nwb_path`, and more.
+
+---
+
+## File contents and schema
+
+### Discover internal paths
+
+See what's inside an NWB file:
+```python
+paths = lazynwb.get_internal_paths('my_file.nwb')
+# {'/acquisition/lick_sensor_events/data': <HDF5 dataset ...>,
+#  '/intervals/trials': <HDF5 group ...>,
+#  '/units': <HDF5 group ...>,
+#  ...}
+```
+
+### Get table schema
+
+Get the unified column names and types for a table across multiple files:
+```python
+schema = lazynwb.get_table_schema(nwb_paths, '/intervals/trials')
+# OrderedDict([('condition', String), ('id', Int64), ('start_time', Float64), ...])
+```
+
+Uses polars (Arrow) data types.
+
+---
+
+## Format conversion
+
+Export NWB tables to other file formats with `convert_nwb_tables`.
+
+Supported formats: `parquet`, `csv`, `json`, `excel`, `feather`, `arrow`, `avro`, `delta`.
+
+```python
+output_paths = lazynwb.convert_nwb_tables(
+    nwb_paths,
+    output_dir='./output',
+    output_format='parquet',
+)
+# {'/intervals/trials': PosixPath('./output/trials.parquet'),
+#  '/units': PosixPath('./output/units.parquet')}
+```
+
+Pass format-specific options via keyword arguments:
+```python
+# parquet with zstd compression
+lazynwb.convert_nwb_tables(nwb_paths, './output', output_format='parquet', compression='zstd')
+
+# csv with custom separator
+lazynwb.convert_nwb_tables(nwb_paths, './output', output_format='csv', separator='\t')
+
+# json, pretty-printed
+lazynwb.convert_nwb_tables(nwb_paths, './output', output_format='json', pretty=True)
+```
+
+Only export tables present in all files:
+```python
+lazynwb.convert_nwb_tables(nwb_paths, './output', min_file_count=len(nwb_paths))
+```
+
+Use full internal paths as filenames (e.g. `intervals_trials.parquet` instead of `trials.parquet`):
+```python
+lazynwb.convert_nwb_tables(nwb_paths, './output', full_path=True)
+```
+
+---
+
+## SQL queries
+
+Register all tables from NWB files as a Polars SQL context:
+```python
+ctx = lazynwb.get_sql_context(nwb_paths)
+df = ctx.execute("SELECT unit_id, location FROM units WHERE presence_ratio > 0.9").collect()
+```
+
+---
+
+## Cloud and remote files
+
+All functions accept S3, GCS, Azure Blob Storage and HTTP/HTTPS paths
+in addition to local file paths:
+
+```python
+# S3
+df = lazynwb.get_df('s3://my-bucket/data/file.nwb', '/units')
+
+# Google Cloud Storage
+df = lazynwb.get_df('gs://my-bucket/data/file.nwb', '/units')
+
+# Azure Blob Storage
+df = lazynwb.get_df('az://my-container/data/file.nwb', '/units')
+
+# HTTP/HTTPS
+df = lazynwb.get_df('https://example.com/data/file.nwb', '/units')
+```
+
+Configure cloud access via `lazynwb.file_io.config`:
+```python
+from lazynwb.file_io import config
+
+config.use_obstore = True                          # use obstore for S3/GCS/Azure (default: True)
+config.use_remfile = False                         # use remfile for HTTP byte-range requests (default: False)
+config.fsspec_storage_options = {"anon": True}     # e.g. anonymous S3 access
+config.disable_cache = False                       # disable FileAccessor caching (default: False)
+```
+
+---
+
+## DANDI archive
+
+Scan a table across all NWB files in a DANDI dandiset:
+```python
+lf = lazynwb.scan_dandiset(
+    dandiset_id='000363',
+    table_path='/units',
+    version='0.231012.2129',
+    max_assets=10,  # limit number of files (useful for testing)
+)
+df = lf.collect()
+```
+
+Filter which assets to include:
+```python
+lf = lazynwb.scan_dandiset(
+    '000363',
+    '/units',
+    asset_filter=lambda asset: 'probe' in asset['path'],
+)
+```
+
+Get S3 URLs for all NWB files in a dandiset:
+```python
+urls = lazynwb.get_dandiset_s3_urls('000363')
+```
+
+Open a single DANDI asset:
+```python
+accessor = lazynwb.from_dandi_asset(
+    dandiset_id='000363',
+    asset_id='21c622b7-6d8e-459b-98e8-b968a97a1585',
+)
+```
+
+---
+
+## Internal columns
+
+When reading tables from multiple files, three columns are added automatically:
+
+| Column | Description |
+|---|---|
+| `_nwb_path` | Path to the source NWB file |
+| `_table_path` | Internal path of the table (e.g. `/units`) |
+| `_table_index` | Row index in the original table |
+
+These are available as constants: `lazynwb.NWB_PATH_COLUMN_NAME`,
+`lazynwb.TABLE_PATH_COLUMN_NAME`, `lazynwb.TABLE_INDEX_COLUMN_NAME`.
+
+---
