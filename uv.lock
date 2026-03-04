@@ -1244,7 +1244,7 @@ wheels = [
 
 [[package]]
 name = "hdmf-zarr"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "hdmf" },
@@ -1260,9 +1260,9 @@ dependencies = [
     { name = "zarr", version = "2.18.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "zarr", version = "2.18.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/57/e4/6487919591acfe82a561ca0354012dbf1e1076f679cab2be5344f845ebb8/hdmf_zarr-0.11.0.tar.gz", hash = "sha256:4a2b4b67140385a5726439ed8ab6729056595b93a5cef12b1e017ef81c245ac8", size = 3104197, upload-time = "2025-01-17T19:27:23.875Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/56/707bafae46727e0d69030fac436b96fb4ea8fefc693e661474ed45d12987/hdmf_zarr-0.12.0.tar.gz", hash = "sha256:9fa413fcddfc12e825b99f06ebdbc35439c6fad9f00a44936961b9ffd684e0c0", size = 3106640, upload-time = "2025-10-08T18:27:38.921Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f1/56/e13d2d4a0a0af84673341fc1edb773d530159dac188bfbb4934183353d35/hdmf_zarr-0.11.0-py3-none-any.whl", hash = "sha256:9aae4715bf18e9f44963912ccda15555e3e2b1732cfd83171d8f01feebb40c53", size = 32932, upload-time = "2025-01-17T19:27:21.558Z" },
+    { url = "https://files.pythonhosted.org/packages/96/74/eeff5039149201bead00c27fab2ddf071899307bd578c3eabcd069ba4eba/hdmf_zarr-0.12.0-py3-none-any.whl", hash = "sha256:aaf866122799f547b9594f54fe906e2ffc4e8b9fe1928bf15a037dfcc864c98b", size = 33787, upload-time = "2025-10-08T18:27:37.44Z" },
 ]
 
 [[package]]
@@ -1517,13 +1517,13 @@ testing = [
 requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "h5py", specifier = ">=3.10.0" },
-    { name = "hdmf-zarr", marker = "extra == 'pynwb'", specifier = "==0.11.0" },
+    { name = "hdmf-zarr", marker = "extra == 'pynwb'", specifier = ">=0.12.0" },
     { name = "numcodecs", specifier = "<0.16" },
     { name = "obstore", specifier = ">=0.8.2" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "polars", extras = ["pandas"], specifier = ">1.32.0" },
     { name = "pydantic", specifier = ">=2.11.6" },
-    { name = "pynwb", marker = "extra == 'pynwb'", specifier = "==3.0.0" },
+    { name = "pynwb", marker = "extra == 'pynwb'", specifier = ">=3.1.3" },
     { name = "remfile", specifier = ">=0.1.10" },
     { name = "requests", specifier = ">=2.32.4" },
     { name = "s3fs", specifier = ">=2025.7.0" },
@@ -3270,7 +3270,7 @@ wheels = [
 
 [[package]]
 name = "pynwb"
-version = "3.0.0"
+version = "3.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "h5py", version = "3.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -3281,11 +3281,13 @@ dependencies = [
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "platformdirs", version = "4.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "platformdirs", version = "4.9.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f1/05/7a0dc80ce18b51b447e699e857d43830caebd96c92f73707d427d5a46358/pynwb-3.0.0.tar.gz", hash = "sha256:9eb88e11ab185f1769e2f1165ac5049c93a280bd705c03d1d472b873534f2887", size = 35598349, upload-time = "2025-02-26T20:15:39.735Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6d/83/0c37d99d2a262ca69be2df5bf9153b7bf2d79391d668e7ec232e89129ab4/pynwb-3.1.3.tar.gz", hash = "sha256:ee75219aa241b72b10d1c6830ae6bafa7e3e44f0429715c2ef0920a19654e185", size = 35784649, upload-time = "2025-12-09T23:40:50.358Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/b5/ae83faa6bf5bf97e8016c37d86486c4e63290bb73570fd0f763e96eb31a7/pynwb-3.0.0-py3-none-any.whl", hash = "sha256:5a4c442a5c6c0a159ac92ea3364c4df3669a6cd5f06b803143bf9ecb8769d7e4", size = 1389349, upload-time = "2025-02-26T20:15:35.523Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/47/b5b7d5285e823a16fe7b007bce3cf79ddcd3b6d7c8b3ca15cbe8c17c0a17/pynwb-3.1.3-py3-none-any.whl", hash = "sha256:43b5d753c6c2c8f6b4fa6c784ac85675556b64b42c727d9eab27670ef529929a", size = 1396673, upload-time = "2025-12-09T23:40:48.454Z" },
 ]
 
 [[package]]
