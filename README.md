@@ -18,48 +18,118 @@ pip install lazynwb
 
 ## Why lazynwb
 
-With `pynwb`, each container type has its own access pattern - dot attributes,
-dictionary keys, and method calls get mixed together depending on where the data
-lives in the file:
+### Work with a project's worth of NWB files
+
+Seamlessly read and concatenate tables across sessions:
 
 ```python
-# pynwb
-from pynwb import NWBHDF5IO
-io = NWBHDF5IO('my_file.nwb', 'r')
-nwb = io.read()
-
-nwb.units.to_dataframe()
-nwb.trials.to_dataframe()
-nwb.processing['behavior']['eye_tracking'].to_dataframe()
-nwb.processing['ophys']['Fluorescence']['RoiResponseSeries'].data[:]
-```
-
-You need to know whether something is a property, a dict-like container,
-or a DynamicTable, and chain the right combination for each.
-
-With `lazynwb`, every table is accessed the same way - by its internal path:
-
-```python
-# lazynwb
 import lazynwb
 
-lazynwb.get_df('my_file.nwb', '/units')
-lazynwb.get_df('my_file.nwb', '/intervals/trials')
-lazynwb.get_df('my_file.nwb', '/processing/behavior/eye_tracking')
+# read the units table from every session into a single DataFrame
+df = lazynwb.get_df(
+    ['session_1.nwb', 'session_2.nwb', 'session_3.nwb'],
+    '/intervals/trials',
+)
+# each row keeps its source file in the `_nwb_path` column
 ```
 
-And for time series data:
+### Efficient dataframe access with projection and predicate pushdown
+
+NWB tables like `/units` mix single-value metric columns with large array
+columns (`spike_times`, `waveform_mean`). With `pynwb`, accessing a dataframe means
+loading everything.
+
+`lazynwb` provides a Polars plugin that returns a LazyFrame backed by the NWB
+file. Only the columns and rows you actually use are loaded:
+
 ```python
-ts = lazynwb.get_timeseries('my_file.nwb', '/processing/ophys/Fluorescence/RoiResponseSeries')
-ts.data[:]
+import lazynwb
+import polars as pl
+
+lf = lazynwb.scan_nwb('s3://bucket/session.nwb', '/units')
+
+df = (
+    lf
+    .filter(
+        pl.col('presence_ratio') >= 0.95,    # predicate pushdown: skip non-matching rows
+        pl.col('location') == 'VISp',
+    )
+    .select('unit_id', 'spike_times')        # projection pushdown: only fetch these columns
+    .collect()
+)
 ```
 
-No need to know the container class or chain attribute lookups. The same path
-works for any file, any backend (HDF5 or Zarr), local or remote, and extends to
-reading across multiple files in one call.
+For queries that don't need all columns on data that's stored in the cloud, `lazynwb` can turn an operations that takes minutes into one that takes seconds.
 
-`lazynwb` can also read only the columns and rows you request, rather than loading the entire table into memory first. This matters for tables with list- or array- like columns, like the `units` table, 
-where `spike_times` and `waveform_mean` can be very large compared to other single-value metrics columns.
+For more details, see the [lazy API guide in the Polars documentation](https://docs.pola.rs/user-guide/concepts/lazy-api/).
+
+### A simple, consistent API
+
+One interface for local files, S3/GCS/Azure, HDF5 and Zarr: no extra imports
+or backend-specific code:
+
+```python
+import lazynwb
+
+# local HDF5
+lazynwb.get_df('my_file.nwb', '/trials')
+
+# remote Zarr
+lazynwb.get_df('s3://bucket/session.nwb', '/trials')
+
+# DANDI archive
+lf = lazynwb.scan_dandiset('000363', '/trials')
+```
+
+### Basic benchmarks
+
+Streaming a single NWB file over HTTPS
+([Steinmetz 2019](https://dandiarchive.org/dandiset/000017), 312 MB HDF5) with a laptop on a typical home internet connection:
+
+**Tables**: reading `/intervals/trials` (214 rows, no array columns):
+
+| Method | Time |
+|---|---|
+| `pynwb` `.to_dataframe()` | 8.3 s |
+| `lazynwb.get_df` | 5.1 s |
+| `lazynwb.scan_nwb` | 4.1 s |
+
+For a table with no array columns (relatively quick to load), all approaches read the same volume of data.
+
+**Tables**: reading `/units` (1085 rows, includes large `spike_times` and `waveform_mean` arrays):
+
+| Method | Time | What it reads |
+|---|---|---|
+| `pynwb` `.to_dataframe()` | 231 s | all columns (no choice) |
+| `lazynwb.get_df(..., exclude_array_columns=False)`  | 282 s | all columns (equivalent) |
+| `lazynwb.get_df(..., exclude_array_columns=True)` | 6 s | scalar columns only |
+| `lazynwb.scan_nwb` (filter + select) | 10 s | filter on scalar columns, then fetch `spike_times` |
+
+When reading all columns, `lazynwb` and `pynwb` take
+roughly the same time: if you need all data in memory, there's no reason to use `lazynwb` here. The difference is
+that `pynwb` always reads everything, while `lazynwb` lets you choose.
+
+**TimeSeries**: `lick_times` (3190 samples, full download):
+
+| Method | Time |
+|---|---|
+| `pynwb` | 7.3 s |
+| `lazynwb.get_timeseries` | 6.1 s |
+| `lazynwb.get_timeseries` (metadata only) | 6.2 s |
+
+Both download the same data, and `pynwb` also supports lazy access to time series data. The only advantage here is the consistent API.
+
+See [benchmarks/streaming_benchmark.py](benchmarks/streaming_benchmark.py)
+to reproduce or run against your own files:
+```
+python benchmarks/streaming_benchmark.py [NWB_PATH]
+```
+
+## Why not to use lazynwb
+
+- some convenience features of `pynwb` will not be available, for example object references in tables
+- incomplete coverage of the NWB spec. Focussed on the core metadata, `TimeSeries` and `DynamicTable`, and tested primarily on ecephys files. Please file an issue if you need support for a particular container.
+- you need to write NWB files
 
 ---
 
@@ -172,6 +242,8 @@ There's also `read_nwb`, which is the same as `scan_nwb(...).collect()`:
 ```python
 df = lazynwb.read_nwb(nwb_paths, '/units')  # returns pl.DataFrame
 ```
+
+Note: `pl.DataFrame` has a `.to_pandas()` method.
 
 ### Using `LazyNWB` (PyNWB-like interface)
 
