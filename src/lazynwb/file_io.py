@@ -98,7 +98,7 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
             )
             return zarr.open(store, mode="r")
     with contextlib.suppress(Exception):
-            return zarr.open(u.as_posix(), mode="r")
+        return zarr.open(u.as_posix(), mode="r")
     raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
 
 

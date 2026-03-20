@@ -8,13 +8,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.82...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.83...HEAD)</small>
+
+### Added
+
+- Add streaming benchmark script for pynwb vs lazynwb comparison [skip actions] ([fc1cac9](https://github.com/bjhardcastle/lazynwb/commit/fc1cac99567699c4d329ea417fb00d365ea10949) by bjhardcastle).
+
+### Fixed
+
+- Fix file remote opening with obstore ([d8a0ab5](https://github.com/bjhardcastle/lazynwb/commit/d8a0ab53ce948e18bf7db518d9a7ecaf2d9bbf9e) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.83](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.83) - 2026-03-04
+
+<small>[Compare with v0.2.82](https://github.com/bjhardcastle/lazynwb/compare/v0.2.82...v0.2.83)</small>
 
 ### Added
 
 - Add __getattr__ to TimeSeries for extension attribute access ([e76b745](https://github.com/bjhardcastle/lazynwb/commit/e76b74527bb1184ae4e86658bc8b576557a44409) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.82](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.82) - 2026-03-04
 
 <small>[Compare with v0.2.81](https://github.com/bjhardcastle/lazynwb/compare/v0.2.81...v0.2.82)</small>
