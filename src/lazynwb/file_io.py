@@ -85,20 +85,20 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     p = from_pathlike(path)
     u = upath.UPath(p, **config.fsspec_storage_options)
     key = u.as_posix()
-    is_zarr = "zarr" in key
-    if not is_zarr:
+    is_definitely_zarr = "zarr" in key
+    if not is_definitely_zarr:
         with contextlib.suppress(Exception):
             return _open_hdf5(
                 u, use_remfile=config.use_remfile, use_obstore=config.use_obstore
             )
-    with contextlib.suppress(Exception):
-        if config.use_obstore and u.protocol and u.protocol != "file":
+    if config.use_obstore and u.protocol and u.protocol != "file":
+        with contextlib.suppress(Exception):
             store = obstore.store.from_url(
                 key.split("//")[-1].split("/")[0], **config.fsspec_storage_options
             )
             return zarr.open(store, mode="r")
-        else:
-            return zarr.open(u, mode="r")
+    with contextlib.suppress(Exception):
+            return zarr.open(u.as_posix(), mode="r")
     raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
 
 
