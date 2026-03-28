@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.84...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.85...HEAD)</small>
+
+### Added
+
+- Add subdirs option for conversion ([3f05926](https://github.com/bjhardcastle/lazynwb/commit/3f059268bef8039ebf2867bc087c79c2c9bc49ca) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.85](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.85) - 2026-03-28
+
+<small>[Compare with v0.2.84](https://github.com/bjhardcastle/lazynwb/compare/v0.2.84...v0.2.85)</small>
 
 ### Added
 
 - Add HDF5/zarr parity test for get_sub_attrs ([c0d842b](https://github.com/bjhardcastle/lazynwb/commit/c0d842bcfca65dc66e18fe45c540bd809ad709a6) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.84](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.84) - 2026-03-20
 
 <small>[Compare with v0.2.83](https://github.com/bjhardcastle/lazynwb/compare/v0.2.83...v0.2.84)</small>

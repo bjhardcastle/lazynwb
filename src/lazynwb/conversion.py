@@ -152,9 +152,7 @@ def convert_nwb_tables(
         nwb_sources, Iterable
     ):
         nwb_sources = (nwb_sources,)
-    sources = cast(
-        "tuple[lazynwb.types_.PathLike, ...]", tuple(nwb_sources)
-    )
+    sources = cast("tuple[lazynwb.types_.PathLike, ...]", tuple(nwb_sources))
 
     output_dir = pathlib.Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -221,7 +219,9 @@ def convert_nwb_tables(
             write_func(output_path, **write_kwargs)
             output_paths[table_path] = output_path
 
-            logger.info(f"Wrote {df.height} rows, {df.width} columns to {output_path.name}")
+            logger.info(
+                f"Wrote {df.height} rows, {df.width} columns to {output_path.name}"
+            )
 
     logger.info(f"Successfully converted {len(output_paths)} tables to {output_format}")
     return output_paths
