@@ -78,10 +78,18 @@ def test_get_attrs_caching(local_hdf5_path: pathlib.Path) -> None:
     assert attrs1 == attrs2
 
 
-def test_get_sub_attrs(local_hdf5_path: pathlib.Path) -> None:
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    [
+        "local_hdf5_path",
+        "local_zarr_path",
+    ],
+)
+def test_get_sub_attrs(nwb_fixture_name: str, request: pytest.FixtureRequest) -> None:
     """Test retrieving all sub-attributes under a parent path."""
+    nwb_path = request.getfixturevalue(nwb_fixture_name)
     all_attrs = lazynwb.attrs.get_sub_attrs(
-        nwb_path=local_hdf5_path,
+        nwb_path=nwb_path,
         parent_path="/units",
     )
 
@@ -90,10 +98,18 @@ def test_get_sub_attrs(local_hdf5_path: pathlib.Path) -> None:
     assert "units" in all_attrs
 
 
-def test_get_sub_attrs_root(local_hdf5_path: pathlib.Path) -> None:
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    [
+        "local_hdf5_path",
+        "local_zarr_path",
+    ],
+)
+def test_get_sub_attrs_root(nwb_fixture_name: str, request: pytest.FixtureRequest) -> None:
     """Test retrieving all sub-attributes from root."""
+    nwb_path = request.getfixturevalue(nwb_fixture_name)
     all_attrs = lazynwb.attrs.get_sub_attrs(
-        nwb_path=local_hdf5_path,
+        nwb_path=nwb_path,
         parent_path="/",
     )
 
@@ -102,10 +118,18 @@ def test_get_sub_attrs_root(local_hdf5_path: pathlib.Path) -> None:
     assert len(all_attrs) > 1
 
 
-def test_get_sub_attrs_nonexistent(local_hdf5_path: pathlib.Path) -> None:
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    [
+        "local_hdf5_path",
+        "local_zarr_path",
+    ],
+)
+def test_get_sub_attrs_nonexistent(nwb_fixture_name: str, request: pytest.FixtureRequest) -> None:
     """Test retrieving sub-attrs from nonexistent path."""
+    nwb_path = request.getfixturevalue(nwb_fixture_name)
     all_attrs = lazynwb.attrs.get_sub_attrs(
-        nwb_path=local_hdf5_path,
+        nwb_path=nwb_path,
         parent_path="/nonexistent/path",
     )
 
@@ -114,16 +138,24 @@ def test_get_sub_attrs_nonexistent(local_hdf5_path: pathlib.Path) -> None:
     assert len(all_attrs) == 0
 
 
-def test_get_sub_attrs_filtering(local_hdf5_path: pathlib.Path) -> None:
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    [
+        "local_hdf5_path",
+        "local_zarr_path",
+    ],
+)
+def test_get_sub_attrs_filtering(nwb_fixture_name: str, request: pytest.FixtureRequest) -> None:
     """Test that filtering works for sub_attrs."""
+    nwb_path = request.getfixturevalue(nwb_fixture_name)
     attrs_filtered = lazynwb.attrs.get_sub_attrs(
-        nwb_path=local_hdf5_path,
+        nwb_path=nwb_path,
         parent_path="/units",
         exclude_private=True,
     )
 
     lazynwb.attrs.get_sub_attrs(
-        nwb_path=local_hdf5_path,
+        nwb_path=nwb_path,
         parent_path="/units",
         exclude_private=False,
     )
