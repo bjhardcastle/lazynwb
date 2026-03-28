@@ -5,15 +5,18 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import pathlib
+import re
 from collections import Counter
-from collections.abc import Iterable
-from typing import Any, Literal
+from collections.abc import Iterable, Sequence
+from typing import Any, Literal, cast
 
 import polars as pl
 import tqdm
 
+import lazynwb.base
 import lazynwb.file_io
 import lazynwb.lazyframe
+import lazynwb.tables
 import lazynwb.types_
 import lazynwb.utils
 
@@ -46,6 +49,7 @@ def convert_nwb_tables(
     exclude_array_columns: bool = False,
     ignore_errors: bool = True,
     disable_progress: bool = False,
+    session_subdirs: bool = False,
     **write_kwargs: Any,
 ) -> dict[str, pathlib.Path]:
     """
@@ -78,6 +82,11 @@ def convert_nwb_tables(
         If True, continue processing other tables when errors occur reading specific tables.
     disable_progress : bool, default False
         If True, progress bars will be disabled.
+    session_subdirs : bool, default False
+        If True, write each session's tables into a subdirectory named by /general/session_id
+        (falling back to /identifier). The common schema across all files is computed once per
+        table path and applied consistently to every session file. Output dict keys become
+        "{session_name}{table_path}" (e.g. "abc123/intervals/trials").
     **write_kwargs : Any
         Additional keyword arguments passed to the polars DataFrame write method.
         For parquet: compression="snappy" or compression="zstd"
@@ -143,16 +152,18 @@ def convert_nwb_tables(
         nwb_sources, Iterable
     ):
         nwb_sources = (nwb_sources,)
-    nwb_sources = tuple(nwb_sources)
+    sources = cast(
+        "tuple[lazynwb.types_.PathLike, ...]", tuple(nwb_sources)
+    )
 
     output_dir = pathlib.Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Discovering tables in {len(nwb_sources)} NWB files...")
+    logger.info(f"Discovering tables in {len(sources)} NWB files...")
 
     # Find common table paths across all files using threadpool
     common_table_paths = _find_common_paths(
-        nwb_sources=nwb_sources,
+        nwb_sources=sources,
         min_file_count=min_file_count,
         disable_progress=disable_progress,
     )
@@ -169,37 +180,175 @@ def convert_nwb_tables(
     output_paths: dict[str, pathlib.Path] = {}
     write_method, file_extension = _OUTPUT_FORMATS[output_format]
 
-    for table_path in common_table_paths:
-        output_path = _table_path_to_output_path(
-            output_dir,
-            table_path,
-            file_extension,
+    if session_subdirs:
+        output_paths = _convert_nwb_tables_session_subdir(
+            nwb_sources=sources,
+            output_dir=output_dir,
+            common_table_paths=common_table_paths,
+            write_method=write_method,
+            file_extension=file_extension,
             full_path=full_path,
-        )
-        logger.info(f"Converting {table_path} -> {output_path.name}")
-
-        # Read table across all files
-        df = lazynwb.lazyframe.scan_nwb(
-            source=nwb_sources,
-            table_path=table_path,
             exclude_array_columns=exclude_array_columns,
             ignore_errors=ignore_errors,
             disable_progress=disable_progress,
-        ).collect()
+            write_kwargs=write_kwargs,
+        )
+    else:
+        for table_path in common_table_paths:
+            output_path = _table_path_to_output_path(
+                output_dir,
+                table_path,
+                file_extension,
+                full_path=full_path,
+            )
+            logger.info(f"Converting {table_path} -> {output_path.name}")
 
-        if df.is_empty():
-            logger.warning(f"Table {table_path} is empty, skipping")
-            continue
+            # Read table across all files
+            df = lazynwb.lazyframe.scan_nwb(
+                source=sources,
+                table_path=table_path,
+                exclude_array_columns=exclude_array_columns,
+                ignore_errors=ignore_errors,
+                disable_progress=disable_progress,
+            ).collect()
 
-        # Write using the appropriate method
-        write_func = getattr(df, write_method)
-        write_func(output_path, **write_kwargs)
-        output_paths[table_path] = output_path
+            if df.is_empty():
+                logger.warning(f"Table {table_path} is empty, skipping")
+                continue
 
-        logger.info(f"Wrote {df.height} rows, {df.width} columns to {output_path.name}")
+            # Write using the appropriate method
+            write_func = getattr(df, write_method)
+            write_func(output_path, **write_kwargs)
+            output_paths[table_path] = output_path
+
+            logger.info(f"Wrote {df.height} rows, {df.width} columns to {output_path.name}")
 
     logger.info(f"Successfully converted {len(output_paths)} tables to {output_format}")
     return output_paths
+
+
+def _convert_nwb_tables_session_subdir(
+    nwb_sources: Sequence[lazynwb.types_.PathLike],
+    output_dir: pathlib.Path,
+    common_table_paths: set[str],
+    write_method: str,
+    file_extension: str,
+    full_path: bool,
+    exclude_array_columns: bool,
+    ignore_errors: bool,
+    disable_progress: bool,
+    write_kwargs: dict[str, Any],
+) -> dict[str, pathlib.Path]:
+    """Write each NWB file's tables into a per-session subdirectory.
+
+    The common schema across all files is computed once per table path and applied
+    consistently to every session file to guarantee uniform column sets and types.
+    Dict keys use the form "{session_name}{table_path}" (e.g. "abc123/intervals/trials").
+    """
+    # Cache common schema for each table path across ALL files up front
+    table_schemas: dict[str, pl.Schema] = {}
+    for table_path in common_table_paths:
+        try:
+            table_schemas[table_path] = lazynwb.tables.get_table_schema(
+                file_paths=nwb_sources,
+                table_path=table_path,
+                exclude_array_columns=exclude_array_columns,
+            )
+            logger.debug(
+                f"Cached schema for {table_path!r}: {list(table_schemas[table_path].keys())}"
+            )
+        except Exception as exc:
+            if not ignore_errors:
+                raise
+            logger.warning(f"Could not compute schema for {table_path!r}: {exc}")
+
+    output_paths: dict[str, pathlib.Path] = {}
+
+    sources_iter: Iterable[lazynwb.types_.PathLike] = nwb_sources
+    if not disable_progress:
+        sources_iter = tqdm.tqdm(
+            sources_iter,
+            total=len(nwb_sources),
+            desc="Converting sessions",
+            unit="session",
+            ncols=80,
+        )
+
+    for nwb_source in sources_iter:
+        session_name = _get_session_name(nwb_source)
+        session_dir = output_dir / session_name
+        session_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Writing session {session_name!r} -> {session_dir}")
+
+        for table_path, schema in table_schemas.items():
+            output_path = _table_path_to_output_path(
+                session_dir, table_path, file_extension, full_path=full_path
+            )
+            if _write_session_table(
+                nwb_source=nwb_source,
+                table_path=table_path,
+                schema=schema,
+                output_path=output_path,
+                write_method=write_method,
+                exclude_array_columns=exclude_array_columns,
+                ignore_errors=ignore_errors,
+                write_kwargs=write_kwargs,
+            ):
+                output_paths[f"{session_name}{table_path}"] = output_path
+
+    return output_paths
+
+
+def _write_session_table(
+    nwb_source: lazynwb.types_.PathLike,
+    table_path: str,
+    schema: pl.Schema,
+    output_path: pathlib.Path,
+    write_method: str,
+    exclude_array_columns: bool,
+    ignore_errors: bool,
+    write_kwargs: dict[str, Any],
+) -> bool:
+    """Read one table from one NWB file and write it. Returns True if written."""
+    try:
+        df = lazynwb.lazyframe.scan_nwb(
+            source=[nwb_source],
+            table_path=table_path,
+            schema=schema,
+            exclude_array_columns=exclude_array_columns,
+            ignore_errors=ignore_errors,
+            disable_progress=True,
+        ).collect()
+    except Exception as exc:
+        if not ignore_errors:
+            raise
+        logger.warning(f"Error reading {table_path!r} from {nwb_source!r}: {exc}")
+        return False
+
+    if df.is_empty():
+        logger.warning(f"Table {table_path!r} is empty for {nwb_source!r}, skipping")
+        return False
+
+    getattr(df, write_method)(output_path, **write_kwargs)
+    logger.info(f"Wrote {df.height} rows to {output_path}")
+    return True
+
+
+def _get_session_name(nwb_source: lazynwb.types_.PathLike) -> str:
+    """Get a session directory name from an NWB file.
+
+    Prefers /general/session_id, falls back to /identifier, then the file stem.
+    The result is sanitized to be safe as a directory name.
+    """
+    accessor = lazynwb.file_io._get_accessor(nwb_source)
+    for internal_path in ("/general/session_id", "identifier"):
+        value = lazynwb.base._cast(accessor, internal_path)
+        if value and isinstance(value, str) and value.strip():
+            return re.sub(r'[\\/:*?"<>|]', "_", value).strip()
+    logger.warning(
+        f"No session_id or identifier found in {nwb_source!r}, using file stem"
+    )
+    return pathlib.Path(str(nwb_source)).stem
 
 
 def get_sql_context(

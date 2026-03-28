@@ -254,5 +254,125 @@ def test_convert_nwb_tables_skips_electrical_series_electrodes_array():
         ), "ElectricalSeries.electrodes array should not appear as a converted table"
 
 
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    [
+        "local_zarr_paths",
+        "local_hdf5_paths",
+    ],
+)
+def test_convert_nwb_tables_session_subdirs(nwb_fixture_name, request):
+    """Test that session_subdirs=True writes one subdir per file with consistent schemas."""
+    nwb_paths = request.getfixturevalue(nwb_fixture_name)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        output_dir = pathlib.Path(temp_dir)
+
+        output_paths = lazynwb.convert_nwb_tables(
+            nwb_sources=nwb_paths,
+            output_dir=output_dir,
+            output_format="parquet",
+            min_file_count=1,
+            disable_progress=True,
+            session_subdirs=True,
+        )
+
+        assert len(output_paths) > 0, "Should have converted at least one table"
+
+        # Each output path lives inside a session subdir directly under output_dir
+        session_dirs = {p.parent for p in output_paths.values()}
+        assert len(session_dirs) == len(nwb_paths), (
+            "Should have one session dir per NWB file"
+        )
+        for session_dir in session_dirs:
+            assert session_dir.parent == output_dir, (
+                "Session dirs must be direct children of output_dir"
+            )
+
+        # All session dirs should contain the same set of table files
+        table_file_sets = [
+            {p.name for p in sd.glob("*.parquet")} for sd in session_dirs
+        ]
+        assert all(s == table_file_sets[0] for s in table_file_sets), (
+            "Every session dir should contain the same table files"
+        )
+
+        # Each parquet file should be readable, non-empty, and contain exactly one session
+        for path in output_paths.values():
+            assert path.exists()
+            df = pl.read_parquet(path)
+            assert not df.is_empty(), f"{path.name} should not be empty"
+            assert df[lazynwb.NWB_PATH_COLUMN_NAME].n_unique() == 1, (
+                "Each session file should contain data from exactly one NWB file"
+            )
+
+        # Schema must be identical across all session dirs for each table
+        table_to_schemas: dict[str, list[dict]] = {}
+        for path in output_paths.values():
+            schema = dict(pl.read_parquet(path).schema)
+            table_to_schemas.setdefault(path.name, []).append(schema)
+
+        for table_name, schemas in table_to_schemas.items():
+            assert all(s == schemas[0] for s in schemas), (
+                f"Schema inconsistency across sessions for {table_name}"
+            )
+
+
+def test_convert_nwb_tables_session_subdirs_uses_session_id():
+    """session_id is preferred over identifier; identifier is the fallback."""
+    from pynwb import NWBHDF5IO, NWBFile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+
+        session_id = "my_special_session"
+        identifier_a = str(uuid.uuid4())
+        nwb_with_session_id = tmp_path / "with_session_id.nwb"
+        nwbfile_a = NWBFile(
+            session_description="session_id test",
+            identifier=identifier_a,
+            session_start_time=datetime.now(tz=timezone.utc),
+            session_id=session_id,
+        )
+        nwbfile_a.add_trial(start_time=0.0, stop_time=1.0)
+        with NWBHDF5IO(str(nwb_with_session_id), "w") as io:
+            io.write(nwbfile_a)
+
+        identifier_b = str(uuid.uuid4())
+        nwb_no_session_id = tmp_path / "no_session_id.nwb"
+        nwbfile_b = NWBFile(
+            session_description="identifier fallback test",
+            identifier=identifier_b,
+            session_start_time=datetime.now(tz=timezone.utc),
+        )
+        nwbfile_b.add_trial(start_time=0.0, stop_time=1.0)
+        with NWBHDF5IO(str(nwb_no_session_id), "w") as io:
+            io.write(nwbfile_b)
+
+        output_dir = tmp_path / "out"
+        try:
+            output_paths = lazynwb.convert_nwb_tables(
+                nwb_sources=[nwb_with_session_id, nwb_no_session_id],
+                output_dir=output_dir,
+                output_format="parquet",
+                min_file_count=1,
+                disable_progress=True,
+                session_subdirs=True,
+            )
+        finally:
+            lazynwb.clear_cache()
+
+        assert (output_dir / session_id).is_dir(), (
+            f"Expected dir named by session_id={session_id!r}"
+        )
+        assert (output_dir / identifier_b).is_dir(), (
+            f"Expected dir named by identifier={identifier_b!r}"
+        )
+        # identifier_a should NOT be used because session_id takes precedence
+        assert not (output_dir / identifier_a).exists(), (
+            "session_id should take precedence over identifier"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", '--pdb'])
