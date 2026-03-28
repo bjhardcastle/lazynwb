@@ -254,6 +254,48 @@ def test_clear_attrs_cache_all() -> None:
     assert True
 
 
+@pytest.mark.parametrize("parent_path", ["/", "/units", "/intervals", "/processing"])
+def test_get_sub_attrs_hdf5_zarr_parity(
+    local_hdf5_path: pathlib.Path,
+    local_zarr_path: pathlib.Path,
+    parent_path: str,
+) -> None:
+    """Test that get_sub_attrs returns consistent results for HDF5 and zarr backends.
+
+    Zarr stores scalars as separate arrays and adds zarr-specific attrs
+    (zarr_dtype, _ARRAY_DIMENSIONS), so we compare the intersection of paths
+    after stripping zarr-only attrs.
+    """
+    zarr_only_attrs = {"zarr_dtype", "_ARRAY_DIMENSIONS"}
+
+    lazynwb.attrs.clear_attrs_cache()
+    hdf5_result = lazynwb.attrs.get_sub_attrs(
+        nwb_path=local_hdf5_path, parent_path=parent_path
+    )
+    lazynwb.attrs.clear_attrs_cache()
+    zarr_result = lazynwb.attrs.get_sub_attrs(
+        nwb_path=local_zarr_path, parent_path=parent_path
+    )
+
+    # All HDF5 paths should be present in zarr (zarr may have extra scalar paths)
+    hdf5_keys = set(hdf5_result.keys())
+    zarr_keys = set(zarr_result.keys())
+    assert hdf5_keys <= zarr_keys, (
+        f"Paths in HDF5 but not zarr for parent_path={parent_path!r}: "
+        f"{hdf5_keys - zarr_keys}"
+    )
+
+    # For shared paths, attrs should match after removing zarr-specific keys
+    for path in hdf5_keys:
+        hdf5_attrs = hdf5_result[path]
+        zarr_attrs = {
+            k: v for k, v in zarr_result[path].items() if k not in zarr_only_attrs
+        }
+        assert hdf5_attrs == zarr_attrs, (
+            f"Value mismatch at {path!r}: hdf5={hdf5_attrs}, zarr={zarr_attrs}"
+        )
+
+
 def test_get_attrs_normalize_path(local_hdf5_path: pathlib.Path) -> None:
     """Test that internal paths are normalized correctly."""
     # Test with leading slash
