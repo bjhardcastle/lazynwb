@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.83...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.84...HEAD)</small>
+
+### Added
+
+- Add HDF5/zarr parity test for get_sub_attrs ([c0d842b](https://github.com/bjhardcastle/lazynwb/commit/c0d842bcfca65dc66e18fe45c540bd809ad709a6) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.84](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.84) - 2026-03-20
+
+<small>[Compare with v0.2.83](https://github.com/bjhardcastle/lazynwb/compare/v0.2.83...v0.2.84)</small>
 
 ### Added
 
@@ -18,7 +27,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Fix file remote opening with obstore ([d8a0ab5](https://github.com/bjhardcastle/lazynwb/commit/d8a0ab53ce948e18bf7db518d9a7ecaf2d9bbf9e) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.83](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.83) - 2026-03-04
 
 <small>[Compare with v0.2.82](https://github.com/bjhardcastle/lazynwb/compare/v0.2.82...v0.2.83)</small>
