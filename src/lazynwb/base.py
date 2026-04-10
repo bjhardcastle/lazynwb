@@ -117,7 +117,7 @@ class LazyNWB:
 
     @property
     def subject(self) -> Subject:
-        return Subject(self._file)
+        return Subject(self._file._path)
 
     @property
     def session_start_time(self) -> datetime.datetime:
