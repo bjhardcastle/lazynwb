@@ -23,10 +23,10 @@ import lazynwb.utils
 logger = logging.getLogger(__name__)
 
 
-def _cast(file: lazynwb.file_io.FileAccessor, path: str) -> Any:
+def _cast(accessor: lazynwb.file_io.FileAccessor, path: str) -> Any:
     """Read attribute from NWB file and interpret it as the appropriate Python object."""
     path = lazynwb.utils.normalize_internal_file_path(path)
-    v = file.get(path, None)
+    v = accessor.get(path, None)
     if v is None:
         return None
     if not getattr(v, "shape", True):
@@ -66,7 +66,7 @@ class LazyNWB:
         datetime.datetime(2022, 8, 2, 15, 39, 59, tzinfo=datetime.timezone.utc)
     """
 
-    _file: lazynwb.file_io.FileAccessor
+    _accessor: lazynwb.file_io.FileAccessor
 
     def __init__(
         self,
@@ -75,7 +75,7 @@ class LazyNWB:
         self._file_path = lazynwb.file_io.from_pathlike(path)
 
     @property
-    def _file(self) -> lazynwb.file_io.FileAccessor:
+    def _accessor(self) -> lazynwb.file_io.FileAccessor:
         """The underlying file accessor for this NWB file."""
         return lazynwb.file_io._get_accessor(self._file_path)
 
@@ -88,7 +88,7 @@ class LazyNWB:
         paths = self.describe().get("paths", [])
 
         html = f"""
-        <h3>NWB file: {self._file._path}</h3>
+        <h3>NWB file: {self._file_path}</h3>
         <ul>
         """
         for key, value in main_info.items():
@@ -113,40 +113,40 @@ class LazyNWB:
 
     @property
     def identifier(self) -> str:
-        return _cast(self._file, "identifier")
+        return _cast(self._accessor, "identifier")
 
     @property
     def subject(self) -> Subject:
-        return Subject(self._file._path)
+        return Subject(self._file_path)
 
     @property
     def session_start_time(self) -> datetime.datetime:
-        return _cast(self._file, "session_start_time")
+        return _cast(self._accessor, "session_start_time")
 
     @property
     def session_id(self) -> str:
-        return _cast(self._file, "/general/session_id")
+        return _cast(self._accessor, "/general/session_id")
 
     @property
     def session_description(self) -> str:
-        return _cast(self._file, "session_description")
+        return _cast(self._accessor, "session_description")
 
     @property
     def trials(self) -> pd.DataFrame:
         return lazynwb.tables.get_df(
-            self._file, search_term="/intervals/trials", exact_path=True
+            self._file_path, search_term="/intervals/trials", exact_path=True
         )
 
     @property
     def epochs(self) -> pd.DataFrame:
         return lazynwb.tables.get_df(
-            self._file, search_term="/intervals/epochs", exact_path=True
+            self._file_path, search_term="/intervals/epochs", exact_path=True
         )
 
     @property
     def electrodes(self) -> pd.DataFrame:
         return lazynwb.tables.get_df(
-            self._file,
+            self._file_path,
             search_term="/general/extracellular_ephys/electrodes",
             exact_path=True,
         )
@@ -154,7 +154,7 @@ class LazyNWB:
     @property
     def units(self) -> pd.DataFrame:
         return lazynwb.tables.get_df(
-            self._file,
+            self._file_path,
             search_term="/units",
             exclude_array_columns=True,
             exact_path=True,
@@ -162,27 +162,27 @@ class LazyNWB:
 
     @property
     def experiment_description(self) -> str:
-        return _cast(self._file, "/general/experiment_description")
+        return _cast(self._accessor, "/general/experiment_description")
 
     @property
     def experimenter(self) -> str:
-        return _cast(self._file, "/general/experimenter")
+        return _cast(self._accessor, "/general/experimenter")
 
     @property
     def lab(self) -> str:
-        return _cast(self._file, "/general/lab")
+        return _cast(self._accessor, "/general/lab")
 
     @property
     def institution(self) -> str:
-        return _cast(self._file, "/general/institution")
+        return _cast(self._accessor, "/general/institution")
 
     @property
     def related_publications(self) -> str:
-        return _cast(self._file, "/general/related_publications")
+        return _cast(self._accessor, "/general/related_publications")
 
     @property
     def keywords(self) -> list[str]:
-        k: str | Iterable[str] | None = _cast(self._file, "/general/keywords")
+        k: str | Iterable[str] | None = _cast(self._accessor, "/general/keywords")
         if k is None:
             return []
         if isinstance(k, str):
@@ -191,31 +191,31 @@ class LazyNWB:
 
     @property
     def notes(self) -> str:
-        return _cast(self._file, "/general/notes")
+        return _cast(self._accessor, "/general/notes")
 
     @property
     def data_collection(self) -> str:
-        return _cast(self._file, "/general/data_collection")
+        return _cast(self._accessor, "/general/data_collection")
 
     @property
     def surgery(self) -> str:
-        return _cast(self._file, "/general/surgery")
+        return _cast(self._accessor, "/general/surgery")
 
     @property
     def pharmacology(self) -> str:
-        return _cast(self._file, "/general/pharmacology")
+        return _cast(self._accessor, "/general/pharmacology")
 
     @property
     def virus(self) -> str:
-        return _cast(self._file, "/general/virus")
+        return _cast(self._accessor, "/general/virus")
 
     @property
     def source_script(self) -> str:
-        return _cast(self._file, "/general/source_script")
+        return _cast(self._accessor, "/general/source_script")
 
     @property
     def source_script_file_name(self) -> str:
-        return _cast(self._file, "/general/source_script_file_name")
+        return _cast(self._accessor, "/general/source_script_file_name")
 
     def _to_dict(self) -> dict[str, Any]:
         return to_dict(self)
@@ -224,7 +224,7 @@ class LazyNWB:
         self, search_term: str | None = None
     ) -> lazynwb.timeseries.TimeSeries:
         return lazynwb.timeseries.get_timeseries(
-            self._file, search_term=search_term, match_all=False
+            self._file_path, search_term=search_term, match_all=False
         )
 
     @typing.overload
@@ -271,7 +271,7 @@ class LazyNWB:
         as_polars: bool = False,
     ) -> pd.DataFrame | pl.DataFrame:
         return lazynwb.tables.get_df(
-            nwb_data_sources=self._file,
+            nwb_data_sources=self._file_path,
             search_term=search_term,
             exact_path=exact_path,
             include_column_names=include_column_names,
@@ -288,13 +288,13 @@ class LazyNWB:
         return {
             **self._to_dict(),
             **self.subject._to_dict(),
-            "paths": list(lazynwb.file_io.get_internal_paths(self._file._path).keys()),
+            "paths": list(lazynwb.file_io.get_internal_paths(self._file_path).keys()),
         }
 
 
 class NWBComponent(Protocol):
     @property
-    def _file(self) -> lazynwb.file_io.FileAccessor: ...
+    def _accessor(self) -> lazynwb.file_io.FileAccessor: ...
 
 
 def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]:
@@ -323,7 +323,7 @@ class Subject:
         self._file_path = lazynwb.file_io.from_pathlike(path)
 
     @property
-    def _file(self) -> lazynwb.file_io.FileAccessor:
+    def _accessor(self) -> lazynwb.file_io.FileAccessor:
         """The underlying file accessor for this subject."""
         return lazynwb.file_io._get_accessor(self._file_path)
 
@@ -333,52 +333,52 @@ class Subject:
     @property
     def age(self) -> str | None:
         """The age of the subject. The ISO 8601 Duration format is recommended, e.g., “P90D” for 90 days old."""
-        return _cast(self._file, "/general/subject/age")
+        return _cast(self._accessor, "/general/subject/age")
 
     @property
     def age__reference(self) -> str | None:
         """Age is with reference to this event. Can be `birth` or `gestational`. If reference is omitted, then `birth` is implied. Value can be None when read from an NWB file with schema version 2.0 to 2.5 where age__reference is missing."""
-        return _cast(self._file, "/general/subject/age__reference")
+        return _cast(self._accessor, "/general/subject/age__reference")
 
     @property
     def description(self) -> str | None:
         """A description of the subject, e.g., “mouse A10”."""
-        return _cast(self._file, "/general/subject/description")
+        return _cast(self._accessor, "/general/subject/description")
 
     @property
     def genotype(self) -> str | None:
         """The genotype of the subject, e.g., “Sst-IRES-Cre/wt;Ai32(RCL-ChR2(H134R)_EYFP"""
-        return _cast(self._file, "/general/subject/genotype")
+        return _cast(self._accessor, "/general/subject/genotype")
 
     @property
     def sex(self) -> str | None:
         """The sex of the subject. Using “F” (female), “M” (male), “U” (unknown), or “O” (other) is recommended."""
-        return _cast(self._file, "/general/subject/sex")
+        return _cast(self._accessor, "/general/subject/sex")
 
     @property
     def species(self) -> str | None:
         """The species of the subject. The formal latin binomal name is recommended, e.g., “Mus musculus”."""
-        return _cast(self._file, "/general/subject/species")
+        return _cast(self._accessor, "/general/subject/species")
 
     @property
     def subject_id(self) -> str | None:
         """A unique identifier for the subject, e.g., “A10”."""
-        return _cast(self._file, "/general/subject/subject_id")
+        return _cast(self._accessor, "/general/subject/subject_id")
 
     @property
     def weight(self) -> str | None:
         """The weight of the subject, including units. Using kilograms is recommended. e.g., “0.02 kg”. If a float is provided, then the weight will be stored as “[value] kg”."""
-        return _cast(self._file, "/general/subject/weight")
+        return _cast(self._accessor, "/general/subject/weight")
 
     @property
     def strain(self) -> str | None:
         """The strain of the subject, e.g., “C57BL/6J”."""
-        return _cast(self._file, "/general/subject/strain")
+        return _cast(self._accessor, "/general/subject/strain")
 
     @property
     def date_of_birth(self) -> datetime.datetime | None:
         """The datetime of the date of birth. May be supplied instead of age."""
-        return _cast(self._file, "/general/subject/date_of_birth")
+        return _cast(self._accessor, "/general/subject/date_of_birth")
 
     def _to_dict(self) -> dict[str, Any]:
         return to_dict(self)
@@ -417,7 +417,7 @@ def get_metadata_df(
         return {
             **nwb._to_dict(),
             **nwb.subject._to_dict(),
-            lazynwb.tables.NWB_PATH_COLUMN_NAME: nwb._file._path.as_posix(),
+            lazynwb.tables.NWB_PATH_COLUMN_NAME: nwb._accessor._path.as_posix(),
         }
 
     future_to_path = {}
