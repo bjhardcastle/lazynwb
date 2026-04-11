@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.86...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.87...HEAD)</small>
+
+### Fixed
+
+- Fix accessor/file attributes ([3a43994](https://github.com/bjhardcastle/lazynwb/commit/3a439942420dd43eb3c9cc7a2198f3451d2c55e7) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.87](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.87) - 2026-04-10
+
+<small>[Compare with v0.2.86](https://github.com/bjhardcastle/lazynwb/compare/v0.2.86...v0.2.87)</small>
 
 ### Fixed
 
 - Fix subject and add metadata tests ([7fadcbd](https://github.com/bjhardcastle/lazynwb/commit/7fadcbd63c92b8f21b92862b0a66bb1001f20468) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.86](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.86) - 2026-03-28
 
 <small>[Compare with v0.2.85](https://github.com/bjhardcastle/lazynwb/compare/v0.2.85...v0.2.86)</small>
