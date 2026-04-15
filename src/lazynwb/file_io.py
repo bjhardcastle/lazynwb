@@ -27,6 +27,7 @@ class FileIOConfig(pydantic_settings.BaseSettings):
     """
     Global configuration for file I/O behavior.
     """
+
     model_config = pydantic_settings.SettingsConfigDict(
         env_prefix="LAZYNWB_FILE_IO_",
     )
