@@ -12,7 +12,7 @@ from typing import Any
 
 import h5py
 import obstore.fsspec
-import pydantic
+import pydantic_settings
 import remfile
 import upath
 import zarr
@@ -23,13 +23,15 @@ import lazynwb.utils
 logger = logging.getLogger(__name__)
 
 
-class FileIOConfig(pydantic.BaseModel):
+class FileIOConfig(pydantic_settings.BaseSettings):
     """
     Global configuration for file I/O behavior.
     """
-
+    model_config = pydantic_settings.SettingsConfigDict(
+        env_prefix="LAZYNWB_FILE_IO_",
+    )
     use_remfile: bool = False
-    use_obstore: bool = True
+    use_obstore: bool = False
     fsspec_storage_options: dict[str, Any] = {
         "anon": False,
     }
