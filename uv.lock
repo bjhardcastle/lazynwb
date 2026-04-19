@@ -1459,6 +1459,8 @@ version = "0.2.89"
 source = { editable = "." }
 dependencies = [
     { name = "dotenv" },
+    { name = "fsspec", version = "2025.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "fsspec", version = "2026.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "h5py", version = "3.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "h5py", version = "3.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "numcodecs", version = "0.12.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -1468,6 +1470,8 @@ dependencies = [
     { name = "obstore", version = "0.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "platformdirs", version = "4.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "platformdirs", version = "4.9.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "polars", version = "1.36.1", source = { registry = "https://pypi.org/simple" }, extra = ["pandas"], marker = "python_full_version < '3.10'" },
     { name = "polars", version = "1.38.1", source = { registry = "https://pypi.org/simple" }, extra = ["pandas"], marker = "python_full_version >= '3.10'" },
     { name = "pydantic" },
@@ -1489,6 +1493,9 @@ pynwb = [
 ]
 
 [package.dev-dependencies]
+benchmarking = [
+    { name = "lindi" },
+]
 bump = [
     { name = "bump-my-version" },
     { name = "git-changelog", version = "2.6.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -1516,11 +1523,13 @@ testing = [
 [package.metadata]
 requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
+    { name = "fsspec", specifier = ">=2025.7.0" },
     { name = "h5py", specifier = ">=3.10.0" },
     { name = "hdmf-zarr", marker = "extra == 'pynwb'", specifier = ">=0.12.0" },
     { name = "numcodecs", specifier = "<0.16" },
     { name = "obstore", specifier = ">=0.8.2" },
     { name = "pandas", specifier = ">=2.0.0" },
+    { name = "platformdirs", specifier = ">=4.0.0" },
     { name = "polars", extras = ["pandas"], specifier = ">1.32.0" },
     { name = "pydantic", specifier = ">=2.11.6" },
     { name = "pynwb", marker = "extra == 'pynwb'", specifier = ">=3.1.3" },
@@ -1534,6 +1543,7 @@ requires-dist = [
 provides-extras = ["pynwb"]
 
 [package.metadata.requires-dev]
+benchmarking = [{ name = "lindi", specifier = ">=0.4.6" }]
 bump = [
     { name = "bump-my-version", specifier = ">=1.1.1" },
     { name = "git-changelog", specifier = ">=2.5.3" },
@@ -1646,6 +1656,24 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c9/92/2b44fd3cc3313f44e43bdbb41343735b568fa675fa351642b408ee48d418/librt-0.8.1-cp39-cp39-musllinux_1_2_x86_64.whl", hash = "sha256:237796479f4d0637d6b9cbcb926ff424a97735e68ade6facf402df4ec93375ed", size = 236664, upload-time = "2026-02-17T16:13:02.314Z" },
     { url = "https://files.pythonhosted.org/packages/00/23/92313ecdab80e142d8ea10e8dfa6297694359dbaacc9e81679bdc8cbceb6/librt-0.8.1-cp39-cp39-win32.whl", hash = "sha256:4beb04b8c66c6ae62f8c1e0b2f097c1ebad9295c929a8d5286c05eae7c2fc7dc", size = 54368, upload-time = "2026-02-17T16:13:03.549Z" },
     { url = "https://files.pythonhosted.org/packages/68/36/18f6e768afad6b55a690d38427c53251b69b7ba8795512730fd2508b31a9/librt-0.8.1-cp39-cp39-win_amd64.whl", hash = "sha256:64548cde61b692dc0dc379f4b5f59a2f582c2ebe7890d09c1ae3b9e66fa015b7", size = 61507, upload-time = "2026-02-17T16:13:04.556Z" },
+]
+
+[[package]]
+name = "lindi"
+version = "0.4.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "h5py", version = "3.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "h5py", version = "3.15.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "requests" },
+    { name = "tqdm" },
+    { name = "zarr", version = "2.18.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "zarr", version = "2.18.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "zarr", version = "2.18.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/ff/78c2219c6e05ea95ebe019b3060a86e9339aefddc38f8baa4b634b800ef4/lindi-0.4.6.tar.gz", hash = "sha256:9a486ec34e79462b7ace838626315d6af712d691de89a1c4a69d55aa1d189012", size = 53622, upload-time = "2026-03-09T14:44:44.394Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/ef/0a2b0f5d52458e6521920d0b9dad64e95bf4e800b8e640326f187e924b1f/lindi-0.4.6-py3-none-any.whl", hash = "sha256:defce634ef72ac2cfaeb5fb23671878b1dbe704905d236814716eb974e414fef", size = 63578, upload-time = "2026-03-09T14:44:43.124Z" },
 ]
 
 [[package]]

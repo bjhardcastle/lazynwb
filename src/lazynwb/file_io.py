@@ -10,6 +10,7 @@ import threading
 from collections.abc import Iterable
 from typing import Any
 
+import fsspec
 import h5py
 import obstore.fsspec
 import pydantic_settings
@@ -81,6 +82,12 @@ def _s3_to_http(url: str) -> str:
         return url
 
 
+def _open_reference_zarr(path: upath.UPath) -> zarr.Group:
+    """Open a kerchunk/LINDI-style reference JSON as a read-only Zarr group."""
+    fs = fsspec.filesystem("reference", fo=path.as_posix())
+    return zarr.open(fs.get_mapper(""), mode="r")
+
+
 def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     """
     open raw HDF5 or Zarr backend using global config
@@ -88,6 +95,9 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     p = from_pathlike(path)
     u = upath.UPath(p, **config.fsspec_storage_options)
     key = u.as_posix()
+    if key.endswith(".lindi.json"):
+        with contextlib.suppress(Exception):
+            return _open_reference_zarr(u)
     is_definitely_zarr = "zarr" in key
     if not is_definitely_zarr:
         with contextlib.suppress(Exception):

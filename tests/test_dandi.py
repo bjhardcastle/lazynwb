@@ -23,7 +23,7 @@ TEST_ASSET_ID = "21c622b7-6d8e-459b-98e8-b968a97a1585"
 pytestmark = pytest.mark.integration
 
 
-def test_get_dandiset_s3_urls_returns_valid_urls():
+def test_get_dandiset_s3_urls_returns_valid_urls() -> None:
     """Test that get_dandiset_s3_urls returns a list of valid S3 URLs."""
     urls = get_dandiset_s3_urls(TEST_DANDISET_ID, TEST_VERSION)
     assert isinstance(urls, list)
@@ -33,27 +33,31 @@ def test_get_dandiset_s3_urls_returns_valid_urls():
         assert "s3" in url.lower()
 
 
-def test_get_dandiset_s3_urls_with_latest_version():
+def test_get_dandiset_s3_urls_with_latest_version() -> None:
     """Test fetching URLs with latest version."""
     urls = get_dandiset_s3_urls(TEST_DANDISET_ID, version=None)
     assert isinstance(urls, list)
     assert len(urls) > 0
 
 
-def test_from_dandi_asset_returns_file_accessor():
+def test_from_dandi_asset_returns_file_accessor() -> None:
     """Test that from_dandi_asset returns a readable FileAccessor."""
     accessor = from_dandi_asset(TEST_DANDISET_ID, TEST_ASSET_ID, TEST_VERSION)
     assert isinstance(accessor, lazynwb.file_io.FileAccessor)
-    assert accessor.file is not None
+    assert accessor._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.ZARR
+    path_str = str(accessor._path)
+    assert path_str.endswith("nwb.lindi.json")
+    assert path_str.startswith("https://lindi.neurosift.org/")
 
 
-def test_from_dandi_asset_with_latest_version():
+def test_from_dandi_asset_with_latest_version() -> None:
     """Test creating FileAccessor with latest version."""
     accessor = from_dandi_asset(TEST_DANDISET_ID, TEST_ASSET_ID, version=None)
     assert isinstance(accessor, lazynwb.file_io.FileAccessor)
+    assert accessor._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.ZARR
 
 
-def test_scan_dandiset():
+def test_scan_dandiset() -> None:
     """Test that scan_dandiset returns a LazyFrame with data."""
     lf = scan_dandiset(
         TEST_DANDISET_ID,
