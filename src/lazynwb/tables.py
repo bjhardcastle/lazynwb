@@ -1009,11 +1009,16 @@ def _get_table_schema_helper(
 
     if https_url is not None and norm_path not in ("general",) and not _is_timeseries(all_keys):
         try:
+            import logging as _logging
+            _h5coro_logger = _logging.getLogger("h5coro")
+            _prev_level = _h5coro_logger.level
+            _h5coro_logger.setLevel(_logging.CRITICAL)  # suppress expected boolean-enum warnings
             h5c = h5coro.H5Coro(
                 https_url, HTTPDriver, credentials={}, errorChecking=False, verbose=False
             )
             dataset_paths = [f"/{table_path.strip('/')}/{name}" for name in columns_to_fetch]
             h5c.readDatasets(dataset_paths, block=True, metaOnly=True, enableAttributes=False)
+            _h5coro_logger.setLevel(_prev_level)
             for name in columns_to_fetch:
                 meta_key = f"{table_path.strip('/')}/{name}"
                 meta = h5c.metadataTable.get(meta_key)
@@ -1052,45 +1057,46 @@ def _get_table_schema_helper(
 
     file_schema: dict[str, polars._typing.PolarsDataType] = {}
 
-    # Build schema from h5coro metadata (fast path)
-    for name, meta in h5coro_meta.items():
+    # Build schema in all_keys order (preserves original HDF5 group ordering)
+    for name in all_keys:
+        if name not in columns_to_fetch:
+            continue
         if _is_nominally_indexed_column(name, all_keys) and name.endswith("_index"):
             continue
-        base_dtype = _h5coro_meta_to_polars_base(meta)
-        if base_dtype is None:
-            # Unsupported h5coro type — fall through to h5py below
-            h5coro_fallback_names.add(name)
-            column_accessors[name] = table.get(name)
-            continue
 
-        dims = meta.dimensions
-        ndims = meta.ndims
+        # Try h5coro metadata first (fast path)
+        meta = h5coro_meta.get(name)
+        if meta is not None:
+            base_dtype = _h5coro_meta_to_polars_base(meta)
+            if base_dtype is not None:
+                dims = meta.dimensions
+                ndims = meta.ndims
 
-        if is_metadata_table and ndims == 1 and dims[0] > 1:
-            dtype: polars._typing.PolarsDataType = pl.List(base_dtype)
-        elif ndims > 1:
-            # Shape for each row is dims[1:]
-            shape = tuple(dims[1:])
-            dtype = pl.Array(base_dtype, shape=shape)
-        else:
-            dtype = base_dtype
+                if is_metadata_table and ndims == 1 and dims[0] > 1:
+                    dtype: polars._typing.PolarsDataType = pl.List(base_dtype)
+                elif ndims > 1:
+                    shape = tuple(dims[1:])
+                    dtype = pl.Array(base_dtype, shape=shape)
+                else:
+                    dtype = base_dtype
 
-        if _is_nominally_indexed_column(name, all_keys):
-            index_cols = [
-                c for c in _get_indexed_column_names(all_keys)
-                if c.startswith(name) and c.endswith("_index")
-            ]
-            for _ in index_cols:
-                dtype = pl.List(dtype)
+                if _is_nominally_indexed_column(name, all_keys):
+                    index_cols = [
+                        c for c in _get_indexed_column_names(all_keys)
+                        if c.startswith(name) and c.endswith("_index")
+                    ]
+                    for _ in index_cols:
+                        dtype = pl.List(dtype)
 
-        file_schema[name] = dtype
+                file_schema[name] = dtype
+                continue
+            # Unsupported h5coro type — fall through to h5py
 
-    # Build schema from h5py fallback columns (same logic as before)
-    for name in h5coro_fallback_names:
+        # h5py fallback
         dataset = column_accessors.get(name)
-        if dataset is None or name not in columns_to_fetch:
-            continue
-        if _is_nominally_indexed_column(name, all_keys) and name.endswith("_index"):
+        if dataset is None:
+            dataset = table.get(name)
+        if dataset is None:
             continue
         if lazynwb.file_io.is_group(dataset):
             continue
