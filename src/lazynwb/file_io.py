@@ -131,7 +131,7 @@ def _open_hdf5(
         # obstore doesn't support http/https; remfile handles byte-range requests well for these
         file = remfile.File(url=path.as_posix())
     if file is None:
-        file = path.open(mode="rb", cache_type="first")
+        file = path.open(mode="rb", cache_type="first", block_size=8 * 1024 * 1024)
     return h5py.File(file, mode="r")
 
 
