@@ -12,6 +12,26 @@ from typing import Any, Literal, TypeVar
 import h5py
 import h5coro
 from h5coro.webdriver import HTTPDriver
+import h5coro.h5dataset as _h5dataset
+
+# Monkey-patch h5coro to skip shared/virtual HDF5 messages (e.g. 0x810) with zero size.
+# These are shared-message references in V1 object headers — h5coro raises FatalError for
+# unknown message types with msg_size==0, but shared attribute messages (0x800 bit set)
+# are safe to skip when we only care about datatype/dataspace metadata.
+_orig_readMessage = _h5dataset.H5Dataset.readMessage
+
+def _patched_readMessage(self, msg_type, msg_size, obj_hdr_flags, dlvl):
+    try:
+        return _orig_readMessage(self, msg_type, msg_size, obj_hdr_flags, dlvl)
+    except _h5dataset.FatalError as exc:
+        # Re-raise if this is NOT a zero-size unknown message (those are safe to skip).
+        if msg_size != 0 or msg_type == 0:
+            raise
+        # Zero-size unknown message (e.g. shared message reference 0x810): skip silently.
+        logger.debug(f"h5coro: skipping zero-size unknown message type 0x{msg_type:x} in {self.dataset}")
+        return 0
+
+_h5dataset.H5Dataset.readMessage = _patched_readMessage
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -960,6 +980,8 @@ def _h5coro_meta_to_polars_base(meta: Any) -> polars._typing.PolarsDataType | No
         return pl.String
     elif t == 8:  # ENUMERATED (NWB booleans)
         return pl.Boolean
+    elif t == 7:  # REFERENCE — NWB stores object references as strings
+        return pl.String
     return None  # unsupported — fall back to h5py
 
 
@@ -974,103 +996,140 @@ def _open_h5coro_bg(https_url: str) -> Any:
         return None
 
 
+def _open_and_inspect_h5coro(https_url: str, table_path: str) -> tuple[Any, set[str]] | None:
+    """Open h5coro and call inspectPath to get group keys — faster than waiting for h5py.
+
+    h5coro open (~0.13s) + inspectPath (~0.25s) = ~0.38s total, vs h5py open+colnames ~0.80s.
+    Starting this concurrently with h5py lets us kick off batch readDatasets much earlier.
+    Returns (h5c_instance, set_of_group_member_names) or None on failure.
+    """
+    import logging as _logging
+    _logging.getLogger("h5coro").setLevel(_logging.CRITICAL)
+    try:
+        h5c = h5coro.H5Coro(https_url, HTTPDriver, credentials={}, errorChecking=False, verbose=False)
+        result = h5c.inspectPath(f'/{table_path.strip("/")}')
+        if result is None or not result[0]:
+            return None
+        group_keys: set[str] = result[0]
+        return h5c, group_keys
+    except Exception as exc:
+        logger.debug(f"h5coro open+inspect failed: {exc!r}")
+        return None
+
+
 def _get_table_schema_helper(
     file_path: lazynwb.types_.PathLike, table_path: str, raise_on_missing: bool
 ) -> dict[str, Any] | None:
-    # Start h5coro opening in background BEFORE h5py (both make HTTP requests, GIL released)
     https_url = _s3_to_https(str(file_path))
-    h5coro_open_future = None
-    if https_url is not None:
-        _bg_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        h5coro_open_future = _bg_executor.submit(_open_h5coro_bg, https_url)
+    norm_path = lazynwb.utils.normalize_internal_file_path(table_path)
+    use_h5coro = https_url is not None and norm_path not in ("general",)
 
-    try:
-        file = lazynwb.file_io._get_accessor(file_path)
-        norm_path = lazynwb.utils.normalize_internal_file_path(table_path)
-        if norm_path not in file:
-            raise KeyError(table_path)
-        table = file[table_path]
-        if not lazynwb.file_io.is_group(table):
-            raise lazynwb.exceptions.InternalPathError(
-                f"{table_path!r} is not a group/table"
-            )
-    except KeyError:
-        if h5coro_open_future is not None:
-            h5coro_open_future.cancel()
-        if raise_on_missing:
-            raise lazynwb.exceptions.InternalPathError(
-                f"Table {table_path!r} not found in {file_path!r}"
-            ) from None
-        else:
-            logger.info(f"Table {table_path!r} not found in {file_path!r}: skipping")
-            return None
+    # Start h5coro (inspectPath) AND h5py open simultaneously in background threads.
+    # h5coro inspectPath finishes in ~0.38s; h5py finishes in ~0.80s.
+    # This lets us start h5coro batch readDatasets ~0.42s earlier than before.
+    _bg_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    h5coro_inspect_future = (
+        _bg_executor.submit(_open_and_inspect_h5coro, https_url, table_path)
+        if use_h5coro else None
+    )
+    h5py_future = _bg_executor.submit(lazynwb.file_io._get_accessor, file_path)
 
-    # colnames attr lists only data columns (no _index, no id) — cheap from attrs
-    colnames: list[str] = list(table.attrs.get("colnames", []))
+    # --- h5coro fast path ---
+    h5coro_meta: dict[str, Any] = {}
+    h5coro_fallback_names: set[str] = set()
+    all_keys: list[str] = []
+    columns_to_fetch: set[str] = set()
+    h5c = None
 
-    if colnames and norm_path != "general":
-        # Fast path: skip the slow table.keys() call (0.4s over S3).
-        # Infer all_keys from colnames: data cols + candidate _index cols + id.
-        # HDF5 groups store keys alphabetically, so sort to match original key order.
-        # h5coro batch read will confirm which _index columns actually exist.
-        candidate_index_keys = [f"{c}_index" for c in colnames]
-        all_keys: list[str] = sorted(set(colnames) | set(candidate_index_keys) | {"id"})
-        columns_to_fetch: set[str] = set(colnames) | {"id"}
-    else:
-        # Fallback for general table or when colnames attr is absent — read keys from h5py
-        all_keys = list(table.keys())
-        columns_to_fetch = set(all_keys)
+    if h5coro_inspect_future is not None:
+        inspect_result = h5coro_inspect_future.result()  # wait ~0.38s (h5py still opening)
+        if inspect_result is not None:
+            h5c, group_keys = inspect_result
+            if not _is_timeseries(group_keys):
+                # Derive all_keys and columns_to_fetch from group membership.
+                # Data columns = all non-_index keys (or _index keys with no base col).
+                index_keys = {k for k in group_keys if k.endswith("_index") and k[:-6] in group_keys}
+                columns_to_fetch = group_keys - index_keys
+                all_keys = sorted(group_keys)
 
-    # --- h5coro fast path: batch-read all column metadata in one call ---
-    # (h5coro open was already started concurrently with h5py above)
-    h5coro_meta: dict[str, Any] = {}  # col_name → H5Metadata or None (failed)
-    h5coro_fallback_names: set[str] = set()  # columns h5coro couldn't read
+                # Batch-read all column metadata — starts before h5py finishes!
+                dataset_paths = [f"/{table_path.strip('/')}/{name}" for name in all_keys]
+                try:
+                    h5c.readDatasets(dataset_paths, block=True, metaOnly=True, enableAttributes=False)
+                    for name in columns_to_fetch:
+                        meta_key = f"{table_path.strip('/')}/{name}"
+                        meta = h5c.metadataTable.get(meta_key)
+                        if meta is not None:
+                            if _h5coro_meta_to_polars_base(meta) is not None:
+                                # Known-good type: h5coro can fully determine the polars dtype
+                                h5coro_meta[name] = meta
+                            else:
+                                # h5coro knows the meta but type is unsupported (e.g. REFERENCE=7)
+                                # → fall back to h5py for dtype resolution
+                                h5coro_fallback_names.add(name)
+                        else:
+                            h5coro_fallback_names.add(name)
+                except Exception as exc:
+                    logger.debug(f"h5coro batch read failed ({exc!r}), falling back to h5py")
+                    h5coro_fallback_names = columns_to_fetch.copy()
 
-    if h5coro_open_future is not None and norm_path not in ("general",) and not _is_timeseries(all_keys):
+    # If h5coro handled all columns, we can skip waiting for h5py entirely.
+    # h5py still runs in background — it populates the FileAccessor cache for future calls.
+    needs_h5py = bool(h5coro_fallback_names) or not all_keys
+
+    if needs_h5py:
         try:
-            # Get h5coro instance — opened concurrently with h5py (likely already done)
-            h5c = h5coro_open_future.result()
-            if h5c is None:
-                raise RuntimeError("h5coro open returned None")
-            # Also include candidate _index columns so metadataTable confirms which exist
-            candidate_index = [k for k in all_keys if k.endswith("_index")]
-            all_paths_to_request = columns_to_fetch | set(candidate_index)
-            dataset_paths = [f"/{table_path.strip('/')}/{name}" for name in all_paths_to_request]
-            h5c.readDatasets(dataset_paths, block=True, metaOnly=True, enableAttributes=False)
-            # Update all_keys to reflect which candidate _index cols actually exist.
-            # Keep alphabetical sort to match HDF5 group key order.
-            confirmed_index_keys = {
-                name for name in candidate_index
-                if h5c.metadataTable.get(f"{table_path.strip('/')}/{name}") is not None
-            }
-            all_keys = sorted(set(colnames) | confirmed_index_keys | {"id"})
-            for name in columns_to_fetch:
-                meta_key = f"{table_path.strip('/')}/{name}"
-                meta = h5c.metadataTable.get(meta_key)
-                if meta is not None:
-                    h5coro_meta[name] = meta
-                else:
-                    h5coro_fallback_names.add(name)
-        except Exception as exc:
-            logger.debug(f"h5coro metadata read failed ({exc!r}), falling back to h5py for all columns")
-            h5coro_fallback_names = columns_to_fetch.copy()
-        finally:
-            if h5coro_open_future is not None:
-                _bg_executor.shutdown(wait=False)
-
-    else:
-        if h5coro_open_future is not None:
-            h5coro_open_future.cancel()
+            file = h5py_future.result()
             _bg_executor.shutdown(wait=False)
+        except Exception:
+            _bg_executor.shutdown(wait=False)
+            raise
+    else:
+        # Let h5py finish in background (cache warm-up), don't block on it
+        _bg_executor.shutdown(wait=False)
+        file = None
+
+    # Validate table exists and is a group via h5py (only needed when h5coro failed)
+    table = None
+    if not all_keys:
+        # h5coro fast-path was skipped or failed — use h5py to get keys
+        try:
+            if norm_path not in file:
+                raise KeyError(table_path)
+            table = file[table_path]
+            if not lazynwb.file_io.is_group(table):
+                raise lazynwb.exceptions.InternalPathError(
+                    f"{table_path!r} is not a group/table"
+                )
+        except KeyError:
+            if raise_on_missing:
+                raise lazynwb.exceptions.InternalPathError(
+                    f"Table {table_path!r} not found in {file_path!r}"
+                ) from None
+            else:
+                logger.info(f"Table {table_path!r} not found in {file_path!r}: skipping")
+                return None
+        colnames: list[str] = list(table.attrs.get("colnames", []))
+        if colnames and norm_path != "general":
+            candidate_index_keys = [f"{c}_index" for c in colnames]
+            all_keys = sorted(set(colnames) | set(candidate_index_keys) | {"id"})
+            columns_to_fetch = set(colnames) | {"id"}
+        else:
+            all_keys = list(table.keys())
+            columns_to_fetch = set(all_keys)
         h5coro_fallback_names = columns_to_fetch.copy()
+    elif h5coro_fallback_names:
+        # h5coro succeeded for some cols but not all — get table handle for fallbacks
+        table = file[table_path]
 
     # Fetch h5py accessors only for columns h5coro couldn't handle
     column_accessors: dict[str, Any] = {}
-    for name in h5coro_fallback_names:
-        if name in all_keys:
-            column_accessors[name] = table.get(name)
+    if h5coro_fallback_names and table is not None:
+        for name in h5coro_fallback_names:
+            if name in all_keys:
+                column_accessors[name] = table.get(name)
 
-    # Skip reference columns in fallback set
+    # Skip reference columns — check via h5py accessors (fallback) or h5coro meta
     known_references = {"timeseries": "TimeSeriesReferenceVectorData"}
     for ref_name, neurodata_type in known_references.items():
         if (
@@ -1081,9 +1140,17 @@ def _get_table_schema_helper(
             column_accessors.pop(f"{ref_name}_index", None)
             h5coro_meta.pop(f"{ref_name}_index", None)
 
-    # Determine table characteristics (need accessors for metadata detection)
-    all_accessors_for_check = {**column_accessors}
-    is_metadata_table = _is_metadata(all_accessors_for_check) if all_accessors_for_check else False
+    # Detect metadata table:
+    # - from h5py accessors if available (any ndim==0 scalar column)
+    # - from h5coro metadata otherwise (any meta.ndims==0)
+    if column_accessors:
+        is_metadata_table = _is_metadata(column_accessors)
+    elif h5coro_meta:
+        no_multi_dim = all(m.ndims <= 1 for m in h5coro_meta.values())
+        some_scalar = any(m.ndims == 0 for m in h5coro_meta.values())
+        is_metadata_table = no_multi_dim and some_scalar and not _is_timeseries_with_rate(columns_to_fetch)
+    else:
+        is_metadata_table = False
     is_timeseries = _is_timeseries(columns_to_fetch)
 
     file_schema: dict[str, polars._typing.PolarsDataType] = {}
@@ -1121,11 +1188,11 @@ def _get_table_schema_helper(
 
                 file_schema[name] = dtype
                 continue
-            # Unsupported h5coro type — fall through to h5py
+            # h5coro_meta only contains columns with supported types; should not reach here
 
         # h5py fallback
         dataset = column_accessors.get(name)
-        if dataset is None:
+        if dataset is None and table is not None:
             dataset = table.get(name)
         if dataset is None:
             continue
