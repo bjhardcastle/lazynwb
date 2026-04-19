@@ -31,9 +31,7 @@ def get_processpool_executor() -> concurrent.futures.ProcessPoolExecutor:
     global process_pool_executor
     if process_pool_executor is None:
         process_pool_executor = concurrent.futures.ProcessPoolExecutor(
-            mp_context=(
-                multiprocessing.get_context("spawn") if os.name == "posix" else None
-            )
+            mp_context=multiprocessing.get_context("fork")
         )
     return process_pool_executor
 
