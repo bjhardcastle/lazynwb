@@ -985,21 +985,20 @@ def _get_table_schema_helper(
             logger.info(f"Table {table_path!r} not found in {file_path!r}: skipping")
             return None
 
-    # All key names in the table group — cheap (HDF5 group header already fetched)
-    all_keys: list[str] = list(table.keys())
-
     # colnames attr lists only data columns (no _index, no id) — cheap from attrs
     colnames: list[str] = list(table.attrs.get("colnames", []))
 
     if colnames and norm_path != "general":
-        # Fast path: only fetch accessors for listed data columns, skipping _index columns.
-        # Include 'id' if present (NWB standard column not listed in colnames).
-        # Use all_keys to correctly identify indexed columns for dtype inference.
-        columns_to_fetch: set[str] = set(colnames)
-        if "id" in all_keys:
-            columns_to_fetch.add("id")
+        # Fast path: skip the slow table.keys() call (0.4s over S3).
+        # Infer all_keys from colnames: data cols + candidate _index cols + id.
+        # HDF5 groups store keys alphabetically, so sort to match original key order.
+        # h5coro batch read will confirm which _index columns actually exist.
+        candidate_index_keys = [f"{c}_index" for c in colnames]
+        all_keys: list[str] = sorted(set(colnames) | set(candidate_index_keys) | {"id"})
+        columns_to_fetch: set[str] = set(colnames) | {"id"}
     else:
-        # Fallback for general table or when colnames attr is absent
+        # Fallback for general table or when colnames attr is absent — read keys from h5py
+        all_keys = list(table.keys())
         columns_to_fetch = set(all_keys)
 
     # --- h5coro fast path: batch-read all column metadata in one call ---
@@ -1016,9 +1015,19 @@ def _get_table_schema_helper(
             h5c = h5coro.H5Coro(
                 https_url, HTTPDriver, credentials={}, errorChecking=False, verbose=False
             )
-            dataset_paths = [f"/{table_path.strip('/')}/{name}" for name in columns_to_fetch]
+            # Also include candidate _index columns so metadataTable confirms which exist
+            candidate_index = [k for k in all_keys if k.endswith("_index")]
+            all_paths_to_request = columns_to_fetch | set(candidate_index)
+            dataset_paths = [f"/{table_path.strip('/')}/{name}" for name in all_paths_to_request]
             h5c.readDatasets(dataset_paths, block=True, metaOnly=True, enableAttributes=False)
             _h5coro_logger.setLevel(_prev_level)
+            # Update all_keys to reflect which candidate _index cols actually exist.
+            # Keep alphabetical sort to match HDF5 group key order.
+            confirmed_index_keys = {
+                name for name in candidate_index
+                if h5c.metadataTable.get(f"{table_path.strip('/')}/{name}") is not None
+            }
+            all_keys = sorted(set(colnames) | confirmed_index_keys | {"id"})
             for name in columns_to_fetch:
                 meta_key = f"{table_path.strip('/')}/{name}"
                 meta = h5c.metadataTable.get(meta_key)
