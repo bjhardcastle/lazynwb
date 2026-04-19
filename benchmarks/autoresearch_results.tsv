@@ -1,0 +1,3 @@
+iteration	description	time_s	keep	notes
+0	baseline (ThreadPoolExecutor)	9.71	baseline	2 S3 HDF5 files, 69 cols, profiled bottleneck is h5py GIL
+1	ProcessPoolExecutor (fork) for multi-file	4.57	keep	52% reduction; each process owns its h5py handle, bypasses GIL
