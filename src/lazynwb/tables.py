@@ -963,9 +963,27 @@ def _h5coro_meta_to_polars_base(meta: Any) -> polars._typing.PolarsDataType | No
     return None  # unsupported — fall back to h5py
 
 
+def _open_h5coro_bg(https_url: str) -> Any:
+    """Open h5coro in a background thread concurrently with h5py."""
+    import logging as _logging
+    _logging.getLogger("h5coro").setLevel(_logging.CRITICAL)
+    try:
+        return h5coro.H5Coro(https_url, HTTPDriver, credentials={}, errorChecking=False, verbose=False)
+    except Exception as exc:
+        logger.debug(f"h5coro background open failed: {exc!r}")
+        return None
+
+
 def _get_table_schema_helper(
     file_path: lazynwb.types_.PathLike, table_path: str, raise_on_missing: bool
 ) -> dict[str, Any] | None:
+    # Start h5coro opening in background BEFORE h5py (both make HTTP requests, GIL released)
+    https_url = _s3_to_https(str(file_path))
+    h5coro_open_future = None
+    if https_url is not None:
+        _bg_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        h5coro_open_future = _bg_executor.submit(_open_h5coro_bg, https_url)
+
     try:
         file = lazynwb.file_io._get_accessor(file_path)
         norm_path = lazynwb.utils.normalize_internal_file_path(table_path)
@@ -977,6 +995,8 @@ def _get_table_schema_helper(
                 f"{table_path!r} is not a group/table"
             )
     except KeyError:
+        if h5coro_open_future is not None:
+            h5coro_open_future.cancel()
         if raise_on_missing:
             raise lazynwb.exceptions.InternalPathError(
                 f"Table {table_path!r} not found in {file_path!r}"
@@ -1002,25 +1022,21 @@ def _get_table_schema_helper(
         columns_to_fetch = set(all_keys)
 
     # --- h5coro fast path: batch-read all column metadata in one call ---
-    https_url = _s3_to_https(str(file_path))
+    # (h5coro open was already started concurrently with h5py above)
     h5coro_meta: dict[str, Any] = {}  # col_name → H5Metadata or None (failed)
     h5coro_fallback_names: set[str] = set()  # columns h5coro couldn't read
 
-    if https_url is not None and norm_path not in ("general",) and not _is_timeseries(all_keys):
+    if h5coro_open_future is not None and norm_path not in ("general",) and not _is_timeseries(all_keys):
         try:
-            import logging as _logging
-            _h5coro_logger = _logging.getLogger("h5coro")
-            _prev_level = _h5coro_logger.level
-            _h5coro_logger.setLevel(_logging.CRITICAL)  # suppress expected boolean-enum warnings
-            h5c = h5coro.H5Coro(
-                https_url, HTTPDriver, credentials={}, errorChecking=False, verbose=False
-            )
+            # Get h5coro instance — opened concurrently with h5py (likely already done)
+            h5c = h5coro_open_future.result()
+            if h5c is None:
+                raise RuntimeError("h5coro open returned None")
             # Also include candidate _index columns so metadataTable confirms which exist
             candidate_index = [k for k in all_keys if k.endswith("_index")]
             all_paths_to_request = columns_to_fetch | set(candidate_index)
             dataset_paths = [f"/{table_path.strip('/')}/{name}" for name in all_paths_to_request]
             h5c.readDatasets(dataset_paths, block=True, metaOnly=True, enableAttributes=False)
-            _h5coro_logger.setLevel(_prev_level)
             # Update all_keys to reflect which candidate _index cols actually exist.
             # Keep alphabetical sort to match HDF5 group key order.
             confirmed_index_keys = {
@@ -1038,8 +1054,14 @@ def _get_table_schema_helper(
         except Exception as exc:
             logger.debug(f"h5coro metadata read failed ({exc!r}), falling back to h5py for all columns")
             h5coro_fallback_names = columns_to_fetch.copy()
+        finally:
+            if h5coro_open_future is not None:
+                _bg_executor.shutdown(wait=False)
 
     else:
+        if h5coro_open_future is not None:
+            h5coro_open_future.cancel()
+            _bg_executor.shutdown(wait=False)
         h5coro_fallback_names = columns_to_fetch.copy()
 
     # Fetch h5py accessors only for columns h5coro couldn't handle
