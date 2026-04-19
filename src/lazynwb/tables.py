@@ -934,7 +934,15 @@ def _get_table_schema_helper(
     file_path: lazynwb.types_.PathLike, table_path: str, raise_on_missing: bool
 ) -> dict[str, Any] | None:
     try:
-        column_accessors = _get_table_column_accessors(file_path, table_path)
+        file = lazynwb.file_io._get_accessor(file_path)
+        norm_path = lazynwb.utils.normalize_internal_file_path(table_path)
+        if norm_path not in file:
+            raise KeyError(table_path)
+        table = file[table_path]
+        if not lazynwb.file_io.is_group(table):
+            raise lazynwb.exceptions.InternalPathError(
+                f"{table_path!r} is not a group/table"
+            )
     except KeyError:
         if raise_on_missing:
             raise lazynwb.exceptions.InternalPathError(
@@ -943,38 +951,64 @@ def _get_table_schema_helper(
         else:
             logger.info(f"Table {table_path!r} not found in {file_path!r}: skipping")
             return None
-    else:
-        file_schema = {}
-        is_metadata = _is_metadata(column_accessors)
-        is_timeseries = _is_timeseries(column_accessors.keys())
 
-        for name, dataset in column_accessors.items():
-            if _is_nominally_indexed_column(
-                name, column_accessors.keys()
-            ) and name.endswith("_index"):
-                # skip the index columns
-                continue
-            if lazynwb.file_io.is_group(dataset):
-                continue
-            if name == "starting_time" and _is_timeseries_with_rate(
-                column_accessors.keys()
-            ):
-                # this is a TimeSeries object with start/rate: we'll generate timestamps
-                file_schema["timestamps"] = pl.Float64
-                continue
-            if (
-                is_timeseries
-                and (shape := dataset.shape)
-                and shape[0] != (len_data := column_accessors["data"].shape[0])
-            ):
-                logger.debug(
-                    f"skipping column {name!r} with shape {shape} from TimeSeries table: length does not match data length {len_data}"
-                )
-                continue
-            file_schema[name] = _get_polars_dtype(
-                dataset, name, column_accessors.keys(), is_metadata=is_metadata
+    # All key names in the table group — cheap (HDF5 group header already fetched)
+    all_keys: list[str] = list(table.keys())
+
+    # colnames attr lists only data columns (no _index, no id) — cheap from attrs
+    colnames: list[str] = list(table.attrs.get("colnames", []))
+
+    if colnames and norm_path != "general":
+        # Fast path: only fetch accessors for listed data columns, skipping _index and id.
+        # Use all_keys to correctly identify indexed columns for dtype inference.
+        columns_to_fetch: set[str] = set(colnames)
+    else:
+        # Fallback for general table or when colnames attr is absent
+        columns_to_fetch = set(all_keys)
+
+    column_accessors: dict[str, Any] = {}
+    for name in all_keys:
+        if name not in columns_to_fetch:
+            continue
+        column_accessors[name] = table.get(name)
+
+    # Skip reference columns (e.g. TimeSeriesReferenceVectorData)
+    known_references = {"timeseries": "TimeSeriesReferenceVectorData"}
+    for ref_name, neurodata_type in known_references.items():
+        if (
+            accessor := column_accessors.get(ref_name)
+        ) is not None and accessor.attrs.get("neurodata_type") == neurodata_type:
+            column_accessors.pop(ref_name)
+            column_accessors.pop(f"{ref_name}_index", None)
+
+    file_schema = {}
+    is_metadata = _is_metadata(column_accessors)
+    is_timeseries = _is_timeseries(column_accessors.keys())
+
+    for name, dataset in column_accessors.items():
+        if _is_nominally_indexed_column(name, all_keys) and name.endswith("_index"):
+            # skip the index columns
+            continue
+        if lazynwb.file_io.is_group(dataset):
+            continue
+        if name == "starting_time" and _is_timeseries_with_rate(column_accessors.keys()):
+            # TimeSeries with rate: generate timestamps column
+            file_schema["timestamps"] = pl.Float64
+            continue
+        if (
+            is_timeseries
+            and (shape := dataset.shape)
+            and shape[0] != (len_data := column_accessors["data"].shape[0])
+        ):
+            logger.debug(
+                f"skipping column {name!r} with shape {shape} from TimeSeries table: "
+                f"length does not match data length {len_data}"
             )
-        return file_schema
+            continue
+        file_schema[name] = _get_polars_dtype(
+            dataset, name, all_keys, is_metadata=is_metadata
+        )
+    return file_schema
 
 
 def get_table_schema(
