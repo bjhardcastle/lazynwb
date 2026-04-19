@@ -10,6 +10,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, TypeVar
 
 import h5py
+import h5coro
+from h5coro.webdriver import HTTPDriver
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -930,6 +932,37 @@ def _get_path_to_row_indices(df: pl.DataFrame) -> dict[str, list[int]]:
     }
 
 
+def _s3_to_https(path: str) -> str | None:
+    """Convert s3:// path to https URL for h5coro HTTPDriver."""
+    if path.startswith("s3://"):
+        bucket = path[5:].split("/")[0]
+        key = "/".join(path[5:].split("/")[1:])
+        return f"https://{bucket}.s3.amazonaws.com/{key}"
+    elif path.startswith(("http://", "https://")):
+        return path
+    return None
+
+
+def _h5coro_meta_to_polars_base(meta: Any) -> polars._typing.PolarsDataType | None:
+    """Convert h5coro H5Metadata type/size to a base (non-list) polars dtype.
+    Returns None for unsupported types (caller should fall back to h5py)."""
+    t = meta.type
+    if t == 1:  # FLOATING_POINT
+        return {4: pl.Float32, 8: pl.Float64}.get(meta.typeSize, pl.Float64)
+    elif t == 0:  # FIXED_POINT (integer)
+        signed = getattr(meta, "signedval", True)
+        size = meta.typeSize
+        if signed:
+            return {1: pl.Int8, 2: pl.Int16, 4: pl.Int32, 8: pl.Int64}.get(size, pl.Int64)
+        else:
+            return {1: pl.UInt8, 2: pl.UInt16, 4: pl.UInt32, 8: pl.UInt64}.get(size, pl.UInt64)
+    elif t in (3, 12):  # STRING or VL_STRING
+        return pl.String
+    elif t == 8:  # ENUMERATED (NWB booleans)
+        return pl.Boolean
+    return None  # unsupported — fall back to h5py
+
+
 def _get_table_schema_helper(
     file_path: lazynwb.types_.PathLike, table_path: str, raise_on_missing: bool
 ) -> dict[str, Any] | None:
@@ -969,48 +1002,112 @@ def _get_table_schema_helper(
         # Fallback for general table or when colnames attr is absent
         columns_to_fetch = set(all_keys)
 
-    column_accessors: dict[str, Any] = {}
-    for name in all_keys:
-        if name not in columns_to_fetch:
-            continue
-        column_accessors[name] = table.get(name)
+    # --- h5coro fast path: batch-read all column metadata in one call ---
+    https_url = _s3_to_https(str(file_path))
+    h5coro_meta: dict[str, Any] = {}  # col_name → H5Metadata or None (failed)
+    h5coro_fallback_names: set[str] = set()  # columns h5coro couldn't read
 
-    # Skip reference columns (e.g. TimeSeriesReferenceVectorData)
+    if https_url is not None and norm_path not in ("general",) and not _is_timeseries(all_keys):
+        try:
+            h5c = h5coro.H5Coro(
+                https_url, HTTPDriver, credentials={}, errorChecking=False, verbose=False
+            )
+            dataset_paths = [f"/{table_path.strip('/')}/{name}" for name in columns_to_fetch]
+            h5c.readDatasets(dataset_paths, block=True, metaOnly=True, enableAttributes=False)
+            for name in columns_to_fetch:
+                meta_key = f"{table_path.strip('/')}/{name}"
+                meta = h5c.metadataTable.get(meta_key)
+                if meta is not None:
+                    h5coro_meta[name] = meta
+                else:
+                    h5coro_fallback_names.add(name)
+        except Exception as exc:
+            logger.debug(f"h5coro metadata read failed ({exc!r}), falling back to h5py for all columns")
+            h5coro_fallback_names = columns_to_fetch.copy()
+
+    else:
+        h5coro_fallback_names = columns_to_fetch.copy()
+
+    # Fetch h5py accessors only for columns h5coro couldn't handle
+    column_accessors: dict[str, Any] = {}
+    for name in h5coro_fallback_names:
+        if name in all_keys:
+            column_accessors[name] = table.get(name)
+
+    # Skip reference columns in fallback set
     known_references = {"timeseries": "TimeSeriesReferenceVectorData"}
     for ref_name, neurodata_type in known_references.items():
         if (
             accessor := column_accessors.get(ref_name)
         ) is not None and accessor.attrs.get("neurodata_type") == neurodata_type:
             column_accessors.pop(ref_name)
+            h5coro_meta.pop(ref_name, None)
             column_accessors.pop(f"{ref_name}_index", None)
+            h5coro_meta.pop(f"{ref_name}_index", None)
 
-    file_schema = {}
-    is_metadata = _is_metadata(column_accessors)
-    is_timeseries = _is_timeseries(column_accessors.keys())
+    # Determine table characteristics (need accessors for metadata detection)
+    all_accessors_for_check = {**column_accessors}
+    is_metadata_table = _is_metadata(all_accessors_for_check) if all_accessors_for_check else False
+    is_timeseries = _is_timeseries(columns_to_fetch)
 
-    for name, dataset in column_accessors.items():
+    file_schema: dict[str, polars._typing.PolarsDataType] = {}
+
+    # Build schema from h5coro metadata (fast path)
+    for name, meta in h5coro_meta.items():
         if _is_nominally_indexed_column(name, all_keys) and name.endswith("_index"):
-            # skip the index columns
+            continue
+        base_dtype = _h5coro_meta_to_polars_base(meta)
+        if base_dtype is None:
+            # Unsupported h5coro type — fall through to h5py below
+            h5coro_fallback_names.add(name)
+            column_accessors[name] = table.get(name)
+            continue
+
+        dims = meta.dimensions
+        ndims = meta.ndims
+
+        if is_metadata_table and ndims == 1 and dims[0] > 1:
+            dtype: polars._typing.PolarsDataType = pl.List(base_dtype)
+        elif ndims > 1:
+            # Shape for each row is dims[1:]
+            shape = tuple(dims[1:])
+            dtype = pl.Array(base_dtype, shape=shape)
+        else:
+            dtype = base_dtype
+
+        if _is_nominally_indexed_column(name, all_keys):
+            index_cols = [
+                c for c in _get_indexed_column_names(all_keys)
+                if c.startswith(name) and c.endswith("_index")
+            ]
+            for _ in index_cols:
+                dtype = pl.List(dtype)
+
+        file_schema[name] = dtype
+
+    # Build schema from h5py fallback columns (same logic as before)
+    for name in h5coro_fallback_names:
+        dataset = column_accessors.get(name)
+        if dataset is None or name not in columns_to_fetch:
+            continue
+        if _is_nominally_indexed_column(name, all_keys) and name.endswith("_index"):
             continue
         if lazynwb.file_io.is_group(dataset):
             continue
-        if name == "starting_time" and _is_timeseries_with_rate(column_accessors.keys()):
-            # TimeSeries with rate: generate timestamps column
+        if name == "starting_time" and _is_timeseries_with_rate(columns_to_fetch):
             file_schema["timestamps"] = pl.Float64
             continue
         if (
             is_timeseries
             and (shape := dataset.shape)
-            and shape[0] != (len_data := column_accessors["data"].shape[0])
+            and (data_acc := column_accessors.get("data")) is not None
+            and shape[0] != data_acc.shape[0]
         ):
-            logger.debug(
-                f"skipping column {name!r} with shape {shape} from TimeSeries table: "
-                f"length does not match data length {len_data}"
-            )
             continue
         file_schema[name] = _get_polars_dtype(
-            dataset, name, all_keys, is_metadata=is_metadata
+            dataset, name, all_keys, is_metadata=is_metadata_table
         )
+
     return file_schema
 
 
