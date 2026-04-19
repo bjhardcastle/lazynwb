@@ -992,8 +992,13 @@ def get_table_schema(
         file_paths = file_paths[: min(first_n_files_to_infer_schema, len(file_paths))]
     per_file_schemas: list[dict[str, polars.DataType]] = []
     future_to_file_path = {}
+    executor = (
+        lazynwb.utils.get_processpool_executor()
+        if len(file_paths) > 1
+        else lazynwb.utils.get_threadpool_executor()
+    )
     for file_path in file_paths:
-        future = lazynwb.utils.get_threadpool_executor().submit(
+        future = executor.submit(
             _get_table_schema_helper,
             file_path=file_path,
             table_path=table_path,
