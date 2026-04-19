@@ -959,9 +959,12 @@ def _get_table_schema_helper(
     colnames: list[str] = list(table.attrs.get("colnames", []))
 
     if colnames and norm_path != "general":
-        # Fast path: only fetch accessors for listed data columns, skipping _index and id.
+        # Fast path: only fetch accessors for listed data columns, skipping _index columns.
+        # Include 'id' if present (NWB standard column not listed in colnames).
         # Use all_keys to correctly identify indexed columns for dtype inference.
         columns_to_fetch: set[str] = set(colnames)
+        if "id" in all_keys:
+            columns_to_fetch.add("id")
     else:
         # Fallback for general table or when colnames attr is absent
         columns_to_fetch = set(all_keys)
