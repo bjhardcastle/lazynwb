@@ -8,9 +8,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.88...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.89...HEAD)</small>
+
+### Added
+
+- Add dedicated anon config option ([d0d79e2](https://github.com/bjhardcastle/lazynwb/commit/d0d79e27e6f3c9ec1ed9dae76232722ad0693238) by bjhardcastle).
+- Add pydantic_settings ([619cb2d](https://github.com/bjhardcastle/lazynwb/commit/619cb2d4e44eb0a5fa73a125b4c2ce81b1bf55e1) by bjhardcastle).
+
+### Fixed
+
+- Fix pydantic use on 3.9 ([0aa5e74](https://github.com/bjhardcastle/lazynwb/commit/0aa5e740f9b5a601dc91c5d9c884e79b3a84d242) by bjhardcastle).
 
 <!-- insertion marker -->
+## [v0.2.89](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.89) - 2026-04-15
+
+<small>[Compare with v0.2.88](https://github.com/bjhardcastle/lazynwb/compare/v0.2.88...v0.2.89)</small>
+
 ## [v0.2.88](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.88) - 2026-04-11
 
 <small>[Compare with v0.2.87](https://github.com/bjhardcastle/lazynwb/compare/v0.2.87...v0.2.88)</small>
