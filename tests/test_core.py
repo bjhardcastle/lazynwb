@@ -7,7 +7,7 @@ import lazynwb
 
 
 def test_import_package():
-    pass
+    import lazynwb # noqa: F401
 
 
 def test_describe(local_hdf5_path):
