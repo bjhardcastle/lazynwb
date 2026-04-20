@@ -31,7 +31,7 @@ class FileIOConfig(pydantic_settings.BaseSettings):
     model_config = pydantic_settings.SettingsConfigDict(
         env_prefix="LAZYNWB_FILE_IO_",
     )
-    use_remfile: bool = False
+    use_remfile: bool = True
     use_obstore: bool = False
     fsspec_storage_options: dict[str, Any] = {
         "anon": False,
