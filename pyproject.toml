@@ -20,6 +20,7 @@ dependencies = [
     "s3fs>=2025.7.0",
     "requests>=2.32.4",
     "obstore>=0.8.2",
+    "pydantic-settings>=2.11.0",
 ]
 version = "0.2.89"
 classifiers = [
