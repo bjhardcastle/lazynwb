@@ -7,6 +7,9 @@ import logging
 import os
 import pathlib
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections.abc import Iterable
 from typing import Any
 
@@ -33,9 +36,8 @@ class FileIOConfig(pydantic_settings.BaseSettings):
     )
     use_remfile: bool = False
     use_obstore: bool = False
-    fsspec_storage_options: dict[str, Any] = {
-        "anon": False,
-    }
+    anon: bool | None = None
+    fsspec_storage_options: dict[str, Any] = {}
     disable_cache: bool = False
 
 
@@ -45,6 +47,8 @@ config = FileIOConfig()
 # cache for FileAccessor instances by canonical path
 _accessor_cache: dict[str, FileAccessor] = {}
 _cache_lock = threading.RLock()  # RLock allows same thread to acquire multiple times
+_obstore_region_cache: dict[str, str] = {}
+_obstore_region_lock = threading.RLock()
 
 
 def clear_cache() -> None:
@@ -81,12 +85,94 @@ def _s3_to_http(url: str) -> str:
         return url
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _get_protocol(pathlike: lazynwb.types_.PathLike | str) -> str | None:
+    if isinstance(pathlike, upath.UPath):
+        return pathlike.protocol
+    path = os.fsdecode(pathlike)
+    if "://" not in path:
+        return None
+    return path.split("://", 1)[0]
+
+
+def _split_cloud_url(
+    pathlike: lazynwb.types_.PathLike | str,
+) -> tuple[str | None, str, str]:
+    path = (
+        pathlike.as_posix() if hasattr(pathlike, "as_posix") else os.fsdecode(pathlike)
+    )
+    protocol = _get_protocol(path)
+    if protocol is None:
+        return None, "", path
+    bucket, _, key = path.split("://", 1)[1].partition("/")
+    return protocol, bucket, key
+
+
+def _get_fsspec_storage_options(
+    pathlike: lazynwb.types_.PathLike | str,
+) -> dict[str, Any]:
+    options = dict(config.fsspec_storage_options)
+    if config.anon is not None and _get_protocol(pathlike) in {"s3", "s3a"}:
+        options["anon"] = config.anon
+    return options
+
+
+def _infer_s3_bucket_region(path: upath.UPath, timeout: float = 5.0) -> str | None:
+    return 'us-west-2'
+    _, bucket, key = _split_cloud_url(path)
+    if not bucket:
+        return None
+    with _obstore_region_lock:
+        if bucket in _obstore_region_cache:
+            return _obstore_region_cache[bucket]
+
+    probe_url = f"https://s3.amazonaws.com/{bucket}"
+    if key:
+        probe_url += f"/{urllib.parse.quote(key, safe='/')}"
+
+    opener = urllib.request.build_opener(_NoRedirectHandler)
+    request = urllib.request.Request(probe_url, method="HEAD")
+    headers = None
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            headers = response.headers
+    except urllib.error.HTTPError as exc:
+        headers = exc.headers
+    except Exception as exc:
+        logger.debug(f"failed to infer S3 region for {path}: {exc!r}")
+        return None
+
+    region = headers.get("x-amz-bucket-region") if headers is not None else None
+    if region is not None:
+        with _obstore_region_lock:
+            _obstore_region_cache[bucket] = region
+    return region
+
+
+def _get_obstore_storage_options(path: upath.UPath) -> dict[str, Any]:
+    options = _get_fsspec_storage_options(path)
+    if path.protocol in {"s3", "s3a"}:
+        anon = options.pop("anon", None)
+        if config.anon is not None:
+            options["skip_signature"] = config.anon
+        elif anon is not None:
+            options["skip_signature"] = bool(anon)
+        if "region" not in options:
+            if region := _infer_s3_bucket_region(path):
+                options["region"] = region
+    return options
+
+
 def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     """
     open raw HDF5 or Zarr backend using global config
     """
     p = from_pathlike(path)
-    u = upath.UPath(p, **config.fsspec_storage_options)
+    u = upath.UPath(p, **_get_fsspec_storage_options(p))
     key = u.as_posix()
     is_definitely_zarr = "zarr" in key
     if not is_definitely_zarr:
@@ -96,16 +182,14 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
             )
     if config.use_obstore and u.protocol and u.protocol != "file":
         with contextlib.suppress(Exception):
-            store = obstore.store.from_url(
-                key.split("//")[-1].split("/")[0], **config.fsspec_storage_options
-            )
-            return zarr.open(store, mode="r")
+            fs = obstore.fsspec.FsspecStore(u.protocol, **_get_obstore_storage_options(u))  # type: ignore[call-overload]
+            return zarr.open(fs.get_mapper(u.as_posix()), mode="r")
     with contextlib.suppress(Exception):
         return zarr.open(u.as_posix(), mode="r")
     raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
 
 
-_OBSTORE_PROTOCOLS = frozenset({"s3", "gs", "gcs", "az", "abfs"})
+_OBSTORE_PROTOCOLS = frozenset({"s3", "s3a", "gs", "gcs", "az", "abfs"})
 
 
 def _open_hdf5(
@@ -124,7 +208,7 @@ def _open_hdf5(
             )
     if use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
         file = obstore.fsspec.BufferedFile(
-            fs=obstore.fsspec.FsspecStore(path.protocol, **config.fsspec_storage_options),  # type: ignore[call-overload]
+            fs=obstore.fsspec.FsspecStore(path.protocol, **_get_obstore_storage_options(path)),  # type: ignore[call-overload]
             path=path.as_posix(),
         )
     if file is None and path.protocol in ("http", "https"):
@@ -210,7 +294,9 @@ class FileAccessor:
         elif hasattr(path, "as_posix"):
             cache_key = path.as_posix()
         else:
-            cache_key = from_pathlike(path, **config.fsspec_storage_options).as_posix()
+            cache_key = from_pathlike(
+                path, **_get_fsspec_storage_options(path)
+            ).as_posix()
 
         with _cache_lock:
             # return cached instance if it exists and is open
@@ -317,7 +403,7 @@ class FileAccessor:
         self._hdmf_backend = state["hdmf_backend"]
 
         # Check if already cached in new process
-        u_path = upath.UPath(self._path, **config.fsspec_storage_options)
+        u_path = upath.UPath(self._path, **_get_fsspec_storage_options(self._path))
         key = u_path.as_posix()
 
         if key in _accessor_cache:

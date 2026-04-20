@@ -813,19 +813,20 @@ def _get_table_column_accessors(
         raise lazynwb.exceptions.InternalPathError(
             f"{table_path!r} is not a group/table (found {type(table).__name__})"
         )
+    column_names = _get_table_column_names(table)
     if use_thread_pool:
         future_to_column = {
             lazynwb.utils.get_threadpool_executor().submit(
-                table.get, column_name
+                table.__getitem__, column_name
             ): column_name
-            for column_name in table.keys()
+            for column_name in column_names
         }
         for future in concurrent.futures.as_completed(future_to_column):
             column_name = future_to_column[future]
             names_to_columns[column_name] = future.result()
     else:
-        for column_name in table:
-            names_to_columns[column_name] = table.get(column_name)
+        for column_name in column_names:
+            names_to_columns[column_name] = table[column_name]
     if lazynwb.utils.normalize_internal_file_path(table_path) == "general":
         # add metadata that lives at top-level of file
         root = lazynwb.file_io._get_accessor(file_path)
@@ -869,6 +870,28 @@ def _get_table_column_accessors(
             "Keeping references is not implemented yet: see https://pynwb.readthedocs.io/en/stable/pynwb.base.html#pynwb.base.TimeSeriesReferenceVectorData"
         )
     return names_to_columns
+
+
+def _get_table_column_names(table: zarr.Group | h5py.Group) -> tuple[str, ...]:
+    colnames = getattr(table.attrs, "get", lambda *_args, **_kwargs: None)("colnames")
+    if colnames is not None:
+        base_names = tuple(
+            name.decode() if isinstance(name, bytes) else str(name) for name in colnames
+        )
+        all_names = set(base_names)
+        if "id" in table:
+            all_names.add("id")
+        current_level = base_names
+        while current_level:
+            next_level = []
+            for name in current_level:
+                index_name = f"{name}_index"
+                if index_name in table and index_name not in all_names:
+                    all_names.add(index_name)
+                    next_level.append(index_name)
+            current_level = tuple(next_level)
+        return tuple(sorted(all_names))
+    return tuple(table.keys())
 
 
 def _get_polars_dtype(
@@ -991,19 +1014,36 @@ def get_table_schema(
     if first_n_files_to_infer_schema is not None:
         file_paths = file_paths[: min(first_n_files_to_infer_schema, len(file_paths))]
     per_file_schemas: list[dict[str, polars.DataType]] = []
-    future_to_file_path = {}
-    for file_path in file_paths:
-        future = lazynwb.utils.get_threadpool_executor().submit(
-            _get_table_schema_helper,
-            file_path=file_path,
-            table_path=table_path,
-            raise_on_missing=raise_on_missing,
-        )
-        future_to_file_path[future] = file_path
     is_first_missing = True  # used to warn only once
-    for future in concurrent.futures.as_completed(future_to_file_path):
+    if _should_parallelize_schema_inference(file_paths):
+        future_to_file_path = {}
+        for file_path in file_paths:
+            future = lazynwb.utils.get_threadpool_executor().submit(
+                _get_table_schema_helper,
+                file_path=file_path,
+                table_path=table_path,
+                raise_on_missing=raise_on_missing,
+            )
+            future_to_file_path[future] = file_path
+        future_to_result = concurrent.futures.as_completed(future_to_file_path)
+    else:
+        future_to_file_path = {
+            file_path: file_path for file_path in file_paths
+        }  # keep error handling logic consistent
+        future_to_result = tuple(file_paths)
+
+    for future in future_to_result:
         try:
-            file_schema = future.result()
+            if hasattr(future, "result"):
+                file_schema = future.result()
+                file_path = future_to_file_path[future]
+            else:
+                file_path = future_to_file_path[future]
+                file_schema = _get_table_schema_helper(
+                    file_path=file_path,
+                    table_path=table_path,
+                    raise_on_missing=raise_on_missing,
+                )
         except lazynwb.exceptions.InternalPathError:
             if raise_on_missing:
                 raise
@@ -1013,9 +1053,7 @@ def get_table_schema(
                     is_first_missing = False
                 continue
         except Exception as exc:
-            logger.error(
-                f"Error getting schema for {table_path!r} in {future_to_file_path[future]!r}:"
-            )
+            logger.error(f"Error getting schema for {table_path!r} in {file_path!r}:")
             raise exc from None
         if file_schema is not None:
             per_file_schemas.append(file_schema)
@@ -1055,6 +1093,18 @@ def get_table_schema(
             if isinstance(schema[column_name], (pl.List, pl.Array)):
                 schema.pop(column_name, None)
     return pl.Schema(schema)
+
+
+def _should_parallelize_schema_inference(
+    file_paths: Iterable[lazynwb.types_.PathLike],
+) -> bool:
+    for file_path in file_paths:
+        path = lazynwb.file_io.from_pathlike(file_path)
+        if path.protocol and "zarr" not in path.as_posix().lower():
+            # Remote HDF5 metadata access over a file-like object is substantially
+            # slower when multiple files are walked concurrently.
+            return False
+    return True
 
 
 def insert_is_observed(

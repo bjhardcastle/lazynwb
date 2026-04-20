@@ -5,6 +5,7 @@ import pytest
 
 import lazynwb.file_io
 
+
 @pytest.mark.parametrize(
     "nwb_fixture_name",
     [
@@ -20,7 +21,10 @@ def test_file_accessor(nwb_fixture_name, request):
     assert "units" in accessor, "__contains__() failing, or NWB fixture has changed"
     assert "/units" in accessor, "__contains__() failling to normalize path"
     assert accessor.get("units") is not None, "get() should return an object"
-    assert next(iter(accessor), None) is not None, "Accessor should be iterable and yield at least one item"
+    assert (
+        next(iter(accessor), None) is not None
+    ), "Accessor should be iterable and yield at least one item"
+
 
 def test_file_accessor_caching(local_hdf5_path: pathlib.Path) -> None:
     """Test that FileAccessor instances are cached and reused."""
@@ -105,6 +109,56 @@ def test_open_single_and_multiple(local_hdf5_paths: list[pathlib.Path]) -> None:
     assert all(isinstance(a, lazynwb.file_io.FileAccessor) for a in accessors)
     assert "units" in accessors[0]
     assert "units" in accessors[1]
+
+
+def test_config_anon_translates_for_fsspec_and_obstore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_anon = lazynwb.file_io.config.anon
+    original_storage_options = dict(lazynwb.file_io.config.fsspec_storage_options)
+    try:
+        lazynwb.file_io.config.anon = True
+        lazynwb.file_io.config.fsspec_storage_options = {}
+        path = lazynwb.file_io.from_pathlike("s3://test-bucket/example.nwb")
+
+        assert lazynwb.file_io._get_fsspec_storage_options(path)["anon"] is True
+
+        monkeypatch.setattr(
+            lazynwb.file_io,
+            "_infer_s3_bucket_region",
+            lambda _path: "us-west-2",
+        )
+        obstore_options = lazynwb.file_io._get_obstore_storage_options(path)
+        assert obstore_options["skip_signature"] is True
+        assert obstore_options["region"] == "us-west-2"
+        assert "anon" not in obstore_options
+    finally:
+        lazynwb.file_io.config.anon = original_anon
+        lazynwb.file_io.config.fsspec_storage_options = original_storage_options
+
+
+def test_legacy_fsspec_anon_option_still_translates_for_obstore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_anon = lazynwb.file_io.config.anon
+    original_storage_options = dict(lazynwb.file_io.config.fsspec_storage_options)
+    try:
+        lazynwb.file_io.config.anon = None
+        lazynwb.file_io.config.fsspec_storage_options = {"anon": True}
+        path = lazynwb.file_io.from_pathlike("s3://test-bucket/example.nwb")
+
+        monkeypatch.setattr(
+            lazynwb.file_io,
+            "_infer_s3_bucket_region",
+            lambda _path: "us-west-2",
+        )
+        obstore_options = lazynwb.file_io._get_obstore_storage_options(path)
+        assert obstore_options["skip_signature"] is True
+        assert obstore_options["region"] == "us-west-2"
+        assert "anon" not in obstore_options
+    finally:
+        lazynwb.file_io.config.anon = original_anon
+        lazynwb.file_io.config.fsspec_storage_options = original_storage_options
 
 
 if __name__ == "__main__":

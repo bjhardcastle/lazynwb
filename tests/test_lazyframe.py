@@ -20,6 +20,10 @@ def test_polars_dtype_inference(local_hdf5_path):
         table_path='units',
     )
     assert schema['obs_intervals'] == pl.List(pl.Array(pl.Float64, shape=(2,))), f"Expected polars dtype for obs_intervals to be List[List[Float64]]: {schema['obs_intervals']=}"
+    assert schema["id"] == pl.Int64
+    assert schema["structure"] == pl.String
+    assert schema["spike_times"] == pl.List(pl.Float64)
+    assert schema["waveform_mean"] == pl.Array(pl.Float64, shape=(25, 384))
 
 @pytest.mark.parametrize(
     "nwb_fixture_name",
