@@ -439,10 +439,11 @@ Configure cloud access via `lazynwb.file_io.config`:
 ```python
 from lazynwb.file_io import config
 
-config.use_obstore = True                          # use obstore for S3/GCS/Azure (default: True)
-config.use_remfile = False                         # use remfile for HTTP byte-range requests (default: False)
-config.fsspec_storage_options = {"anon": True}     # e.g. anonymous S3 access
-config.disable_cache = False                       # disable FileAccessor caching (default: False)
+config.use_obstore = True                         # use obstore for S3/GCS/Azure (default: False)
+config.use_remfile = False                        # use remfile for HTTP byte-range requests (default: True)
+config.anon = True                                # anonymous access across backends
+config.fsspec_storage_options = {"region": "us-west-2"}  # backend-specific extras if needed
+config.disable_cache = False                      # disable FileAccessor caching (default: False)
 ```
 
 ---

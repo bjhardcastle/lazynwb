@@ -33,6 +33,7 @@ class FileIOConfig(pydantic_settings.BaseSettings):
     )
     use_remfile: bool = True
     use_obstore: bool = False
+    anon: bool | None = None
     fsspec_storage_options: dict[str, Any] = {
         "anon": False,
     }
@@ -86,7 +87,7 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     open raw HDF5 or Zarr backend using global config
     """
     p = from_pathlike(path)
-    u = upath.UPath(p, **config.fsspec_storage_options)
+    u = upath.UPath(p, **_get_fsspec_storage_options())
     key = u.as_posix()
     is_definitely_zarr = "zarr" in key
     if not is_definitely_zarr:
@@ -97,7 +98,7 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     if config.use_obstore and u.protocol and u.protocol != "file":
         with contextlib.suppress(Exception):
             store = obstore.store.from_url(
-                key.split("//")[-1].split("/")[0], **config.fsspec_storage_options
+                key.split("//")[-1].split("/")[0], **_get_obstore_storage_options()
             )
             return zarr.open(store, mode="r")
     with contextlib.suppress(Exception):
@@ -124,7 +125,7 @@ def _open_hdf5(
             )
     if use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
         file = obstore.fsspec.BufferedFile(
-            fs=obstore.fsspec.FsspecStore(path.protocol, **config.fsspec_storage_options),  # type: ignore[call-overload]
+            fs=obstore.fsspec.FsspecStore(path.protocol, **_get_obstore_storage_options()),  # type: ignore[call-overload]
             path=path.as_posix(),
         )
     if file is None and path.protocol in ("http", "https"):
@@ -140,6 +141,30 @@ def is_group(accessor) -> bool:
     Check if the given accessor is a group (e.g. h5py.Group or zarr.Group).
     """
     return hasattr(accessor, "keys")
+
+
+def _resolve_anon_setting() -> bool:
+    """Resolve anonymous-access intent from the global config."""
+    if config.anon is not None:
+        return config.anon
+    return bool(config.fsspec_storage_options.get("anon", False))
+
+
+def _get_fsspec_storage_options() -> dict[str, Any]:
+    """Return normalized storage options for UPath/fsspec-backed access."""
+    options = dict(config.fsspec_storage_options)
+    options["anon"] = _resolve_anon_setting()
+    return options
+
+
+def _get_obstore_storage_options() -> dict[str, Any]:
+    """Return normalized storage options for obstore-backed access."""
+    options = dict(config.fsspec_storage_options)
+    anon = _resolve_anon_setting()
+    options.pop("anon", None)
+    if anon:
+        options["skip_signature"] = True
+    return options
 
 
 class FileAccessor:
@@ -210,7 +235,7 @@ class FileAccessor:
         elif hasattr(path, "as_posix"):
             cache_key = path.as_posix()
         else:
-            cache_key = from_pathlike(path, **config.fsspec_storage_options).as_posix()
+            cache_key = from_pathlike(path, **_get_fsspec_storage_options()).as_posix()
 
         with _cache_lock:
             # return cached instance if it exists and is open
@@ -317,7 +342,7 @@ class FileAccessor:
         self._hdmf_backend = state["hdmf_backend"]
 
         # Check if already cached in new process
-        u_path = upath.UPath(self._path, **config.fsspec_storage_options)
+        u_path = upath.UPath(self._path, **_get_fsspec_storage_options())
         key = u_path.as_posix()
 
         if key in _accessor_cache:

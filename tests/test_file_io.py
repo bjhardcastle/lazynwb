@@ -5,6 +5,19 @@ import pytest
 
 import lazynwb.file_io
 
+
+@pytest.fixture(autouse=True)
+def reset_file_io_config():
+    """Keep file I/O config isolated between tests."""
+    original_anon = lazynwb.file_io.config.anon
+    original_storage_options = dict(lazynwb.file_io.config.fsspec_storage_options)
+    try:
+        yield
+    finally:
+        lazynwb.file_io.config.anon = original_anon
+        lazynwb.file_io.config.fsspec_storage_options = original_storage_options
+
+
 @pytest.mark.parametrize(
     "nwb_fixture_name",
     [
@@ -105,6 +118,34 @@ def test_open_single_and_multiple(local_hdf5_paths: list[pathlib.Path]) -> None:
     assert all(isinstance(a, lazynwb.file_io.FileAccessor) for a in accessors)
     assert "units" in accessors[0]
     assert "units" in accessors[1]
+
+
+def test_fsspec_storage_options_use_top_level_anon() -> None:
+    lazynwb.file_io.config.anon = True
+    lazynwb.file_io.config.fsspec_storage_options = {"anon": False, "custom": "value"}
+
+    assert lazynwb.file_io._get_fsspec_storage_options() == {
+        "anon": True,
+        "custom": "value",
+    }
+
+
+def test_obstore_storage_options_translate_anon_to_skip_signature() -> None:
+    lazynwb.file_io.config.anon = True
+    lazynwb.file_io.config.fsspec_storage_options = {"anon": False, "region": "us-west-2"}
+
+    assert lazynwb.file_io._get_obstore_storage_options() == {
+        "region": "us-west-2",
+        "skip_signature": True,
+    }
+
+
+def test_storage_options_fall_back_to_legacy_anon_setting() -> None:
+    lazynwb.file_io.config.anon = None
+    lazynwb.file_io.config.fsspec_storage_options = {"anon": True}
+
+    assert lazynwb.file_io._get_fsspec_storage_options()["anon"] is True
+    assert lazynwb.file_io._get_obstore_storage_options()["skip_signature"] is True
 
 
 if __name__ == "__main__":
