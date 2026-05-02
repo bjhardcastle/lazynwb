@@ -255,19 +255,6 @@ def get_df(
     return df
 
 
-def _is_timeseries(group_keys: Iterable[str]) -> bool:
-    return lazynwb.table_metadata._is_timeseries(group_keys)
-
-
-def _is_timeseries_with_rate(group_keys: Iterable[str]) -> bool:
-    return lazynwb.table_metadata._is_timeseries_with_rate(group_keys)
-
-
-def _is_metadata(column_accessors: dict[str, zarr.Array | h5py.Dataset]) -> bool:
-    """Check if the group is a bunch of metadata, as opposed to a table with columns."""
-    return lazynwb.table_metadata._is_metadata(column_accessors)
-
-
 def _get_timeseries_length_from_metadata(
     columns: Iterable[lazynwb.table_metadata.RawTableColumnMetadata],
 ) -> int | None:
@@ -323,7 +310,7 @@ def _filter_table_metadata_for_materialization(
     return filtered_columns
 
 
-def _is_string_or_object_dtype(dtype: Any | None) -> bool:
+def _is_string_or_object_dtype(dtype: object | None) -> bool:
     return getattr(dtype, "kind", None) in ("S", "O", "U") or dtype in ("S", "O", "U")
 
 
@@ -402,7 +389,9 @@ def _get_table_data(
     selected_column_names = {column.name for column in columns}
 
     # indexed columns (columns containing lists) need to be handled differently:
-    indexed_column_names = _get_indexed_column_names(selected_column_names)
+    indexed_column_names = lazynwb.table_metadata._get_indexed_column_names(
+        selected_column_names
+    )
     non_indexed_columns = tuple(
         column for column in columns if column.name not in indexed_column_names
     )
@@ -630,34 +619,6 @@ def _get_indexed_column_data(
         column_data.append(_get_data(start_idx, end_idx))
         start_idx = end_idx
     return column_data
-
-
-def _is_nominally_indexed_column(
-    column_name: str, all_column_names: Iterable[str]
-) -> bool:
-    """
-    >>> is_nominally_indexed_column('spike_times', ['spike_times', 'spike_times_index'])
-    True
-    >>> is_nominally_indexed_column('spike_times_index', ['spike_times', 'spike_times_index'])
-    True
-    >>> is_nominally_indexed_column('spike_times', ['spike_times'])
-    False
-    >>> is_nominally_indexed_column('unit_index', ['unit_index'])
-    False
-    """
-    return lazynwb.table_metadata._is_nominally_indexed_column(
-        column_name, all_column_names
-    )
-
-
-def _get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
-    """
-    >>> get_indexed_columns(['spike_times', 'presence_ratio'])
-    set()
-    >>> sorted(get_indexed_columns(['spike_times', 'spike_times_index', 'presence_ratio']))
-    ['spike_times', 'spike_times_index']
-    """
-    return lazynwb.table_metadata._get_indexed_column_names(column_names)
 
 
 def _array_column_helper(
