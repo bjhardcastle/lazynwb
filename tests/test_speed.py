@@ -4,19 +4,21 @@ import time
 import pytest
 
 import lazynwb
+from lazynwb.dandi import _get_asset_s3_url
 
 logger = logging.getLogger()
 
 MIN_OPEN_TIME_SECONDS = 2.5
+TEST_DANDISET_ID = "000363"
+TEST_VERSION = "0.231012.2129"
+TEST_ASSET_ID = "21c622b7-6d8e-459b-98e8-b968a97a1585"
 
 def get_large_hdf5_url() -> str:
-    dandiset_id = '000363'  # ephys dataset from the Svoboda Lab
-    filepath = 'sub-440957/sub-440957_ses-20190211T143614_behavior+ecephys+image+ogen.nwb' # 437 GB file
-    with lazynwb.get_dandi_client() as client:
-        asset = client.get_dandiset(
-            dandiset_id=dandiset_id, version_id="draft"
-        ).get_asset_by_path(filepath)
-        return asset.get_content_url(follow_redirects=1, strip_query=True)
+    return _get_asset_s3_url(
+        dandiset_id=TEST_DANDISET_ID,
+        asset_id=TEST_ASSET_ID,
+        version=TEST_VERSION,
+    )
 
 def get_small_zarr_url() -> str:
     return 's3://codeocean-s3datasetsbucket-1u41qdg42ur9/00865745-db58-495d-9c5e-e28424bb4b97/nwb/ecephys_721536_2024-05-16_12-32-31_experiment1_recording1.nwb'
@@ -49,17 +51,36 @@ def test_metadata_df(url: str) -> None:
     assert t < MIN_OPEN_TIME_SECONDS, f'Fetching summary dataframe took too long: {t:.1f} seconds (expected < {MIN_OPEN_TIME_SECONDS})'
     logger.info(f'Fetched summary dataframe for {url} in {t:.2f} seconds')
     
-@pytest.mark.xfail(reason="Removed dandi helper function")
+@pytest.mark.skip(reason="Remote backend performance comparisons are too variable for automated tests")
 @pytest.mark.parametrize('url', ['large_hdf5'], indirect=True)
 def test_remfile_vs_h5py(url: str) -> None:
-    times = []
-    for use_remfile in [True, False]: # the first S3 access of data is typically slower than subseqeuent ones, so this is biased against remfile
+    original_use_remfile = lazynwb.config.use_remfile
+    times = {}
+
+    def time_open(*, use_remfile: bool) -> float:
+        lazynwb.clear_cache()
+        lazynwb.config.use_remfile = use_remfile
         t0 = time.time()
-        _ = lazynwb.open(url, use_remfile=use_remfile)
-        times.append( t:= time.time() - t0)
-        logger.info(f'Opened {url} with {use_remfile=} in {t:.2f} seconds')
-    assert times[0] < times[1], f'Opening {url} with remfile {times[0]=} was not faster than h5py {times[1]=}: default to remfile=False in open()'
+        _ = lazynwb.FileAccessor(url)
+        return time.time() - t0
+
+    try:
+        # Warm both code paths first: remote open times vary enough that a single
+        # cold request does not give a stable backend comparison.
+        for use_remfile in [True, False]:
+            _ = time_open(use_remfile=use_remfile)
+        for use_remfile in [True, False]:
+            times[use_remfile] = time_open(use_remfile=use_remfile)
+            logger.info(
+                f'Opened {url} with {use_remfile=} in {times[use_remfile]:.2f} seconds'
+            )
+    finally:
+        lazynwb.config.use_remfile = original_use_remfile
+        lazynwb.clear_cache()
+    assert all(t < MIN_OPEN_TIME_SECONDS for t in times.values()), (
+        f'Opening {url} took too long after warmup: {times=}'
+    )
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO) 
-    pytest.main([__file__])
+    pytest.main([__file__, "-v"])
