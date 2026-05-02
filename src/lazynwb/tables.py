@@ -21,6 +21,7 @@ import zarr
 
 import lazynwb.exceptions
 import lazynwb.file_io
+import lazynwb.table_metadata
 import lazynwb.types_
 import lazynwb.utils
 
@@ -255,32 +256,75 @@ def get_df(
 
 
 def _is_timeseries(group_keys: Iterable[str]) -> bool:
-    return "data" in group_keys and (
-        "timestamps" in group_keys or "starting_time" in group_keys
-    )
+    return lazynwb.table_metadata._is_timeseries(group_keys)
 
 
 def _is_timeseries_with_rate(group_keys: Iterable[str]) -> bool:
-    return (
-        "data" in group_keys
-        and "starting_time" in group_keys
-        and "timestamps" not in group_keys
-    )
+    return lazynwb.table_metadata._is_timeseries_with_rate(group_keys)
 
 
 def _is_metadata(column_accessors: dict[str, zarr.Array | h5py.Dataset]) -> bool:
     """Check if the group is a bunch of metadata, as opposed to a table with columns."""
-    no_multi_dim_columns = all(
-        v.ndim <= 1 for v in column_accessors.values() if hasattr(v, "dtype")
+    return lazynwb.table_metadata._is_metadata(column_accessors)
+
+
+def _get_timeseries_length_from_metadata(
+    columns: Iterable[lazynwb.table_metadata.RawTableColumnMetadata],
+) -> int | None:
+    for column in columns:
+        if column.name == "data" and column.shape:
+            return column.shape[0]
+    return None
+
+
+def _filter_table_metadata_for_materialization(
+    columns: Iterable[lazynwb.table_metadata.RawTableColumnMetadata],
+    exclude_array_columns: bool,
+    exclude_column_names: Iterable[str] | None,
+    include_column_names: Iterable[str] | None,
+) -> tuple[lazynwb.table_metadata.RawTableColumnMetadata, ...]:
+    columns = tuple(columns)
+    remaining_column_names = {column.name for column in columns}
+    has_include_filter = include_column_names is not None
+    exclude_column_names = set(exclude_column_names or ())
+    include_column_names = set(include_column_names or ())
+
+    for column in columns:
+        if column.is_index_column:
+            # users include/exclude ragged columns by the data column name, not the raw *_index
+            continue
+        is_synthetic_timestamps = (
+            column.name == "starting_time" and column.is_timeseries_with_rate
+        )
+        is_excluded = column.name in exclude_column_names or (
+            is_synthetic_timestamps and "timestamps" in exclude_column_names
+        )
+        is_included = column.name in include_column_names or (
+            is_synthetic_timestamps and "timestamps" in include_column_names
+        )
+        is_not_included = has_include_filter and not is_included
+        is_unrequested_indexed_array = (
+            exclude_array_columns and column.is_nominally_indexed and not is_included
+        )
+        if is_not_included or is_excluded or is_unrequested_indexed_array:
+            remaining_column_names.discard(column.name)
+            remaining_column_names.discard(f"{column.name}_index")
+            remaining_column_names.discard(column.name.removesuffix("_index"))
+
+    filtered_columns = tuple(
+        column for column in columns if column.name in remaining_column_names
     )
-    some_scalar_columns = any(
-        v.ndim == 0 for v in column_accessors.values() if hasattr(v, "dtype")
+    logger.debug(
+        "planned %d/%d raw columns for materialization: %s",
+        len(filtered_columns),
+        len(columns),
+        [column.name for column in filtered_columns],
     )
-    return (
-        no_multi_dim_columns
-        and some_scalar_columns
-        and not _is_timeseries_with_rate(column_accessors.keys())
-    )
+    return filtered_columns
+
+
+def _is_string_or_object_dtype(dtype: Any | None) -> bool:
+    return getattr(dtype, "kind", None) in ("S", "O", "U") or dtype in ("S", "O", "U")
 
 
 def _get_table_data(
@@ -315,20 +359,14 @@ def _get_table_data(
             # substring of the match
             logger.warning(f"Using {match_!r} instead of {search_term!r}")
         search_term = match_
-    column_accessors: dict[str, zarr.Array | h5py.Dataset] = (
-        _get_table_column_accessors(
-            file_path=path,
-            table_path=search_term,
-            use_thread_pool=False,
-        )
+    columns = lazynwb.table_metadata.get_table_column_metadata(
+        file_path=file,
+        table_path=search_term,
+        use_thread_pool=False,
     )
-    is_metadata_table = _is_metadata(column_accessors)
-    is_timeseries = _is_timeseries(column_accessors)
-
-    if is_timeseries:
-        timeseries_len = column_accessors["data"].shape[0]
-    else:
-        timeseries_len = None
+    column_by_name = {column.name: column for column in columns}
+    is_metadata_table = any(column.is_metadata_table for column in columns)
+    timeseries_len = _get_timeseries_length_from_metadata(columns)
 
     if isinstance(exclude_column_names, str):
         exclude_column_names = (exclude_column_names,)
@@ -355,162 +393,152 @@ def _get_table_data(
     else:
         only_internal_columns_requested = False
 
-    table_length = None
-    for name in tuple(column_accessors.keys()):
-        is_indexed = _is_nominally_indexed_column(name, column_accessors.keys())
-        if is_indexed and name.endswith("_index"):
-            # users are not expected to include/exclude the '_index' suffix columns,
-            # and they will be removed by the column name without the suffix
-            continue
-        is_excluded = exclude_column_names is not None and name in exclude_column_names
-        is_included = include_column_names is not None and name in include_column_names
-        is_not_included = (
-            include_column_names is not None and name not in include_column_names
-        )
-        if (
-            is_not_included
-            or is_excluded
-            or (exclude_array_columns and is_indexed and not is_included)
-        ):
-            regular_column = column_accessors.pop(name, None)
-            column_accessors.pop(f"{name}_index", None)
-            column_accessors.pop(name.removesuffix("_index"), None)
-
-            if (
-                regular_column is not None
-                and only_internal_columns_requested
-                and table_length is None
-                and not name.endswith("_index")
-            ):
-                if regular_column.ndim == 1:
-                    table_length = regular_column.shape[
-                        0
-                    ]  # may be updated below if specific rows requested
+    columns = _filter_table_metadata_for_materialization(
+        columns=columns,
+        exclude_array_columns=exclude_array_columns,
+        exclude_column_names=exclude_column_names,
+        include_column_names=include_column_names,
+    )
+    selected_column_names = {column.name for column in columns}
 
     # indexed columns (columns containing lists) need to be handled differently:
-    indexed_column_names: set[str] = _get_indexed_column_names(column_accessors.keys())
-    non_indexed_column_names = column_accessors.keys() - indexed_column_names
+    indexed_column_names = _get_indexed_column_names(selected_column_names)
+    non_indexed_columns = tuple(
+        column for column in columns if column.name not in indexed_column_names
+    )
     # some columns have >2 dims but no index - they also need to be handled differently
-    multi_dim_column_names = []
+    multi_dim_columns: list[lazynwb.table_metadata.RawTableColumnMetadata] = []
 
     column_data: dict[str, npt.NDArray | list] = {}
     logger.debug(
-        f"materializing non-indexed columns for {file._path}/{search_term}: {non_indexed_column_names}"
+        "materializing non-indexed columns for %s/%s: %s",
+        file._path,
+        search_term,
+        [column.name for column in non_indexed_columns],
     )
     if table_row_indices is not None:
         _idx: Sequence[int] | slice = table_row_indices
         table_length = len(table_row_indices)
     else:
         _idx = slice(None)
-    for column_name in non_indexed_column_names:
-        if (ndim := getattr(column_accessors[column_name], "ndim", None)) is None:
+        table_length = None
+    for column in non_indexed_columns:
+        if column.ndim is None:
             # accessor is not a Dataset
             continue
-        if ndim >= 2:
+        if column.is_multidimensional:
             logger.debug(
-                f"non-indexed column {column_name!r} has {ndim=}: will be treated as an indexed column"
+                "non-indexed column %r has ndim=%d: will be treated as an array column",
+                column.name,
+                column.ndim,
             )
-            multi_dim_column_names.append(column_name)
+            multi_dim_columns.append(column)
             continue
-        if (
-            is_timeseries
-            and (shape := column_accessors[column_name].shape)
-            and timeseries_len != shape[0]
-        ):
+        if column.is_timeseries and not column.is_timeseries_length_aligned:
             logger.debug(
-                f"skipping column {column_name!r} with shape {shape} from TimeSeries table: length does not match data length {timeseries_len}"
+                "skipping column %r with shape %s from TimeSeries table: length does not match data length %s",
+                column.name,
+                column.shape,
+                timeseries_len,
             )
             continue
-        if column_name == "starting_time" and _is_timeseries_with_rate(
-            non_indexed_column_names
-        ):
+        if column.name == "starting_time" and column.is_timeseries_with_rate:
             # without timestamps, the default TimeSeries object has two keys: 'data' and
             # 'starting_time' which is another Group.
             # we need to generate a timestamps column to make it usable:
-            starting_time = column_accessors[column_name][()]
-            rate = column_accessors[column_name].attrs["rate"]
-            column_data["timestamps"] = np.linspace(
+            starting_time = column.accessor[()]
+            rate = column.attrs["rate"]
+            timestamps = np.linspace(
                 starting_time, starting_time + timeseries_len / rate, num=timeseries_len
             )
+            column_data["timestamps"] = timestamps[_idx]
             # TODO: lazyframes should have a plan for this rather than a materialized array
             continue
-        if column_accessors[column_name].dtype.kind in ("S", "O"):
-            if not column_accessors[column_name].shape:
-                column_data[column_name] = column_accessors[column_name].asstr()[()]
+        if _is_string_or_object_dtype(column.dtype):
+            if not column.shape:
+                column_data[column.name] = column.accessor.asstr()[()]
                 # this isn't a table: we're picking up single values, e.g. metadata in general/subject
                 continue
             try:
-                column_data[column_name] = column_accessors[column_name].asstr()[_idx]
+                column_data[column.name] = column.accessor.asstr()[_idx]
             except (AttributeError, TypeError):
                 # - no way to tell apart hdf5 reference columns, but if the above fails, we cast to
                 # string differently, resulting in '<HDF5 object reference>'
                 # - zarr Array as no attribute 'asstr'
-                column_data[column_name] = column_accessors[column_name][_idx].astype(
-                    str
-                )
+                column_data[column.name] = column.accessor[_idx].astype(str)
         else:
-            column_data[column_name] = column_accessors[column_name][_idx]
+            column_data[column.name] = column.accessor[_idx]
 
     if indexed_column_names and (
         include_column_names is not None or not exclude_array_columns
     ):
-        data_column_names = {
-            name for name in indexed_column_names if not name.endswith("_index")
-        }
-        logger.debug(
-            f"materializing indexed columns for {file._path}/{search_term}: {data_column_names}"
+        data_columns = tuple(
+            column_by_name[name]
+            for name in indexed_column_names
+            if not name.endswith("_index") and name in column_by_name
         )
-        for column_name in data_column_names:
-            if (
-                is_timeseries
-                and timeseries_len != (shape := column_accessors[column_name].shape)[0]
-            ):
+        logger.debug(
+            "materializing indexed columns for %s/%s: %s",
+            file._path,
+            search_term,
+            [column.name for column in data_columns],
+        )
+        for column in data_columns:
+            if column.is_timeseries and not column.is_timeseries_length_aligned:
                 logger.debug(
-                    f"skipping column {column_name!r} with shape {shape} from TimeSeries table: length does not match data length {timeseries_len}"
+                    "skipping column %r with shape %s from TimeSeries table: length does not match data length %s",
+                    column.name,
+                    column.shape,
+                    timeseries_len,
                 )
                 continue
-            if column_accessors[column_name].dtype.kind in ("S", "O"):
+            if _is_string_or_object_dtype(column.dtype):
                 try:
-                    data_column_accessor = column_accessors[column_name].asstr()
+                    data_column_accessor = column.accessor.asstr()
                 except TypeError:
                     # no way to tell apart hdf5 reference columns, but if the above fails, we cast to
                     # string differently, resulting in '<HDF5 object reference>'
-                    data_column_accessor = column_accessors[column_name].astype(str)
+                    data_column_accessor = column.accessor.astype(str)
                 except AttributeError:
                     # zarr Array has no attribute 'asstr', and .astype(str) creates
                     # a wrapper that fails on chunk decoding - read directly instead
                     # (zarr already returns strings for object-dtype arrays)
-                    data_column_accessor = column_accessors[column_name]
+                    data_column_accessor = column.accessor
             else:
-                data_column_accessor = column_accessors[column_name]
-            column_data[column_name] = _get_indexed_column_data(
+                data_column_accessor = column.accessor
+            index_column = column_by_name[column.index_column_name or ""]
+            column_data[column.name] = _get_indexed_column_data(
                 data_column_accessor=data_column_accessor,
-                index_column_accessor=column_accessors[f"{column_name}_index"],
+                index_column_accessor=index_column.accessor,
                 table_row_indices=table_row_indices,
                 low_memory=low_memory,
             )
-    if multi_dim_column_names and (
+    if multi_dim_columns and (
         include_column_names is not None or not exclude_array_columns
     ):
         logger.debug(
-            f"materializing multi-dimensional array columns for {file._path}/{search_term}: {multi_dim_column_names}"
+            "materializing multi-dimensional array columns for %s/%s: %s",
+            file._path,
+            search_term,
+            [column.name for column in multi_dim_columns],
         )
-        for column_name in multi_dim_column_names:
-            multi_dim_column_data = column_accessors[column_name][_idx]
+        for column in multi_dim_columns:
+            multi_dim_column_data = column.accessor[_idx]
             if not as_polars:
                 multi_dim_column_data = _format_multi_dim_column_pd(
                     multi_dim_column_data
                 )
-            column_data[column_name] = multi_dim_column_data
+            column_data[column.name] = multi_dim_column_data
 
     if is_metadata_table:
         # we picked up single values, or 1-dim arrays (e.g. keywords) - put each one in a list
         column_data = {k: [v] for k, v in column_data.items() if v is not None}
 
     if only_internal_columns_requested:
-        assert (
-            table_length is not None
-        ), "We should have found column length before discarding data accessors"
+        if table_length is None:
+            table_length = lazynwb.table_metadata.get_table_length_from_metadata(
+                columns=column_by_name.values()
+            )
     else:
         try:
             table_length = len(next(iter(column_data.values())))
@@ -526,7 +554,11 @@ def _get_table_data(
             lazynwb.utils.normalize_internal_file_path(search_term)
         ]
         * table_length,
-        TABLE_INDEX_COLUMN_NAME: table_row_indices or np.arange(table_length),
+        TABLE_INDEX_COLUMN_NAME: (
+            table_row_indices
+            if table_row_indices is not None
+            else np.arange(table_length)
+        ),
     }
     if exclude_column_names is not None:
         # remove any identifiers that are also in the exclude list:
@@ -613,15 +645,9 @@ def _is_nominally_indexed_column(
     >>> is_nominally_indexed_column('unit_index', ['unit_index'])
     False
     """
-    all_column_names = set(all_column_names)  # in case object is an iterator
-    if column_name not in all_column_names:
-        return False
-    if column_name.endswith("_index"):
-        return (
-            column_name.split("_index")[0] in all_column_names
-        )  # _index can appear multiple times at end of name
-    else:
-        return f"{column_name}_index" in all_column_names
+    return lazynwb.table_metadata._is_nominally_indexed_column(
+        column_name, all_column_names
+    )
 
 
 def _get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
@@ -631,7 +657,7 @@ def _get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
     >>> sorted(get_indexed_columns(['spike_times', 'spike_times_index', 'presence_ratio']))
     ['spike_times', 'spike_times_index']
     """
-    return {k for k in column_names if _is_nominally_indexed_column(k, column_names)}
+    return lazynwb.table_metadata._get_indexed_column_names(column_names)
 
 
 def _array_column_helper(
@@ -643,22 +669,28 @@ def _array_column_helper(
 ) -> pd.DataFrame | pl.DataFrame:
     file = lazynwb.file_io._get_accessor(nwb_path)
     try:
-        data_column_accessor = file[table_path][column_name]
+        columns = lazynwb.table_metadata.get_table_column_metadata(file, table_path)
+        column_by_name = {column.name: column for column in columns}
+        column = column_by_name[column_name]
     except KeyError as exc:
         if exc.args[0] == column_name:
             raise lazynwb.exceptions.ColumnError(column_name) from None
-        elif exc.args[0] == table_path:
+        if exc.args[0] == table_path:
             raise lazynwb.exceptions.InternalPathError(table_path) from None
-        else:
-            raise
-    if data_column_accessor.ndim >= 2:
-        column_data = data_column_accessor[table_row_indices]
+        raise
+    if column.is_multidimensional:
+        column_data = column.accessor[table_row_indices]
         if not as_polars:
             column_data = _format_multi_dim_column_pd(column_data)
     else:
+        index_column_name = column.index_column_name or f"{column_name}_index"
+        try:
+            index_column = column_by_name[index_column_name]
+        except KeyError:
+            raise lazynwb.exceptions.ColumnError(column_name) from None
         column_data = _get_indexed_column_data(
-            data_column_accessor=data_column_accessor,
-            index_column_accessor=file[table_path][f"{column_name}_index"],
+            data_column_accessor=column.accessor,
+            index_column_accessor=index_column.accessor,
             table_row_indices=table_row_indices,
         )
     df_cls = pl.DataFrame if as_polars else pd.DataFrame
@@ -806,96 +838,38 @@ def _get_table_column_accessors(
         If True, columns that include references to other objects within the NWB file (e.g. TimeSeriesReferenceVectorData) will be skipped.
         These columns are added for convenience but are convoluted to interpret and impact performance when reading data from the cloud.
     """
-    names_to_columns: dict[str, zarr.Array | h5py.Dataset] = {}
-    t0 = time.time()
-    table = lazynwb.file_io._get_accessor(file_path)[table_path]
-    if not lazynwb.file_io.is_group(table):
-        raise lazynwb.exceptions.InternalPathError(
-            f"{table_path!r} is not a group/table (found {type(table).__name__})"
-        )
-    if use_thread_pool:
-        future_to_column = {
-            lazynwb.utils.get_threadpool_executor().submit(
-                table.get, column_name
-            ): column_name
-            for column_name in table.keys()
-        }
-        for future in concurrent.futures.as_completed(future_to_column):
-            column_name = future_to_column[future]
-            names_to_columns[column_name] = future.result()
-    else:
-        for column_name in table:
-            names_to_columns[column_name] = table.get(column_name)
-    if lazynwb.utils.normalize_internal_file_path(table_path) == "general":
-        # add metadata that lives at top-level of file
-        root = lazynwb.file_io._get_accessor(file_path)
-        for p in (
-            "session_start_time",
-            "session_description",
-            "identifier",
-            "timestamps_reference_time",
-            "file_create_date",
-        ):
-            names_to_columns[p] = root.get(p)
-        # add anything that lives in general/metadata
-        for p in root.get("general/metadata", {}).keys():
-            if p not in names_to_columns:
-                value = root.get(f"general/metadata/{p}")
-                if not lazynwb.file_io.is_group(value):
-                    names_to_columns[p] = value
-        # ensure we don't include any groups from general
-        names_to_columns = {
-            k: v for k, v in names_to_columns.items() if not lazynwb.file_io.is_group(v)
-        }
-
-    logger.debug(
-        f"retrieved {len(names_to_columns)} column accessors from {file_path!r}/{table_path} in {time.time() - t0:.2f} s ({use_thread_pool=})"
+    return lazynwb.table_metadata._get_table_column_accessors(
+        file_path=file_path,
+        table_path=table_path,
+        use_thread_pool=use_thread_pool,
+        skip_references=skip_references,
     )
-    if skip_references:
-        known_references = {
-            "timeseries": "TimeSeriesReferenceVectorData",
-        }
-        for name, neurodata_type in known_references.items():
-            if (
-                accessor := names_to_columns.get(name)
-            ) is not None and accessor.attrs.get("neurodata_type") == neurodata_type:
-                logger.debug(
-                    f"Skipping reference column {name!r} with neurodata_type {neurodata_type!r}"
-                )
-                del names_to_columns[name]
-                del names_to_columns[f"{name}_index"]
-    else:
-        raise NotImplementedError(
-            "Keeping references is not implemented yet: see https://pynwb.readthedocs.io/en/stable/pynwb.base.html#pynwb.base.TimeSeriesReferenceVectorData"
-        )
-    return names_to_columns
 
 
 def _get_polars_dtype(
-    dataset: zarr.Array | h5py.Dataset,
-    column_name: str,
-    all_column_names: Iterable[str],
-    is_metadata: bool,
+    column: lazynwb.table_metadata.RawTableColumnMetadata,
+    all_columns: Iterable[lazynwb.table_metadata.RawTableColumnMetadata],
 ) -> polars._typing.PolarsDataType:
-    dtype = dataset.dtype
-    if dtype in ("S", "O"):
+    dtype = column.dtype
+    if _is_string_or_object_dtype(dtype):
         dtype = pl.String
     else:
         dtype = polars.datatypes.convert.numpy_char_code_to_dtype(dtype)
-    if is_metadata and dataset.shape:
+    if column.is_metadata_table and column.shape:
         # this is a regular-looking array among a bunch of single-value metadata: it should be a list
         return pl.List(dtype)
-    elif dataset.ndim > 1:
+    elif column.ndim is not None and column.ndim > 1:
         dtype = pl.Array(
-            dtype, shape=dataset.shape[1:]
+            dtype, shape=column.shape[1:]
         )  # shape reported is (Ncols, (*shape for each row)
-    if _is_nominally_indexed_column(column_name, all_column_names):
+    if column.is_nominally_indexed:
         # - indexed = variable length list-like (e.g. spike times)
         # - it's possible to have a list of fixed-length arrays (e.g. obs_intervals)
+        all_column_names = [raw_column.name for raw_column in all_columns]
         index_cols = [
             c
-            for c in _get_indexed_column_names(all_column_names)
-            if c.startswith(column_name) and c.endswith("_index")
+            for c in lazynwb.table_metadata._get_indexed_column_names(all_column_names)
+            if c.startswith(column.name) and c.endswith("_index")
         ]
         for _ in index_cols:
             # add as many levels of nested list as there are _index columns for this column
@@ -903,22 +877,44 @@ def _get_polars_dtype(
     return dtype
 
 
+def get_table_schema_from_metadata(
+    columns: Iterable[lazynwb.table_metadata.RawTableColumnMetadata],
+) -> pl.Schema:
+    """Derive a per-file Polars schema from raw NWB table column metadata."""
+    columns = tuple(columns)
+    file_schema = pl.Schema()
+    for column in columns:
+        if column.is_index_column:
+            # skip raw index columns; user-facing ragged columns include list dtype instead
+            continue
+        if column.is_group:
+            continue
+        if column.name == "starting_time" and column.is_timeseries_with_rate:
+            # this is a TimeSeries object with start/rate: we'll generate timestamps
+            file_schema["timestamps"] = pl.Float64
+            continue
+        if column.is_timeseries and not column.is_timeseries_length_aligned:
+            logger.debug(
+                "skipping column %r with shape %s from TimeSeries table: length does not match data length",
+                column.name,
+                column.shape,
+            )
+            continue
+        file_schema[column.name] = _get_polars_dtype(column, columns)
+    logger.debug(
+        "derived Polars schema from %d raw metadata columns: %s",
+        len(columns),
+        file_schema,
+    )
+    return file_schema
+
+
 def _get_table_length(
     file_path: lazynwb.types_.PathLike,
     table_path: str,
 ) -> int:
-    table_accessors = _get_table_column_accessors(file_path, table_path)
-    # first cycle through columns as if this is a regular DynamicTable:
-    for name, accessor in table_accessors.items():
-        if _is_nominally_indexed_column(name, table_accessors.keys()):
-            return table_accessors[f"{name}_index"].shape[0]
-        if accessor.ndim == 1:  # regular column
-            return accessor.shape[0]
-        if accessor.ndim == 0:  # metadata table
-            return 1
-    # at this point we have only ndim arrays, so we can either assume that the first dimension
-    # represents observations (e.g. timepoints in TimeSeries.data) or raise an error:
-    return accessor.shape[0]
+    columns = lazynwb.table_metadata.get_table_column_metadata(file_path, table_path)
+    return lazynwb.table_metadata.get_table_length_from_metadata(columns)
 
 
 def _get_path_to_row_indices(df: pl.DataFrame) -> dict[str, list[int]]:
@@ -934,7 +930,9 @@ def _get_table_schema_helper(
     file_path: lazynwb.types_.PathLike, table_path: str, raise_on_missing: bool
 ) -> dict[str, Any] | None:
     try:
-        column_accessors = _get_table_column_accessors(file_path, table_path)
+        columns = lazynwb.table_metadata.get_table_column_metadata(
+            file_path, table_path
+        )
     except KeyError:
         if raise_on_missing:
             raise lazynwb.exceptions.InternalPathError(
@@ -944,37 +942,7 @@ def _get_table_schema_helper(
             logger.info(f"Table {table_path!r} not found in {file_path!r}: skipping")
             return None
     else:
-        file_schema = {}
-        is_metadata = _is_metadata(column_accessors)
-        is_timeseries = _is_timeseries(column_accessors.keys())
-
-        for name, dataset in column_accessors.items():
-            if _is_nominally_indexed_column(
-                name, column_accessors.keys()
-            ) and name.endswith("_index"):
-                # skip the index columns
-                continue
-            if lazynwb.file_io.is_group(dataset):
-                continue
-            if name == "starting_time" and _is_timeseries_with_rate(
-                column_accessors.keys()
-            ):
-                # this is a TimeSeries object with start/rate: we'll generate timestamps
-                file_schema["timestamps"] = pl.Float64
-                continue
-            if (
-                is_timeseries
-                and (shape := dataset.shape)
-                and shape[0] != (len_data := column_accessors["data"].shape[0])
-            ):
-                logger.debug(
-                    f"skipping column {name!r} with shape {shape} from TimeSeries table: length does not match data length {len_data}"
-                )
-                continue
-            file_schema[name] = _get_polars_dtype(
-                dataset, name, column_accessors.keys(), is_metadata=is_metadata
-            )
-        return file_schema
+        return get_table_schema_from_metadata(columns)
 
 
 def get_table_schema(

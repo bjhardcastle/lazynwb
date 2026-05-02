@@ -14,6 +14,7 @@ from lazynwb.conversion import *
 from lazynwb.dandi import *
 from lazynwb.file_io import *
 from lazynwb.lazyframe import *
+from lazynwb.table_metadata import *
 from lazynwb.tables import *
 from lazynwb.timeseries import *
 from lazynwb.utils import *
