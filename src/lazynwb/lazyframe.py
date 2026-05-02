@@ -152,7 +152,12 @@ def scan_nwb(
                 if sum_rows >= n_rows:
                     break
             filtered_files = source[: idx + 1]
-            logger.debug(f"Limiting files to {len(source)} based on n_rows={n_rows}")
+            logger.debug(
+                "Limiting files to %d of %d based on n_rows=%d",
+                len(filtered_files),
+                len(source),
+                n_rows,
+            )
         else:
             filtered_files = source
         df = lazynwb.tables.get_df(
@@ -195,6 +200,16 @@ def scan_nwb(
             )
             if not n_rows:
                 n_rows = len(filtered_df)
+            if not include_column_names:
+                result_df = _apply_schema(filtered_df, schema=schema).select(
+                    with_columns or schema.keys()
+                )
+                yield (
+                    result_df[:n_rows]
+                    if n_rows is not None and n_rows < result_df.height
+                    else result_df
+                )
+                return
             i = 0
             while i < n_rows:
                 nwb_path_to_row_indices = lazynwb.tables._get_path_to_row_indices(
