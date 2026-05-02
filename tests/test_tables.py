@@ -78,6 +78,55 @@ def test_general(local_hdf5_path):
 @pytest.mark.parametrize(
     "nwb_fixture_name",
     [
+        "local_zarr_path",
+        "local_zarr_paths",
+    ],
+)
+def test_zarr_object_arrays(nwb_fixture_name, request):
+    """Regression test: zarr v2 object arrays can be read without ValueError.
+
+    zarr.Array.astype(str) creates a view with dtype='<U0' (zero-length unicode);
+    when zarr decodes a chunk it calls chunk.view('<U0') which raises
+    ValueError: When changing to a smaller dtype, its size must be a divisor of
+    the size of original dtype.
+
+    The fix is to use the raw zarr Array directly instead of wrapping it with
+    astype(str) for indexed string columns.
+    """
+    nwb_path_or_paths = request.getfixturevalue(nwb_fixture_name)
+
+    # Indexed string column: epochs 'tags' (ragged array of strings).
+    # This exercises the code path that was previously broken for zarr v2.
+    df = lazynwb.get_df(
+        nwb_path_or_paths,
+        "/intervals/epochs",
+        exclude_array_columns=False,
+    )
+    assert "tags" in df.columns, "epochs table should have a 'tags' column"
+    assert all(
+        isinstance(row, list) for row in df["tags"].tolist()
+    ), "each epoch's tags should be a list"
+    assert all(
+        isinstance(tag, str)
+        for row in df["tags"].tolist()
+        for tag in row
+    ), "each tag should be a string"
+
+    # Non-indexed string column: units 'structure'.
+    df = lazynwb.get_df(
+        nwb_path_or_paths,
+        "/units",
+        exclude_array_columns=True,
+    )
+    assert "structure" in df.columns, "units table should have a 'structure' column"
+    assert all(
+        isinstance(v, str) for v in df["structure"].tolist()
+    ), "each structure value should be a string"
+
+
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    [
         "local_hdf5_path",
         "local_hdf5_paths",
     ],
