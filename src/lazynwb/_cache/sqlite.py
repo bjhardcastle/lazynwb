@@ -31,6 +31,18 @@ class _CacheLookupResult:
         return self.snapshot is not None
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ParsedMetadataLookupResult:
+    """Result of a parsed metadata cache lookup."""
+
+    payload: dict[str, object] | None
+    reason: str
+
+    @property
+    def hit(self) -> bool:
+        return self.payload is not None
+
+
 class _SQLiteSnapshotCache:
     """Async SQLite cache for catalog snapshots."""
 
@@ -174,11 +186,144 @@ class _SQLiteSnapshotCache:
                     len(snapshot.columns),
                 )
 
+    async def get_parsed_hdf5_metadata(
+        self,
+        source_identity: catalog_models._SourceIdentity,
+        *,
+        payload_version: int,
+        options_key: str,
+    ) -> _ParsedMetadataLookupResult:
+        await self.initialize()
+        if source_identity.validator_kind == "none":
+            logger.debug(
+                "parsed HDF5 metadata cache miss for %s: source has no reliable validator",
+                source_identity.source_url,
+            )
+            return _ParsedMetadataLookupResult(
+                payload=None,
+                reason="unreliable_identity",
+            )
+        with _SQLITE_LOCK:
+            async with aiosqlite.connect(
+                self._path,
+                timeout=_SQLITE_TIMEOUT_SECONDS,
+            ) as db:
+                db.row_factory = aiosqlite.Row
+                await self._initialize_connection(db)
+                source_row = await self._get_source_row(db, source_identity)
+                if source_row is None:
+                    reason = await self._classify_missing_source(db, source_identity)
+                    logger.debug(
+                        "parsed HDF5 metadata cache miss for %s: %s",
+                        source_identity.source_url,
+                        reason,
+                    )
+                    return _ParsedMetadataLookupResult(payload=None, reason=reason)
+                metadata_row = await self._get_parsed_hdf5_metadata_row(
+                    db,
+                    source_id=int(source_row["source_id"]),
+                    options_key=options_key,
+                )
+                if metadata_row is None:
+                    logger.debug(
+                        "parsed HDF5 metadata cache miss for %s: no payload row",
+                        source_identity.source_url,
+                    )
+                    return _ParsedMetadataLookupResult(
+                        payload=None,
+                        reason="metadata_miss",
+                    )
+                cached_version = int(metadata_row["payload_version"])
+                if cached_version != payload_version:
+                    logger.debug(
+                        "parsed HDF5 metadata cache miss for %s: payload version %d != %d",
+                        source_identity.source_url,
+                        cached_version,
+                        payload_version,
+                    )
+                    return _ParsedMetadataLookupResult(
+                        payload=None,
+                        reason="payload_version_mismatch",
+                    )
+                payload = json.loads(str(metadata_row["payload_json"]))
+                if not isinstance(payload, dict):
+                    logger.debug(
+                        "parsed HDF5 metadata cache miss for %s: payload was not object",
+                        source_identity.source_url,
+                    )
+                    return _ParsedMetadataLookupResult(
+                        payload=None,
+                        reason="invalid_payload",
+                    )
+                logger.debug(
+                    "parsed HDF5 metadata cache hit for %s",
+                    source_identity.source_url,
+                )
+                return _ParsedMetadataLookupResult(payload=payload, reason="hit")
+
+    async def put_parsed_hdf5_metadata(
+        self,
+        source_identity: catalog_models._SourceIdentity,
+        *,
+        payload_version: int,
+        options_key: str,
+        payload: dict[str, object],
+    ) -> None:
+        await self.initialize()
+        if source_identity.validator_kind == "none":
+            logger.debug(
+                "skipping parsed HDF5 metadata cache write for %s: source has no validator",
+                source_identity.source_url,
+            )
+            return
+        with _SQLITE_LOCK:
+            async with aiosqlite.connect(
+                self._path,
+                timeout=_SQLITE_TIMEOUT_SECONDS,
+            ) as db:
+                await self._initialize_connection(db)
+                source_id = await self._get_or_create_source_id(db, source_identity)
+                payload_json = json.dumps(
+                    payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                now = _utc_now()
+                await db.execute(
+                    """
+                    INSERT INTO parsed_hdf5_metadata (
+                        source_id,
+                        options_key,
+                        payload_version,
+                        payload_json,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source_id, options_key) DO UPDATE SET
+                        payload_version = excluded.payload_version,
+                        payload_json = excluded.payload_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        source_id,
+                        options_key,
+                        payload_version,
+                        payload_json,
+                        now,
+                        now,
+                    ),
+                )
+                await db.commit()
+                logger.debug(
+                    "wrote parsed HDF5 metadata cache for %s",
+                    source_identity.source_url,
+                )
+
     async def _initialize_connection(self, db: aiosqlite.Connection) -> None:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA foreign_keys=ON")
-        await db.execute(
-            """
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS source_identities (
                 source_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_url TEXT NOT NULL,
@@ -194,10 +339,8 @@ class _SQLiteSnapshotCache:
                 last_seen_at TEXT NOT NULL,
                 UNIQUE(source_url, resolved_url, validator_kind, validator_value)
             )
-            """
-        )
-        await db.execute(
-            """
+            """)
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS table_schema_snapshots (
                 source_id INTEGER NOT NULL,
                 table_path TEXT NOT NULL,
@@ -210,8 +353,21 @@ class _SQLiteSnapshotCache:
                     REFERENCES source_identities(source_id)
                     ON DELETE CASCADE
             )
-            """
-        )
+            """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS parsed_hdf5_metadata (
+                source_id INTEGER NOT NULL,
+                options_key TEXT NOT NULL,
+                payload_version INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (source_id, options_key),
+                FOREIGN KEY (source_id)
+                    REFERENCES source_identities(source_id)
+                    ON DELETE CASCADE
+            )
+            """)
 
     async def _get_source_row(
         self,
@@ -247,6 +403,21 @@ class _SQLiteSnapshotCache:
             WHERE source_id = ? AND table_path = ?
             """,
             (source_id, table_path),
+        )
+        return await cursor.fetchone()
+
+    async def _get_parsed_hdf5_metadata_row(
+        self,
+        db: aiosqlite.Connection,
+        source_id: int,
+        options_key: str,
+    ) -> aiosqlite.Row | None:
+        cursor = await db.execute(
+            """
+            SELECT * FROM parsed_hdf5_metadata
+            WHERE source_id = ? AND options_key = ?
+            """,
+            (source_id, options_key),
         )
         return await cursor.fetchone()
 

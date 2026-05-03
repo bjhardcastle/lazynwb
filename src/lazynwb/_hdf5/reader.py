@@ -1,27 +1,25 @@
 from __future__ import annotations
 
-import asyncio
 import dataclasses
-import io
 import logging
 import time
-import typing
 import urllib.parse
-
-import h5py
 
 import lazynwb._cache.sqlite as cache_sqlite
 import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
+import lazynwb._hdf5.parser as hdf5_parser
 import lazynwb._hdf5.range_reader as hdf5_range_reader
+import lazynwb.exceptions
 import lazynwb.file_io
-import lazynwb.table_metadata
 import lazynwb.types_
 
 logger = logging.getLogger(__name__)
 
+_PARSED_METADATA_OPTIONS_KEY = '{"resolve_vlen_attributes":false}'
 
-@dataclasses.dataclass(frozen=True, slots=True)
+
+@dataclasses.dataclass(slots=True)
 class _HDF5ParserError(RuntimeError):
     """Structured fail-fast error for migrated HDF5 catalog parsing."""
 
@@ -58,20 +56,25 @@ class _HDF5BackendReader:
         )
         self._cache = cache
         self._source_identity: catalog_models._SourceIdentity | None = None
+        self._scanner: hdf5_parser._HDF5MetadataScanner | None = None
+        self._parsed_metadata_loaded = False
 
     async def get_source_identity(self) -> catalog_models._SourceIdentity:
         if self._source_identity is None:
             self._source_identity = await self._range_reader.get_source_identity()
         return self._source_identity
 
-    async def read_table_schema_snapshot(
+    async def read_table_schema_snapshot(  # noqa: C901
         self,
         exact_table_path: str,
     ) -> catalog_models._TableSchemaSnapshot:
         catalog_backend._require_exact_normalized_path(exact_table_path)
-        t0 = time.perf_counter()
+        started = time.perf_counter()
+        phase_started = started
         source_identity = await self.get_source_identity()
+        identity_seconds = time.perf_counter() - phase_started
         if self._cache is not None:
+            phase_started = time.perf_counter()
             cached = await self._cache.get_table_schema_snapshot(
                 source_identity,
                 exact_table_path,
@@ -83,37 +86,97 @@ class _HDF5BackendReader:
                     exact_table_path,
                 )
                 return cached.snapshot
-        probe = await hdf5_range_reader._probe_hdf5_signature(self._range_reader)
-        if not probe.is_hdf5:
-            raise _NotHDF5Error(
-                source_url=source_identity.source_url,
-                table_path=exact_table_path,
-                feature="hdf5_signature",
-                detail=f"checked offsets {probe.checked_offsets}",
-            )
+            schema_cache_seconds = time.perf_counter() - phase_started
+        else:
+            schema_cache_seconds = 0.0
         if source_identity.content_length is None:
             raise _HDF5ParserError(
                 source_url=source_identity.source_url,
                 table_path=exact_table_path,
                 feature="source_identity",
                 detail="content length is required for range-backed HDF5 parsing",
-                offset=probe.signature_offset,
             )
-        snapshot = await asyncio.to_thread(
-            self._read_table_schema_snapshot_sync,
-            exact_table_path,
-            source_identity,
-            int(source_identity.content_length),
+        scanner = self._get_scanner(int(source_identity.content_length))
+        parsed_cache_seconds = 0.0
+        if self._cache is not None and not self._parsed_metadata_loaded:
+            phase_started = time.perf_counter()
+            parsed_lookup = await self._cache.get_parsed_hdf5_metadata(
+                source_identity,
+                payload_version=hdf5_parser._PARSED_METADATA_PAYLOAD_VERSION,
+                options_key=_PARSED_METADATA_OPTIONS_KEY,
+            )
+            parsed_cache_seconds = time.perf_counter() - phase_started
+            if parsed_lookup.payload is not None:
+                scanner.import_metadata(parsed_lookup.payload)
+            logger.debug(
+                "parsed HDF5 metadata cache lookup for %s: %s",
+                source_identity.source_url,
+                parsed_lookup.reason,
+            )
+            self._parsed_metadata_loaded = True
+        phase_started = time.perf_counter()
+        try:
+            column_schemas = await scanner.read_table_column_schemas(
+                exact_table_path,
+                source_identity,
+            )
+        except hdf5_parser._TableNotFoundError as exc:
+            raise KeyError(exact_table_path) from exc
+        except ValueError as exc:
+            if scanner.is_hdf5 is False or "no HDF5 superblock" in str(exc):
+                raise _NotHDF5Error(
+                    source_url=source_identity.source_url,
+                    table_path=exact_table_path,
+                    feature="hdf5_signature",
+                    detail=str(exc),
+                ) from exc
+            raise _HDF5ParserError(
+                source_url=source_identity.source_url,
+                table_path=exact_table_path,
+                feature="hdf5_metadata_parser",
+                detail=repr(exc),
+            ) from exc
+        except Exception as exc:
+            raise _HDF5ParserError(
+                source_url=source_identity.source_url,
+                table_path=exact_table_path,
+                feature="hdf5_metadata_parser",
+                detail=repr(exc),
+            ) from exc
+        await scanner.warm_table_metadata(_followup_table_paths(exact_table_path))
+        parse_seconds = time.perf_counter() - phase_started
+        table_length = _get_table_length_from_columns(column_schemas)
+        snapshot = catalog_models._TableSchemaSnapshot(
+            source_identity=source_identity,
+            table_path=exact_table_path,
+            backend="hdf5",
+            columns=column_schemas,
+            table_length=table_length,
         )
+        cache_write_seconds = 0.0
         if self._cache is not None:
+            phase_started = time.perf_counter()
             await self._cache.put_table_schema_snapshot(snapshot)
+            await self._cache.put_parsed_hdf5_metadata(
+                source_identity,
+                payload_version=hdf5_parser._PARSED_METADATA_PAYLOAD_VERSION,
+                options_key=_PARSED_METADATA_OPTIONS_KEY,
+                payload=scanner.export_metadata(),
+            )
+            cache_write_seconds = time.perf_counter() - phase_started
         logger.debug(
             "built HDF5 table schema snapshot for %s/%s with %d columns in %.2f s "
-            "(requests=%s bytes=%s)",
+            "(identity=%.3fs schema_cache=%.3fs parsed_cache=%.3fs parse=%.3fs "
+            "cache_write=%.3fs requests=%s bytes=%s)",
             source_identity.source_url,
             exact_table_path,
             len(snapshot.columns),
-            time.perf_counter() - t0,
+            time.perf_counter() - started,
+            identity_seconds,
+            schema_cache_seconds,
+            parsed_cache_seconds,
+            parse_seconds,
+            cache_write_seconds,
             getattr(self._range_reader, "request_count", "?"),
             getattr(self._range_reader, "bytes_fetched", "?"),
         )
@@ -122,149 +185,78 @@ class _HDF5BackendReader:
     async def close(self) -> None:
         logger.debug("closing HDF5 backend reader for %s", self._source_url)
 
-    def _read_table_schema_snapshot_sync(
+    def _get_scanner(
         self,
-        exact_table_path: str,
-        source_identity: catalog_models._SourceIdentity,
         content_length: int,
-    ) -> catalog_models._TableSchemaSnapshot:
-        file_obj = _RangeReaderFile(self._range_reader, size=content_length)
-        try:
-            with h5py.File(file_obj, mode="r") as h5_file:
-                adapter = _HDF5AccessorAdapter(
-                    h5_file=h5_file,
-                    source_url=source_identity.source_url,
-                )
-                columns = lazynwb.table_metadata.get_table_column_metadata(
-                    adapter,
-                    exact_table_path,
-                )
-                column_schemas = tuple(
-                    catalog_models._column_from_raw_metadata(column)
-                    for column in columns
-                )
-                table_length = lazynwb.table_metadata.get_table_length_from_metadata(
-                    columns
-                )
-        except KeyError:
-            raise
-        except Exception as exc:
-            raise _HDF5ParserError(
-                source_url=source_identity.source_url,
-                table_path=exact_table_path,
-                feature="hdf5_metadata_parser",
-                detail=repr(exc),
-            ) from exc
-        return catalog_models._TableSchemaSnapshot(
-            source_identity=source_identity,
-            table_path=exact_table_path,
-            backend="hdf5",
-            columns=column_schemas,
-            table_length=table_length,
+    ) -> hdf5_parser._HDF5MetadataScanner:
+        if self._scanner is None:
+            self._scanner = hdf5_parser._HDF5MetadataScanner(
+                self._source_url,
+                self._range_reader,
+                content_length=content_length,
+            )
+        return self._scanner
+
+
+def _get_table_length_from_columns(
+    columns: tuple[catalog_models._TableColumnSchema, ...],
+) -> int:
+    columns_by_name = {column.name: column for column in columns}
+    if columns and all(column.is_metadata_table for column in columns):
+        logger.debug(
+            "table length for %s/%s resolved as one metadata row",
+            columns[0].source_path,
+            columns[0].table_path,
         )
-
-
-class _RangeReaderFile(io.RawIOBase):
-    """Synchronous file-like adapter over an async range reader."""
-
-    def __init__(
-        self,
-        range_reader: hdf5_range_reader._RangeReader,
-        size: int,
-        block_size: int = 64 * 1024,
-    ) -> None:
-        self._range_reader = range_reader
-        self._size = size
-        self._position = 0
-        self._block_size = block_size
-        self._cache: dict[hdf5_range_reader._ByteRange, bytes] = {}
-
-    def readable(self) -> bool:
-        return True
-
-    def seekable(self) -> bool:
-        return True
-
-    def tell(self) -> int:
-        return self._position
-
-    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
-        if whence == io.SEEK_SET:
-            position = offset
-        elif whence == io.SEEK_CUR:
-            position = self._position + offset
-        elif whence == io.SEEK_END:
-            position = self._size + offset
-        else:
-            raise ValueError(f"unsupported seek mode: {whence}")
-        if position < 0:
-            raise ValueError("negative seek position")
-        self._position = position
-        return self._position
-
-    def read(self, size: int = -1) -> bytes:
-        if size is None or size < 0:
-            size = self._size - self._position
-        if size == 0 or self._position >= self._size:
-            return b""
-        end = min(self._position + size, self._size)
-        payload = self._read_window(self._position, end)
-        self._position += len(payload)
-        return payload
-
-    def readinto(self, buffer: bytearray | memoryview) -> int:
-        payload = self.read(len(buffer))
-        buffer[: len(payload)] = payload
-        return len(payload)
-
-    def _read_window(self, start: int, end: int) -> bytes:
-        chunks = []
-        position = start
-        while position < end:
-            block_start = (position // self._block_size) * self._block_size
-            block_end = min(block_start + self._block_size, self._size)
-            block_range = hdf5_range_reader._ByteRange(block_start, block_end)
-            block = self._cache.get(block_range)
-            if block is None:
-                block = asyncio.run(
-                    self._range_reader.read_range(block_start, end=block_end)
+        return 1
+    for column in columns:
+        if column.is_nominally_indexed:
+            index_column_name = column.index_column_name or column.name
+            index_column = columns_by_name.get(index_column_name)
+            if index_column is not None and index_column.shape is not None:
+                logger.debug(
+                    "table length for %s/%s resolved from indexed column %r: %d",
+                    column.source_path,
+                    column.table_path,
+                    index_column.name,
+                    index_column.shape[0],
                 )
-                self._cache[block_range] = block
-            slice_start = position - block_start
-            slice_end = min(end, block_end) - block_start
-            chunks.append(block[slice_start:slice_end])
-            position = block_start + slice_end
-        return b"".join(chunks)
+                return index_column.shape[0]
+        if column.ndim == 1 and column.shape is not None:
+            logger.debug(
+                "table length for %s/%s resolved from regular column %r: %d",
+                column.source_path,
+                column.table_path,
+                column.name,
+                column.shape[0],
+            )
+            return column.shape[0]
+        if column.ndim == 0:
+            logger.debug(
+                "table length for %s/%s resolved as metadata row",
+                column.source_path,
+                column.table_path,
+            )
+            return 1
+    for column in columns:
+        if column.shape:
+            logger.debug(
+                "table length for %s/%s resolved from multidimensional column %r: %d",
+                column.source_path,
+                column.table_path,
+                column.name,
+                column.shape[0],
+            )
+            return column.shape[0]
+    raise lazynwb.exceptions.InternalPathError("Could not determine table length")
 
 
-class _HDF5AccessorAdapter:
-    """Small FileAccessor-like adapter for h5py files opened via range I/O."""
-
-    _hdmf_backend = lazynwb.file_io.FileAccessor.HDMFBackend.HDF5
-
-    def __init__(self, h5_file: h5py.File, source_url: str) -> None:
-        self._accessor = h5_file
-        self._path = _DisplayPath(source_url)
-
-    def get(self, name: str, default: object = None) -> object:
-        return self._accessor.get(name, default)
-
-    def __getitem__(self, name: str) -> object:
-        return self._accessor[name]
-
-    def __contains__(self, name: str) -> bool:
-        return name in self._accessor
-
-    def __iter__(self) -> typing.Iterator[str]:
-        return iter(self._accessor)
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class _DisplayPath:
-    value: str
-
-    def as_posix(self) -> str:
-        return self.value
+def _followup_table_paths(exact_table_path: str) -> tuple[str, ...]:
+    if exact_table_path == "intervals/trials":
+        return ("units",)
+    if exact_table_path == "units":
+        return ("intervals/trials",)
+    return ()
 
 
 def _is_fast_hdf5_candidate(source: lazynwb.types_.PathLike) -> bool:

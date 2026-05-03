@@ -82,9 +82,7 @@ def test_public_exclude_array_columns_filters_after_cached_hdf5_snapshot(
 
     assert "spike_times" not in schema
     assert "waveform_mean" not in schema
-    assert {"spike_times", "waveform_mean", "obs_intervals"}.issubset(
-        warm_column_names
-    )
+    assert {"spike_times", "waveform_mean", "obs_intervals"}.issubset(warm_column_names)
     assert warm_reader._range_reader.request_count == 0
 
 
@@ -108,6 +106,48 @@ def test_hdf5_backend_reader_reuses_sqlite_snapshot_without_range_reads(
     assert cold_requests > 0
     assert warm_reader._range_reader.request_count == 0
     assert warm_snapshot == cold_snapshot
+
+
+def test_hdf5_backend_reader_does_not_call_h5py_file_for_schema(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "catalog.sqlite")
+
+    def _fail_h5py_file(*args: object, **kwargs: object) -> None:
+        raise AssertionError("fast HDF5 schema path must not call h5py.File")
+
+    monkeypatch.setattr(h5py, "File", _fail_h5py_file)
+
+    snapshot = asyncio.run(reader.read_table_schema_snapshot("intervals/trials"))
+    schema = catalog_polars._snapshot_to_polars_schema(snapshot)
+
+    assert {"start_time", "stop_time", "condition"}.issubset(schema)
+
+
+def test_hdf5_backend_reader_reuses_parsed_metadata_for_followup_table(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    parsed_cache_path = tmp_path / "parsed-cache.sqlite"
+    trials_reader = _buffer_hdf5_reader(local_hdf5_path, parsed_cache_path)
+    asyncio.run(trials_reader.read_table_schema_snapshot("intervals/trials"))
+
+    followup_units_reader = _buffer_hdf5_reader(local_hdf5_path, parsed_cache_path)
+    followup_snapshot = asyncio.run(
+        followup_units_reader.read_table_schema_snapshot("units")
+    )
+    followup_requests = followup_units_reader._range_reader.request_count
+
+    cold_units_reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "cold.sqlite")
+    cold_snapshot = asyncio.run(cold_units_reader.read_table_schema_snapshot("units"))
+    cold_requests = cold_units_reader._range_reader.request_count
+
+    assert catalog_polars._snapshot_to_polars_schema(
+        followup_snapshot
+    ) == catalog_polars._snapshot_to_polars_schema(cold_snapshot)
+    assert followup_requests < cold_requests
 
 
 def test_public_get_table_schema_uses_fast_hdf5_for_obstore_file_url(
@@ -200,9 +240,7 @@ def test_public_multifile_fast_hdf5_preserves_schema_merge_semantics(
     float_file = _write_schema_table(tmp_path / "float.nwb", np.float64)
     int_file_0 = _write_schema_table(tmp_path / "int-0.nwb", np.int64)
     int_file_1 = _write_schema_table(tmp_path / "int-1.nwb", np.int64)
-    source_urls = tuple(
-        path.as_uri() for path in (float_file, int_file_0, int_file_1)
-    )
+    source_urls = tuple(path.as_uri() for path in (float_file, int_file_0, int_file_1))
 
     schema = lazynwb.tables.get_table_schema(source_urls, "/table")
     first_only_schema = lazynwb.tables.get_table_schema(
