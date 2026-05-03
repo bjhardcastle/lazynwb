@@ -17,6 +17,7 @@ import lazynwb._catalog.polars as catalog_polars
 import lazynwb._hdf5.range_reader as hdf5_range_reader
 import lazynwb._hdf5.reader as hdf5_reader
 import lazynwb.tables
+import lazynwb.utils
 
 
 def test_hdf5_backend_reader_parses_scalar_table_from_byte_buffer(
@@ -256,6 +257,33 @@ def test_public_multifile_fast_hdf5_preserves_schema_merge_semantics(
     assert schema[lazynwb.tables.TABLE_INDEX_COLUMN_NAME] == pl.UInt32
     assert first_only_schema == pl.Schema({"value": pl.Float64})
     assert "Column 'value' has inconsistent types across files" in caplog.text
+
+
+def test_public_multifile_fast_hdf5_schema_batch_avoids_threadpool(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    source_urls = tuple(
+        path.as_uri()
+        for path in (
+            _write_schema_table(tmp_path / "left.nwb", np.float64),
+            _write_schema_table(tmp_path / "right.nwb", np.float64),
+        )
+    )
+
+    def _fail_threadpool() -> None:
+        raise AssertionError("fast HDF5 schema batch should not use the threadpool")
+
+    monkeypatch.setattr(lazynwb.utils, "get_threadpool_executor", _fail_threadpool)
+
+    schema = lazynwb.tables.get_table_schema(
+        source_urls,
+        "/table",
+        exclude_internal_columns=True,
+    )
+
+    assert schema == pl.Schema({"value": pl.Float64})
 
 
 def test_public_fast_hdf5_missing_table_preserves_raise_on_missing(

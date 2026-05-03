@@ -937,6 +937,72 @@ def _get_table_schema_helper(
         return get_table_schema_from_metadata(columns)
 
 
+def _run_async_schema_batch(
+    coroutine: typing.Coroutine[
+        Any,
+        Any,
+        list[tuple[lazynwb.types_.PathLike, dict[str, Any] | None, bool]],
+    ],
+) -> list[tuple[lazynwb.types_.PathLike, dict[str, Any] | None, bool]]:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+    future = lazynwb.utils.get_threadpool_executor().submit(asyncio.run, coroutine)
+    return future.result()
+
+
+async def _get_fast_hdf5_table_schemas(
+    file_paths: Sequence[lazynwb.types_.PathLike],
+    table_path: str,
+    raise_on_missing: bool,
+) -> list[tuple[lazynwb.types_.PathLike, dict[str, Any] | None, bool]]:
+    readers = [
+        hdf5_reader._default_hdf5_backend_reader(file_path) for file_path in file_paths
+    ]
+    logger.debug(
+        "getting fast HDF5 table schema for %r from %d files in one async batch",
+        table_path,
+        len(file_paths),
+    )
+
+    async def _read_schema(
+        reader: hdf5_reader._HDF5BackendReader,
+        file_path: lazynwb.types_.PathLike,
+    ) -> tuple[lazynwb.types_.PathLike, dict[str, Any] | None, bool]:
+        try:
+            snapshot = await reader.read_table_schema_snapshot(table_path)
+        except KeyError:
+            return (
+                file_path,
+                _handle_missing_schema_table(
+                    file_path=file_path,
+                    table_path=table_path,
+                    raise_on_missing=raise_on_missing,
+                ),
+                True,
+            )
+        except hdf5_reader._NotHDF5Error:
+            logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
+            return file_path, None, False
+        return file_path, catalog_polars._snapshot_to_polars_schema(snapshot), True
+
+    try:
+        return list(
+            await asyncio.gather(
+                *(
+                    _read_schema(reader, file_path)
+                    for reader, file_path in zip(readers, file_paths, strict=True)
+                )
+            )
+        )
+    finally:
+        await asyncio.gather(
+            *(reader.close() for reader in readers),
+            return_exceptions=True,
+        )
+
+
 def _handle_missing_schema_table(
     file_path: lazynwb.types_.PathLike,
     table_path: str,
@@ -990,8 +1056,38 @@ def get_table_schema(
     if first_n_files_to_infer_schema is not None:
         file_paths = file_paths[: min(first_n_files_to_infer_schema, len(file_paths))]
     per_file_schemas: list[dict[str, polars.DataType]] = []
+    normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
+    fast_hdf5_paths = tuple(
+        file_path
+        for file_path in file_paths
+        if hdf5_reader._is_fast_hdf5_candidate(file_path)
+    )
+    fallback_paths = [
+        file_path
+        for file_path in file_paths
+        if not hdf5_reader._is_fast_hdf5_candidate(file_path)
+    ]
+    if fast_hdf5_paths:
+        logger.debug(
+            "using batched fast HDF5 schema path for %d/%d files at %r",
+            len(fast_hdf5_paths),
+            len(file_paths),
+            normalized_table_path,
+        )
+        for file_path, file_schema, used_fast_hdf5 in _run_async_schema_batch(
+            _get_fast_hdf5_table_schemas(
+                fast_hdf5_paths,
+                normalized_table_path,
+                raise_on_missing,
+            )
+        ):
+            if not used_fast_hdf5:
+                fallback_paths.append(file_path)
+                continue
+            if file_schema is not None:
+                per_file_schemas.append(file_schema)
     future_to_file_path = {}
-    for file_path in file_paths:
+    for file_path in fallback_paths:
         future = lazynwb.utils.get_threadpool_executor().submit(
             _get_table_schema_helper,
             file_path=file_path,

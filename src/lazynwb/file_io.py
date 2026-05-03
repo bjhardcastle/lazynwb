@@ -165,6 +165,11 @@ def _get_obstore_storage_options() -> dict[str, Any]:
     options.pop("anon", None)
     if anon:
         options["skip_signature"] = True
+    if "region" not in options and "aws_region" not in options:
+        region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+        if region:
+            options["region"] = region
+            logger.debug("using AWS region %s for obstore storage options", region)
     return options
 
 

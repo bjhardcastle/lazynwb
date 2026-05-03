@@ -95,6 +95,40 @@ def test_s3_region_discovery_preserves_explicit_region(
     assert options == {"skip_signature": True, "region": "eu-west-1"}
 
 
+def test_obstore_store_cache_reuses_store_for_same_bucket_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = [object()]
+    calls: list[tuple[str, dict[str, object]]] = []
+    hdf5_range_reader._OBSTORE_STORE_CACHE.clear()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append((store_url, kwargs))
+        return stores[0]
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    config = hdf5_range_reader._RangeReaderConfig(
+        storage_options={"region": "us-west-2", "skip_signature": True},
+    )
+
+    try:
+        first_store, first_path = hdf5_range_reader._store_and_path_from_url(
+            "s3://aind-scratch-data/first.nwb",
+            config,
+        )
+        second_store, second_path = hdf5_range_reader._store_and_path_from_url(
+            "s3://aind-scratch-data/second.nwb",
+            config,
+        )
+
+        assert first_store is second_store
+        assert first_path == "first.nwb"
+        assert second_path == "second.nwb"
+        assert [call[0] for call in calls] == ["s3://aind-scratch-data"]
+    finally:
+        hdf5_range_reader._OBSTORE_STORE_CACHE.clear()
+
+
 def test_probe_hdf5_signature_at_zero() -> None:
     reader = hdf5_range_reader._BufferRangeReader(
         hdf5_range_reader._HDF5_SIGNATURE + b"\x00" * 32

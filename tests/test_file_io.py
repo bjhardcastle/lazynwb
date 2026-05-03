@@ -33,7 +33,10 @@ def test_file_accessor(nwb_fixture_name, request):
     assert "units" in accessor, "__contains__() failing, or NWB fixture has changed"
     assert "/units" in accessor, "__contains__() failling to normalize path"
     assert accessor.get("units") is not None, "get() should return an object"
-    assert next(iter(accessor), None) is not None, "Accessor should be iterable and yield at least one item"
+    assert (
+        next(iter(accessor), None) is not None
+    ), "Accessor should be iterable and yield at least one item"
+
 
 def test_file_accessor_caching(local_hdf5_path: pathlib.Path) -> None:
     """Test that FileAccessor instances are cached and reused."""
@@ -132,7 +135,23 @@ def test_fsspec_storage_options_use_top_level_anon() -> None:
 
 def test_obstore_storage_options_translate_anon_to_skip_signature() -> None:
     lazynwb.file_io.config.anon = True
-    lazynwb.file_io.config.fsspec_storage_options = {"anon": False, "region": "us-west-2"}
+    lazynwb.file_io.config.fsspec_storage_options = {
+        "anon": False,
+        "region": "us-west-2",
+    }
+
+    assert lazynwb.file_io._get_obstore_storage_options() == {
+        "region": "us-west-2",
+        "skip_signature": True,
+    }
+
+
+def test_obstore_storage_options_use_aws_region_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    lazynwb.file_io.config.anon = True
+    lazynwb.file_io.config.fsspec_storage_options = {"anon": False}
 
     assert lazynwb.file_io._get_obstore_storage_options() == {
         "region": "us-west-2",

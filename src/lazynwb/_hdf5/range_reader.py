@@ -6,6 +6,7 @@ import datetime
 import logging
 import math
 import pathlib
+import threading
 import time
 import typing
 import urllib.error
@@ -22,6 +23,11 @@ logger = logging.getLogger(__name__)
 
 _HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
 _S3_REGION_CACHE: dict[str, str] = {}
+_OBSTORE_STORE_CACHE_LOCK = threading.RLock()
+_OBSTORE_STORE_CACHE: dict[
+    tuple[str, tuple[tuple[str, str], ...], str, str],
+    obstore.store.ObjectStore,
+] = {}
 
 
 class _RangeReadError(OSError):
@@ -149,7 +155,8 @@ class _ObstoreRangeReader:
             containing_range = next(
                 byte_range
                 for byte_range in coalesced_ranges
-                if byte_range.start <= requested.start and requested.end <= byte_range.end
+                if byte_range.start <= requested.start
+                and requested.end <= byte_range.end
             )
             window = by_coalesced_range[containing_range]
             start = requested.start - containing_range.start
@@ -251,7 +258,8 @@ class _BufferRangeReader:
             containing_range = next(
                 byte_range
                 for byte_range in coalesced_ranges
-                if byte_range.start <= requested.start and requested.end <= byte_range.end
+                if byte_range.start <= requested.start
+                and requested.end <= byte_range.end
             )
             payload = coalesced_payloads[containing_range]
             start = requested.start - containing_range.start
@@ -378,24 +386,20 @@ def _store_and_path_from_url(
         store_url = path.parent.as_uri()
         object_path = path.name
     elif parsed.scheme == "s3":
-        store_url = urllib.parse.urlunsplit(
-            (parsed.scheme, parsed.netloc, "", "", "")
-        )
+        store_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
         object_path = parsed.path.lstrip("/")
         storage_options = _add_discovered_s3_region(
             bucket=parsed.netloc,
             storage_options=storage_options,
         )
     elif parsed.scheme in {"http", "https", "gs", "gcs", "az", "abfs"}:
-        store_url = urllib.parse.urlunsplit(
-            (parsed.scheme, parsed.netloc, "", "", "")
-        )
+        store_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
         object_path = parsed.path.lstrip("/")
     else:
         raise ValueError(f"unsupported obstore URL scheme for range reader: {url!r}")
     if not object_path:
         raise ValueError(f"range reader URL must identify one object: {url!r}")
-    store = obstore.store.from_url(
+    store = _cached_store_from_url(
         store_url,
         client_options=config.client_options,
         retry_config=config.retry_config,
@@ -404,15 +408,42 @@ def _store_and_path_from_url(
     return store, object_path
 
 
+def _cached_store_from_url(
+    store_url: str,
+    *,
+    client_options: object | None = None,
+    retry_config: object | None = None,
+    **storage_options: object,
+) -> obstore.store.ObjectStore:
+    cache_key = (
+        store_url,
+        tuple(
+            sorted((str(key), repr(value)) for key, value in storage_options.items())
+        ),
+        repr(client_options),
+        repr(retry_config),
+    )
+    with _OBSTORE_STORE_CACHE_LOCK:
+        cached = _OBSTORE_STORE_CACHE.get(cache_key)
+        if cached is not None:
+            logger.debug("reusing cached obstore store for %s", store_url)
+            return cached
+        store = obstore.store.from_url(
+            store_url,
+            client_options=client_options,
+            retry_config=retry_config,
+            **storage_options,
+        )
+        _OBSTORE_STORE_CACHE[cache_key] = store
+        logger.debug("created cached obstore store for %s", store_url)
+        return store
+
+
 def _add_discovered_s3_region(
     bucket: str,
     storage_options: dict[str, object],
 ) -> dict[str, object]:
-    if (
-        "region" in storage_options
-        or "aws_region" in storage_options
-        or not bucket
-    ):
+    if "region" in storage_options or "aws_region" in storage_options or not bucket:
         return storage_options
     region = _discover_s3_bucket_region(bucket)
     if region is not None:
