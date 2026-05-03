@@ -66,7 +66,7 @@ def get_table_column_metadata(
     t0 = time.time()
     file = (
         file_path
-        if isinstance(file_path, lazynwb.file_io.FileAccessor)
+        if _is_file_accessor_like(file_path)
         else lazynwb.file_io._get_accessor(file_path)
     )
     normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
@@ -228,7 +228,7 @@ def _get_table_column_accessors(
     t0 = time.time()
     file = (
         file_path
-        if isinstance(file_path, lazynwb.file_io.FileAccessor)
+        if _is_file_accessor_like(file_path)
         else lazynwb.file_io._get_accessor(file_path)
     )
     table = file[table_path]
@@ -436,3 +436,10 @@ def _shape_as_tuple(shape: Iterable[int] | None) -> tuple[int, ...] | None:
     if shape is None:
         return None
     return tuple(shape)
+
+
+def _is_file_accessor_like(value: object) -> bool:
+    return isinstance(value, lazynwb.file_io.FileAccessor) or all(
+        hasattr(value, attr)
+        for attr in ("_accessor", "_hdmf_backend", "_path", "get", "__getitem__")
+    )

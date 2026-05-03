@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import collections
 import concurrent.futures
 import difflib
@@ -19,6 +20,8 @@ import polars.datatypes.convert
 import tqdm
 import zarr
 
+import lazynwb._catalog.polars as catalog_polars
+import lazynwb._hdf5.reader as hdf5_reader
 import lazynwb.exceptions
 import lazynwb.file_io
 import lazynwb.table_metadata
@@ -890,9 +893,16 @@ def _get_path_to_row_indices(df: pl.DataFrame) -> dict[str, list[int]]:
 def _get_table_schema_helper(
     file_path: lazynwb.types_.PathLike, table_path: str, raise_on_missing: bool
 ) -> dict[str, Any] | None:
+    normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
+    fast_schema = _get_fast_hdf5_table_schema_if_available(
+        file_path=file_path,
+        table_path=normalized_table_path,
+    )
+    if fast_schema is not None:
+        return fast_schema
     try:
         columns = lazynwb.table_metadata.get_table_column_metadata(
-            file_path, table_path
+            file_path, normalized_table_path
         )
     except KeyError:
         if raise_on_missing:
@@ -904,6 +914,21 @@ def _get_table_schema_helper(
             return None
     else:
         return get_table_schema_from_metadata(columns)
+
+
+def _get_fast_hdf5_table_schema_if_available(
+    file_path: lazynwb.types_.PathLike,
+    table_path: str,
+) -> pl.Schema | None:
+    if not hdf5_reader._is_fast_hdf5_candidate(file_path):
+        return None
+    reader = hdf5_reader._default_hdf5_backend_reader(file_path)
+    try:
+        snapshot = asyncio.run(reader.read_table_schema_snapshot(table_path))
+    except hdf5_reader._NotHDF5Error:
+        logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
+        return None
+    return catalog_polars._snapshot_to_polars_schema(snapshot)
 
 
 def get_table_schema(

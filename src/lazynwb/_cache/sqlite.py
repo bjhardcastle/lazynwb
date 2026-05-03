@@ -301,3 +301,13 @@ class _SQLiteSnapshotCache:
 
 def _utc_now() -> str:
     return datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
+
+
+def _default_cache_path() -> pathlib.Path:
+    override = os.environ.get("LAZYNWB_CATALOG_CACHE_PATH")
+    if override:
+        return pathlib.Path(override).expanduser()
+    cache_root = pathlib.Path(
+        os.environ.get("XDG_CACHE_HOME", pathlib.Path.home() / ".cache")
+    )
+    return cache_root / "lazynwb" / "catalog.sqlite"
