@@ -6,9 +6,11 @@ import json
 import pathlib
 import typing
 
+import polars
 import pytest
 
 import lazynwb._cli._main as cli_main
+import lazynwb._cli._schema as cli_schema
 import lazynwb._cli._sources as cli_sources
 import lazynwb._cli._tables as cli_tables
 import lazynwb.file_io
@@ -339,6 +341,205 @@ def test_tables_command_debug_logs_source_resolution_and_sql_discovery(
     assert "starting SQL context table discovery" in stderr
     assert "disable_progress=True" in stderr
     assert "completed SQL context table discovery" in stderr
+    assert "elapsed_ms=" in stderr
+    assert "DEBUG:" not in stdout
+
+
+def test_schema_command_inspects_local_fixture_schema_json(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(["schema", "units", str(local_hdf5_path)])
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload == {
+        "column_count": 8,
+        "columns": [
+            {"dtype": "Int64", "internal": False, "name": "id"},
+            {
+                "dtype": "List(Array(Float64, shape=(2,)))",
+                "internal": False,
+                "name": "obs_intervals",
+            },
+            {"dtype": "List(Float64)", "internal": False, "name": "spike_times"},
+            {"dtype": "String", "internal": False, "name": "structure"},
+            {
+                "dtype": "Array(Float64, shape=(25, 384))",
+                "internal": False,
+                "name": "waveform_mean",
+            },
+            {"dtype": "String", "internal": True, "name": "_nwb_path"},
+            {"dtype": "String", "internal": True, "name": "_table_path"},
+            {"dtype": "UInt32", "internal": True, "name": "_table_index"},
+        ],
+        "command": "schema",
+        "infer_schema_length": None,
+        "requested_table": "units",
+        "resolved_count": 1,
+        "resolved_table_path": "units",
+        "source": {
+            "dandi": None,
+            "kind": "paths",
+            "local": None,
+            "paths": [
+                {
+                    "input": str(local_hdf5_path),
+                    "resolved": local_hdf5_path.resolve().as_posix(),
+                }
+            ],
+            "precedence": "command_line_paths",
+            "resolved_count": 1,
+        },
+    }
+
+
+def test_schema_command_accepts_session_alias_for_general_table(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(["schema", "session", str(local_hdf5_path)])
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["requested_table"] == "session"
+    assert payload["resolved_table_path"] == "general"
+    column_names = [column["name"] for column in payload["columns"]]
+    assert "session_description" in column_names
+    assert "_nwb_path" in column_names
+
+
+def test_schema_command_passes_schema_inference_limit(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    calls: list[dict[str, object]] = []
+
+    def _get_table_schema(**kwargs: object) -> polars.Schema:
+        calls.append(kwargs)
+        return polars.Schema({"unit_id": polars.Int64})
+
+    monkeypatch.setattr(
+        cli_schema.tables,
+        "get_table_schema",
+        _get_table_schema,
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["schema", "--infer-schema-length", "1", "units", str(path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert json.loads(stdout)["infer_schema_length"] == 1
+    assert calls == [
+        {
+            "exclude_array_columns": False,
+            "exclude_internal_columns": False,
+            "file_paths": (path.resolve().as_posix(),),
+            "first_n_files_to_infer_schema": 1,
+            "raise_on_missing": False,
+            "table_path": "units",
+        }
+    ]
+
+
+def test_schema_command_supports_table_output(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+
+    monkeypatch.setattr(
+        cli_schema.tables,
+        "get_table_schema",
+        lambda **kwargs: polars.Schema(
+            {"unit_id": polars.Int64, "_nwb_path": polars.String}
+        ),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["schema", "--format", "table", "units", str(path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert "name" in stdout
+    assert "dtype" in stdout
+    assert "internal" in stdout
+    assert "unit_id" in stdout
+    assert "Int64" in stdout
+    assert "_nwb_path" in stdout
+    assert "true" in stdout
+
+
+def test_schema_command_returns_missing_table_error(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(
+        ["schema", "--infer-schema-length", "1", "not_a_table", str(local_hdf5_path)]
+    )
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "schema_not_found",
+            "details": {
+                "infer_schema_length": 1,
+                "requested_table": "not_a_table",
+                "resolved_count": 1,
+                "resolved_table_path": "not_a_table",
+                "source": {
+                    "dandi": None,
+                    "kind": "paths",
+                    "local": None,
+                    "paths": [
+                        {
+                            "input": str(local_hdf5_path),
+                            "resolved": local_hdf5_path.resolve().as_posix(),
+                        }
+                    ],
+                    "precedence": "command_line_paths",
+                    "resolved_count": 1,
+                },
+            },
+            "message": "No NWB table schema was found for the resolved sources.",
+        }
+    }
+
+
+def test_schema_command_debug_logs_source_resolution_and_schema_inspection(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    monkeypatch.setattr(
+        cli_schema.tables,
+        "get_table_schema",
+        lambda **kwargs: polars.Schema({"unit_id": polars.Int64}),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["--debug", "schema", "--infer-schema-length", "1", "units", str(path)]
+    )
+
+    assert exit_code == 0
+    assert json.loads(stdout)["columns"] == [
+        {"dtype": "Int64", "internal": False, "name": "unit_id"}
+    ]
+    assert "resolving active source" in stderr
+    assert "resolved schema source paths" in stderr
+    assert "starting NWB table schema inspection" in stderr
+    assert "table_path=units" in stderr
+    assert "infer_schema_length=1" in stderr
+    assert "completed NWB table schema inspection" in stderr
+    assert "column_count=1" in stderr
+    assert "serializing NWB table schema" in stderr
     assert "elapsed_ms=" in stderr
     assert "DEBUG:" not in stdout
 

@@ -5,6 +5,7 @@ import json
 import typing
 
 import lazynwb._cli._config as cli_config
+import lazynwb._cli._schema as cli_schema
 import lazynwb._cli._sources as cli_sources
 
 
@@ -60,6 +61,37 @@ def _sql_table_json_object(table: _SQLTableLike) -> dict[str, str]:
     return {
         "name": table.name,
         "path": table.path,
+    }
+
+
+def _schema_json_object(
+    schema: cli_schema._TableSchema,
+    resolved_source: cli_sources._ResolvedSource,
+    *,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+) -> dict[str, typing.Any]:
+    return {
+        "column_count": len(schema.columns),
+        "columns": [_schema_column_json_object(column) for column in schema.columns],
+        "command": "schema",
+        "infer_schema_length": schema.infer_schema_length,
+        "requested_table": schema.requested_table,
+        "resolved_count": len(paths),
+        "resolved_table_path": schema.resolved_table_path,
+        "source": cli_sources._source_json_object(
+            resolved_source,
+            paths=paths,
+        ),
+    }
+
+
+def _schema_column_json_object(
+    column: cli_schema._SchemaColumn,
+) -> dict[str, str | bool]:
+    return {
+        "dtype": column.dtype,
+        "internal": column.internal,
+        "name": column.name,
     }
 
 
@@ -121,3 +153,39 @@ def _write_sql_tables_table(
     stream.write(f"{'-' * widths[0]}-+-{'-' * widths[1]}\n")
     for table_name, table_path in rows:
         stream.write(f"{table_name:<{widths[0]}} | {table_path:<{widths[1]}}\n")
+
+
+def _write_schema_table(
+    stream: typing.TextIO,
+    schema: cli_schema._TableSchema,
+) -> None:
+    rows = tuple(
+        (column.name, column.dtype, str(column.internal).lower())
+        for column in schema.columns
+    )
+    headers = ("name", "dtype", "internal")
+    name_width = max((len(row[0]) for row in rows), default=0)
+    dtype_width = max((len(row[1]) for row in rows), default=0)
+    internal_width = max((len(row[2]) for row in rows), default=0)
+    widths = (
+        max(len(headers[0]), name_width),
+        max(len(headers[1]), dtype_width),
+        max(len(headers[2]), internal_width),
+    )
+
+    stream.write(
+        f"{headers[0]:<{widths[0]}} | "
+        f"{headers[1]:<{widths[1]}} | "
+        f"{headers[2]:<{widths[2]}}\n"
+    )
+    stream.write(
+        f"{'-' * widths[0]}-+-"
+        f"{'-' * widths[1]}-+-"
+        f"{'-' * widths[2]}\n"
+    )
+    for column_name, dtype, internal in rows:
+        stream.write(
+            f"{column_name:<{widths[0]}} | "
+            f"{dtype:<{widths[1]}} | "
+            f"{internal:<{widths[2]}}\n"
+        )

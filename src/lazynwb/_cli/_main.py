@@ -125,6 +125,38 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     tables_parser.set_defaults(_handler=_handle_tables)
 
+    schema_parser = subparsers.add_parser(
+        "schema",
+        help="inspect one NWB table schema",
+    )
+    _add_config_argument(schema_parser)
+    schema_parser.add_argument(
+        "--format",
+        choices=("json", "table"),
+        default="json",
+        dest="output_format",
+        help="output format; defaults to json",
+    )
+    schema_parser.add_argument(
+        "--infer-schema-length",
+        default=None,
+        type=_positive_int,
+        help="number of resolved sources to use for schema inference",
+    )
+    _add_source_override_arguments(schema_parser, include_paths=False)
+    schema_parser.add_argument(
+        "table",
+        metavar="TABLE",
+        help="NWB table path or SQL table alias to inspect",
+    )
+    schema_parser.add_argument(
+        "paths",
+        metavar="PATH",
+        nargs="*",
+        help="explicit NWB file or store path",
+    )
+    schema_parser.set_defaults(_handler=_handle_schema)
+
     config_parser = subparsers.add_parser(
         "config",
         help="initialize or show project-local CLI configuration",
@@ -235,6 +267,77 @@ def _handle_tables(
                 resolved_source,
                 paths=paths,
                 sql_defaults=sql_defaults,
+            ),
+        )
+    return cli_errors._ExitCode.OK
+
+
+def _handle_schema(
+    args: argparse.Namespace, stdout: typing.TextIO
+) -> cli_errors._ExitCode:
+    import lazynwb._cli._schema as cli_schema
+    import lazynwb.exceptions as lazynwb_exceptions
+
+    loaded_config = cli_config._load_project_config(args.config)
+    started_at = time.perf_counter()
+    resolved_source = cli_sources._resolve_source(
+        loaded_config,
+        _source_overrides_from_args(args, paths=tuple(args.paths)),
+        validate_paths=True,
+        discover_local=True,
+    )
+    paths = cli_sources._paths_for_source(resolved_source)
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.debug(
+        "resolved schema source paths: source_kind=%s precedence=%s "
+        "resolved_count=%d elapsed_ms=%.3f",
+        resolved_source.kind,
+        resolved_source.precedence,
+        len(paths),
+        elapsed_ms,
+    )
+
+    try:
+        schema = cli_schema._inspect_table_schema(
+            tuple(path["resolved"] for path in paths),
+            table=args.table,
+            infer_schema_length=args.infer_schema_length,
+        )
+    except lazynwb_exceptions.InternalPathError as exc:
+        table_path = cli_schema._resolve_table_path(args.table)
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.SCHEMA_NOT_FOUND,
+            details={
+                "infer_schema_length": args.infer_schema_length,
+                "requested_table": args.table,
+                "resolved_count": len(paths),
+                "resolved_table_path": table_path,
+                "source": cli_sources._source_json_object(
+                    resolved_source,
+                    paths=paths,
+                ),
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message="No NWB table schema was found for the resolved sources.",
+        ) from exc
+
+    logger.debug(
+        "serializing NWB table schema: output_format=%s requested_table=%s "
+        "table_path=%s column_count=%d",
+        args.output_format,
+        schema.requested_table,
+        schema.resolved_table_path,
+        len(schema.columns),
+    )
+    if args.output_format == "table":
+        cli_formatting._write_schema_table(stdout, schema)
+    else:
+        cli_formatting._write_json(
+            stdout,
+            cli_formatting._schema_json_object(
+                schema,
+                resolved_source,
+                paths=paths,
             ),
         )
     return cli_errors._ExitCode.OK
