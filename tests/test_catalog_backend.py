@@ -17,9 +17,12 @@ import lazynwb._catalog.accessor as catalog_accessor
 import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
 import lazynwb._catalog.polars as catalog_polars
+import lazynwb._hdf5.reader as hdf5_reader
 import lazynwb._zarr.reader as zarr_reader
+import lazynwb.file_io
 import lazynwb.table_metadata
 import lazynwb.tables
+import lazynwb.types_
 
 
 @pytest.mark.parametrize(
@@ -258,6 +261,214 @@ def test_public_get_table_schema_uses_zarr_backend_for_local_store(
     assert schema == existing_schema
     assert warm_snapshot.table_path == "units"
     assert warm_reader.metadata_read_count == 0
+
+
+def test_fast_catalog_snapshot_skips_local_zarr_probe_for_remote_hdf5_upath(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = lazynwb.file_io.from_pathlike(
+        "s3://aind-scratch-data/dynamic-routing/cache/nwb/v0.0.272/"
+        "620263_2022-07-26.nwb"
+    )
+
+    def _not_hdf5_candidate(candidate_source: lazynwb.types_.PathLike) -> bool:
+        assert candidate_source == source
+        return False
+
+    monkeypatch.setattr(
+        hdf5_reader,
+        "_is_fast_hdf5_candidate",
+        _not_hdf5_candidate,
+    )
+
+    snapshot = lazynwb.tables._get_fast_catalog_snapshot_if_available(
+        source,
+        "intervals/trials",
+    )
+
+    assert snapshot is None
+
+
+def test_fast_catalog_snapshot_prefers_hdf5_for_non_zarr_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = lazynwb.file_io.from_pathlike(
+        "s3://aind-scratch-data/dynamic-routing/cache/nwb/v0.0.272/"
+        "620263_2022-07-26.nwb"
+    )
+    expected_snapshot = catalog_models._TableSchemaSnapshot(
+        source_identity=catalog_models._SourceIdentity(
+            source_url=str(source),
+            in_process_token="test-hdf5-first",
+        ),
+        table_path="intervals/trials",
+        backend="hdf5",
+        columns=(),
+    )
+    calls: list[str] = []
+
+    class _HDF5Reader:
+        async def read_table_schema_snapshot(
+            self,
+            exact_table_path: str,
+        ) -> catalog_models._TableSchemaSnapshot:
+            calls.append(f"hdf5:{exact_table_path}")
+            return expected_snapshot
+
+        async def close(self) -> None:
+            calls.append("hdf5:close")
+
+    def _unexpected_zarr_probe(candidate_source: lazynwb.types_.PathLike) -> bool:
+        raise AssertionError(
+            f"Zarr should not be probed first for {candidate_source!r}"
+        )
+
+    monkeypatch.setattr(
+        hdf5_reader,
+        "_default_hdf5_backend_reader",
+        lambda candidate_source: _HDF5Reader(),
+    )
+    monkeypatch.setattr(
+        zarr_reader,
+        "_is_fast_zarr_candidate",
+        _unexpected_zarr_probe,
+    )
+
+    snapshot = lazynwb.tables._get_fast_catalog_snapshot_if_available(
+        source,
+        "intervals/trials",
+    )
+
+    assert snapshot == expected_snapshot
+    assert calls == ["hdf5:intervals/trials", "hdf5:close"]
+
+
+def test_fast_catalog_snapshot_falls_back_to_zarr_after_hdf5_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "file:///tmp/remote-style-store-without-zarr-suffix"
+    expected_snapshot = catalog_models._TableSchemaSnapshot(
+        source_identity=catalog_models._SourceIdentity(
+            source_url=source,
+            in_process_token="test-zarr-fallback",
+        ),
+        table_path="intervals/trials",
+        backend="zarr",
+        columns=(),
+    )
+    calls: list[str] = []
+
+    class _RejectingHDF5Reader:
+        async def read_table_schema_snapshot(
+            self,
+            exact_table_path: str,
+        ) -> catalog_models._TableSchemaSnapshot:
+            calls.append(f"hdf5:{exact_table_path}")
+            raise hdf5_reader._NotHDF5Error(
+                source_url=source,
+                table_path=exact_table_path,
+                feature="signature",
+                detail="not an HDF5 file",
+            )
+
+        async def close(self) -> None:
+            calls.append("hdf5:close")
+
+    class _ZarrReader:
+        async def read_table_schema_snapshot(
+            self,
+            exact_table_path: str,
+        ) -> catalog_models._TableSchemaSnapshot:
+            calls.append(f"zarr:{exact_table_path}")
+            return expected_snapshot
+
+        async def close(self) -> None:
+            calls.append("zarr:close")
+
+    monkeypatch.setattr(
+        hdf5_reader,
+        "_default_hdf5_backend_reader",
+        lambda candidate_source: _RejectingHDF5Reader(),
+    )
+    monkeypatch.setattr(
+        zarr_reader,
+        "_is_fast_zarr_candidate",
+        lambda candidate_source: True,
+    )
+    monkeypatch.setattr(
+        zarr_reader,
+        "_default_zarr_backend_reader",
+        lambda candidate_source: _ZarrReader(),
+    )
+
+    snapshot = lazynwb.tables._get_fast_catalog_snapshot_if_available(
+        source,
+        "intervals/trials",
+    )
+
+    assert snapshot == expected_snapshot
+    assert calls == [
+        "hdf5:intervals/trials",
+        "hdf5:close",
+        "zarr:intervals/trials",
+        "zarr:close",
+    ]
+
+
+def test_fast_catalog_snapshot_prefers_explicit_zarr_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "file:///tmp/example.nwb.zarr"
+    expected_snapshot = catalog_models._TableSchemaSnapshot(
+        source_identity=catalog_models._SourceIdentity(
+            source_url=source,
+            in_process_token="test-zarr-first",
+        ),
+        table_path="intervals/trials",
+        backend="zarr",
+        columns=(),
+    )
+    calls: list[str] = []
+
+    class _ZarrReader:
+        async def read_table_schema_snapshot(
+            self,
+            exact_table_path: str,
+        ) -> catalog_models._TableSchemaSnapshot:
+            calls.append(f"zarr:{exact_table_path}")
+            return expected_snapshot
+
+        async def close(self) -> None:
+            calls.append("zarr:close")
+
+    def _unexpected_hdf5_reader(candidate_source: lazynwb.types_.PathLike) -> object:
+        raise AssertionError(
+            f"HDF5 should not be probed first for {candidate_source!r}"
+        )
+
+    monkeypatch.setattr(
+        zarr_reader,
+        "_is_fast_zarr_candidate",
+        lambda candidate_source: True,
+    )
+    monkeypatch.setattr(
+        zarr_reader,
+        "_default_zarr_backend_reader",
+        lambda candidate_source: _ZarrReader(),
+    )
+    monkeypatch.setattr(
+        hdf5_reader,
+        "_default_hdf5_backend_reader",
+        _unexpected_hdf5_reader,
+    )
+
+    snapshot = lazynwb.tables._get_fast_catalog_snapshot_if_available(
+        source,
+        "intervals/trials",
+    )
+
+    assert snapshot == expected_snapshot
+    assert calls == ["zarr:intervals/trials", "zarr:close"]
 
 
 def _contains_live_accessor(value: object) -> bool:

@@ -1,4 +1,5 @@
 import pathlib
+import typing
 from collections.abc import Iterable
 
 import pytest
@@ -121,6 +122,56 @@ def test_open_single_and_multiple(local_hdf5_paths: list[pathlib.Path]) -> None:
     assert all(isinstance(a, lazynwb.file_io.FileAccessor) for a in accessors)
     assert "units" in accessors[0]
     assert "units" in accessors[1]
+
+
+def test_open_file_prefers_zarr_when_zarr_word_is_in_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    sentinel = object()
+
+    def _unexpected_hdf5_open(
+        *args: object,
+        **kwargs: object,
+    ) -> typing.NoReturn:
+        raise AssertionError("HDF5 should not be opened before a Zarr-looking URI")
+
+    def _zarr_open(path: object, mode: str) -> object:
+        calls.append(f"zarr:{path}:{mode}")
+        return sentinel
+
+    monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _unexpected_hdf5_open)
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open", _zarr_open)
+
+    result = lazynwb.file_io._open_file("file:///tmp/zarr-benchmark.nwb")
+
+    assert result is sentinel
+    assert calls == ["zarr:file:///tmp/zarr-benchmark.nwb:r"]
+
+
+def test_open_file_prefers_zarr_for_explicit_zarr_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    sentinel = object()
+
+    def _unexpected_hdf5_open(
+        *args: object,
+        **kwargs: object,
+    ) -> typing.NoReturn:
+        raise AssertionError("HDF5 should not be opened before explicit Zarr")
+
+    def _zarr_open(path: object, mode: str) -> object:
+        calls.append(f"zarr:{path}:{mode}")
+        return sentinel
+
+    monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _unexpected_hdf5_open)
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open", _zarr_open)
+
+    result = lazynwb.file_io._open_file("file:///tmp/example.nwb.zarr")
+
+    assert result is sentinel
+    assert calls == ["zarr:file:///tmp/example.nwb.zarr:r"]
 
 
 def test_fsspec_storage_options_use_top_level_anon() -> None:

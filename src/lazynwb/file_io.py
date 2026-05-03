@@ -94,7 +94,12 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     p = from_pathlike(path)
     u = upath.UPath(p, **_get_fsspec_storage_options())
     key = u.as_posix()
-    is_definitely_zarr = "zarr" in key
+    is_definitely_zarr = "zarr" in key.lower()
+    logger.debug(
+        "opening %s with %s-preferred backend order",
+        key,
+        "Zarr" if is_definitely_zarr else "HDF5",
+    )
     if not is_definitely_zarr:
         with contextlib.suppress(Exception):
             return _open_hdf5(

@@ -552,10 +552,46 @@ def _mtime_iso(mtime: float) -> str:
     ).isoformat()
 
 
+def _source_uri(source: lazynwb.types_.PathLike) -> str:
+    as_posix = getattr(source, "as_posix", None)
+    if callable(as_posix):
+        try:
+            return str(as_posix())
+        except Exception:
+            logger.debug("failed to get as_posix() from source %r", source)
+    try:
+        return os.fsdecode(source)
+    except TypeError:
+        return str(source)
+
+
+def _source_name_has_zarr_suffix(source: lazynwb.types_.PathLike) -> bool:
+    return ".zarr" in _source_uri(source).lower()
+
+
 def _is_fast_zarr_candidate(source: lazynwb.types_.PathLike) -> bool:
-    path = pathlib.Path(os.fsdecode(source))
+    protocol = getattr(source, "protocol", None)
+    if protocol not in (None, "", "file"):
+        logger.debug(
+            "skipping fast Zarr catalog candidate check for non-local source %r "
+            "(protocol=%r)",
+            source,
+            protocol,
+        )
+        return False
+    try:
+        path = pathlib.Path(os.fsdecode(source))
+    except TypeError:
+        logger.debug(
+            "skipping fast Zarr catalog candidate check for unsupported path-like "
+            "source %r",
+            source,
+        )
+        return False
     return path.is_dir() and (
-        path.suffix == ".zarr" or (path / ".zmetadata").exists() or (path / ".zgroup").exists()
+        path.suffix == ".zarr"
+        or (path / ".zmetadata").exists()
+        or (path / ".zgroup").exists()
     )
 
 
