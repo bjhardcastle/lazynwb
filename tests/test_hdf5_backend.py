@@ -252,6 +252,66 @@ def test_common_path_discovery_uses_catalog_summary_without_accessor(
     assert "/processing/behavior/running_speed_with_rate" in paths
 
 
+def test_sql_context_uses_explicit_hdf5_multi_table_schema_scan(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.conversion")
+    source_url = local_hdf5_path.as_uri()
+    calls: list[tuple[str, ...]] = []
+    original_scan = hdf5_reader._HDF5BackendReader._read_table_schema_snapshots
+
+    async def _spy_multi_table_scan(
+        self: hdf5_reader._HDF5BackendReader,
+        exact_table_paths: tuple[str, ...],
+    ) -> dict[str, hdf5_reader._HDF5TableSchemaScanResult]:
+        calls.append(exact_table_paths)
+        return await original_scan(self, exact_table_paths)
+
+    monkeypatch.setattr(
+        hdf5_reader._HDF5BackendReader,
+        "_read_table_schema_snapshots",
+        _spy_multi_table_scan,
+    )
+
+    sql_context = lazynwb.get_sql_context(
+        source_url,
+        full_path=True,
+        min_file_count=1,
+        exclude_array_columns=False,
+        exclude_timeseries=False,
+        ignore_errors=True,
+        disable_progress=True,
+    )
+
+    assert any(
+        {
+            "intervals/trials",
+            "units",
+            "general",
+            "processing/behavior/running_speed_with_rate",
+        }.issubset(call)
+        for call in calls
+    )
+    for table_name in (
+        "intervals/trials",
+        "units",
+        "general",
+        "processing/behavior/running_speed_with_rate",
+    ):
+        assert table_name in sql_context.tables()
+        result = sql_context.execute(
+            f"SELECT COUNT(*) FROM `{table_name}`",
+            eager=True,
+        )
+        assert result.item() > 0
+    assert "SQL context HDF5 multi-table scan" in caplog.text
+    assert "cache_writes=" in caplog.text
+
+
 def test_hdf5_backend_reader_scans_multiple_tables_in_one_lifecycle(
     local_hdf5_path: pathlib.Path,
     tmp_path: pathlib.Path,
