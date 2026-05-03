@@ -6,6 +6,7 @@ import typing
 
 import lazynwb._cli._config as cli_config
 import lazynwb._cli._preview as cli_preview
+import lazynwb._cli._query as cli_query
 import lazynwb._cli._schema as cli_schema
 import lazynwb._cli._sources as cli_sources
 
@@ -116,6 +117,32 @@ def _preview_json_object(
             resolved_source,
             paths=paths,
         ),
+    }
+
+
+def _query_json_object(
+    result: cli_query._SQLQueryResult,
+    resolved_source: cli_sources._ResolvedSource,
+    *,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+    sql_defaults: collections.abc.Mapping[str, typing.Any],
+) -> dict[str, typing.Any]:
+    return {
+        "allow_large": result.allow_large,
+        "columns": list(result.columns),
+        "command": "query",
+        "limit": result.limit,
+        "observed_count": result.observed_count,
+        "query": result.query,
+        "resolved_count": len(paths),
+        "row_count": len(result.rows),
+        "rows": list(result.rows),
+        "source": cli_sources._source_json_object(
+            resolved_source,
+            paths=paths,
+        ),
+        "sql": dict(sql_defaults),
+        "truncated": result.truncated,
     }
 
 
@@ -242,6 +269,61 @@ def _write_preview_table(
     stream.write("-+-".join("-" * width for width in widths))
     stream.write("\n")
     for row in rows:
+        stream.write(
+            " | ".join(
+                f"{cell:<{widths[column_index]}}"
+                for column_index, cell in enumerate(row)
+            )
+        )
+        stream.write("\n")
+
+
+def _write_query_table(
+    stream: typing.TextIO,
+    result: cli_query._SQLQueryResult,
+) -> None:
+    _write_rows_table(stream, result.columns, result.rows)
+
+
+def _write_query_jsonl(
+    stream: typing.TextIO,
+    result: cli_query._SQLQueryResult,
+) -> None:
+    for row in result.rows:
+        stream.write(json.dumps(row, sort_keys=True))
+        stream.write("\n")
+
+
+def _write_rows_table(
+    stream: typing.TextIO,
+    columns: collections.abc.Sequence[str],
+    rows: collections.abc.Sequence[collections.abc.Mapping[str, object]],
+) -> None:
+    if not columns:
+        stream.write("(no columns)\n")
+        return
+
+    serialized_rows = tuple(
+        tuple(_preview_cell(row.get(column)) for column in columns) for row in rows
+    )
+    widths = tuple(
+        max(
+            len(column),
+            max((len(row[column_index]) for row in serialized_rows), default=0),
+        )
+        for column_index, column in enumerate(columns)
+    )
+
+    stream.write(
+        " | ".join(
+            f"{column:<{widths[column_index]}}"
+            for column_index, column in enumerate(columns)
+        )
+    )
+    stream.write("\n")
+    stream.write("-+-".join("-" * width for width in widths))
+    stream.write("\n")
+    for row in serialized_rows:
         stream.write(
             " | ".join(
                 f"{cell:<{widths[column_index]}}"

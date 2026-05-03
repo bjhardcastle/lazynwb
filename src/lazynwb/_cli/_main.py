@@ -189,6 +189,51 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     preview_parser.set_defaults(_handler=_handle_preview)
 
+    query_parser = subparsers.add_parser(
+        "query",
+        help="execute a bounded SQL query against resolved NWB sources",
+    )
+    _add_config_argument(query_parser)
+    query_parser.add_argument(
+        "--format",
+        choices=("json", "jsonl", "table"),
+        default="json",
+        dest="output_format",
+        help="output format; defaults to json",
+    )
+    query_parser.add_argument(
+        "--limit",
+        default=None,
+        type=_query_limit_argument,
+        help="maximum result rows; defaults to 100",
+    )
+    query_parser.add_argument(
+        "--allow-large",
+        "--no-row-cap",
+        action="store_true",
+        dest="allow_large",
+        help="allow --limit values above the default row cap",
+    )
+    query_parser.add_argument(
+        "--infer-schema-length",
+        default=None,
+        type=_positive_int,
+        help="number of resolved sources to use for SQL table discovery",
+    )
+    _add_source_override_arguments(query_parser, include_paths=False)
+    query_parser.add_argument(
+        "query",
+        metavar="SQL",
+        help="SQL query text to execute",
+    )
+    query_parser.add_argument(
+        "paths",
+        metavar="PATH",
+        nargs="*",
+        help="explicit NWB file or store path",
+    )
+    query_parser.set_defaults(_handler=_handle_query)
+
     config_parser = subparsers.add_parser(
         "config",
         help="initialize or show project-local CLI configuration",
@@ -478,6 +523,138 @@ def _handle_preview(
     return cli_errors._ExitCode.OK
 
 
+def _handle_query(
+    args: argparse.Namespace, stdout: typing.TextIO
+) -> cli_errors._ExitCode:
+    import lazynwb._cli._query as cli_query
+
+    loaded_config = cli_config._load_project_config(args.config)
+    try:
+        limit = cli_query._validate_query_limit(
+            args.limit,
+            allow_large=args.allow_large,
+        )
+    except ValueError as exc:
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.QUERY_LIMIT_INVALID,
+            details={
+                "allow_large": args.allow_large,
+                "default_limit": cli_query._DEFAULT_QUERY_LIMIT,
+                "requested_limit": args.limit,
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message="Query row limit must be a positive integer.",
+        ) from exc
+    except OverflowError as exc:
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.QUERY_LIMIT_EXCEEDED,
+            details={
+                "allow_large": args.allow_large,
+                "default_limit": cli_query._DEFAULT_QUERY_LIMIT,
+                "requested_limit": args.limit,
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message=(
+                "Query row limit exceeds the default cap; use --allow-large "
+                "to request more rows."
+            ),
+        ) from exc
+
+    started_at = time.perf_counter()
+    resolved_source = cli_sources._resolve_source(
+        loaded_config,
+        _source_overrides_from_args(args, paths=tuple(args.paths)),
+        validate_paths=True,
+        discover_local=True,
+    )
+    paths = cli_sources._paths_for_source(resolved_source)
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.debug(
+        "resolved query source paths: source_kind=%s precedence=%s "
+        "resolved_count=%d elapsed_ms=%.3f",
+        resolved_source.kind,
+        resolved_source.precedence,
+        len(paths),
+        elapsed_ms,
+    )
+    sql_defaults = _query_sql_defaults(infer_schema_length=args.infer_schema_length)
+
+    try:
+        result = cli_query._execute_sql_query(
+            tuple(path["resolved"] for path in paths),
+            query=args.query,
+            limit=limit,
+            allow_large=args.allow_large,
+            infer_schema_length=args.infer_schema_length,
+        )
+    except cli_query._QueryRowCapExceededError as exc:
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.QUERY_ROW_CAP_EXCEEDED,
+            details={
+                "allow_large": args.allow_large,
+                "cap": exc.cap,
+                "limit": exc.limit,
+                "observed_count": exc.observed_count,
+                "query": args.query,
+                "resolved_count": len(paths),
+                "source": cli_sources._source_json_object(
+                    resolved_source,
+                    paths=paths,
+                ),
+                "sql": sql_defaults,
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message=(
+                "SQL query returned more rows than the configured row cap; "
+                "use --allow-large with an explicit --limit to return more rows."
+            ),
+        ) from exc
+    except Exception as exc:
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.QUERY_FAILED,
+            details={
+                "error_message": str(exc),
+                "error_type": type(exc).__name__,
+                "query": args.query,
+                "resolved_count": len(paths),
+                "source": cli_sources._source_json_object(
+                    resolved_source,
+                    paths=paths,
+                ),
+                "sql": sql_defaults,
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message="SQL query failed.",
+        ) from exc
+
+    logger.debug(
+        "serializing SQL query result: output_format=%s query=%r row_count=%d "
+        "column_count=%d limit=%d allow_large=%s truncated=%s",
+        args.output_format,
+        result.query,
+        len(result.rows),
+        len(result.columns),
+        result.limit,
+        result.allow_large,
+        result.truncated,
+    )
+    if args.output_format == "table":
+        cli_formatting._write_query_table(stdout, result)
+    elif args.output_format == "jsonl":
+        cli_formatting._write_query_jsonl(stdout, result)
+    else:
+        cli_formatting._write_json(
+            stdout,
+            cli_formatting._query_json_object(
+                result,
+                resolved_source,
+                paths=paths,
+                sql_defaults=sql_defaults,
+            ),
+        )
+    return cli_errors._ExitCode.OK
+
+
 def _handle_config_init(
     args: argparse.Namespace, stdout: typing.TextIO
 ) -> cli_errors._ExitCode:
@@ -597,6 +774,19 @@ def _preview_limit_argument(value: str) -> int | str:
         return int(value)
     except ValueError:
         return value
+
+
+def _query_limit_argument(value: str) -> int | str:
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
+def _query_sql_defaults(*, infer_schema_length: int | None) -> dict[str, typing.Any]:
+    import lazynwb._cli._tables as cli_tables
+
+    return cli_tables._sql_defaults_json_object(infer_schema_length=infer_schema_length)
 
 
 def _configure_logging(*, debug: bool, stderr: typing.TextIO) -> None:

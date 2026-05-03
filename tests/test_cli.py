@@ -11,6 +11,7 @@ import pytest
 
 import lazynwb._cli._main as cli_main
 import lazynwb._cli._preview as cli_preview
+import lazynwb._cli._query as cli_query
 import lazynwb._cli._schema as cli_schema
 import lazynwb._cli._sources as cli_sources
 import lazynwb._cli._tables as cli_tables
@@ -816,6 +817,373 @@ def test_preview_command_debug_logs_read_planning_and_materialization(
     assert "completed NWB table preview materialization" in stderr
     assert "row_count=2" in stderr
     assert "serializing NWB table preview" in stderr
+    assert "elapsed_ms=" in stderr
+    assert "DEBUG:" not in stdout
+
+
+def test_query_command_executes_local_fixture_sql_json(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    query = (
+        'SELECT id, condition FROM "intervals/trials" '
+        "WHERE id >= 1 AND id <= 3 ORDER BY id"
+    )
+
+    exit_code, stdout, stderr = _run_cli(["query", query, str(local_hdf5_path)])
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["command"] == "query"
+    assert payload["query"] == query
+    assert payload["limit"] == 100
+    assert payload["allow_large"] is False
+    assert payload["row_count"] == 3
+    assert payload["observed_count"] == 3
+    assert payload["truncated"] is False
+    assert payload["columns"] == ["id", "condition"]
+    assert payload["rows"] == [
+        {"condition": "B", "id": 1},
+        {"condition": "C", "id": 2},
+        {"condition": "D", "id": 3},
+    ]
+    assert payload["source"] == {
+        "dandi": None,
+        "kind": "paths",
+        "local": None,
+        "paths": [
+            {
+                "input": str(local_hdf5_path),
+                "resolved": local_hdf5_path.resolve().as_posix(),
+            }
+        ],
+        "precedence": "command_line_paths",
+        "resolved_count": 1,
+    }
+    assert payload["sql"] == {
+        "disable_progress": True,
+        "eager": False,
+        "exclude_timeseries": False,
+        "full_path": True,
+        "infer_schema_length": None,
+        "rename_general_metadata": True,
+    }
+
+
+def test_query_command_passes_agent_friendly_sql_defaults(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    calls: list[dict[str, object]] = []
+
+    def _get_sql_context(
+        nwb_sources: tuple[str, ...],
+        **kwargs: object,
+    ) -> _FakeQuerySQLContext:
+        calls.append({"nwb_sources": nwb_sources, **kwargs})
+        return _FakeQuerySQLContext(polars.DataFrame({"id": [1]}), calls)
+
+    monkeypatch.setattr(
+        cli_query.conversion,
+        "get_sql_context",
+        _get_sql_context,
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["query", "--infer-schema-length", "1", "SELECT id FROM units", str(path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert json.loads(stdout)["rows"] == [{"id": 1}]
+    assert calls == [
+        {
+            "disable_progress": True,
+            "eager": False,
+            "exclude_timeseries": False,
+            "full_path": True,
+            "infer_schema_length": 1,
+            "nwb_sources": (path.resolve().as_posix(),),
+            "rename_general_metadata": True,
+        },
+        {"execute": "SELECT id FROM units", "eager": False},
+        {"head": 101},
+        {"collect": True},
+    ]
+
+
+def test_query_command_default_cap_failure_returns_machine_readable_error(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    frame = polars.DataFrame({"id": list(range(101))})
+    monkeypatch.setattr(
+        cli_query.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeQuerySQLContext(frame),
+    )
+
+    exit_code, stdout, stderr = _run_cli(["query", "SELECT id FROM units", str(path)])
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "query_row_cap_exceeded",
+            "details": {
+                "allow_large": False,
+                "cap": 100,
+                "limit": 100,
+                "observed_count": 101,
+                "query": "SELECT id FROM units",
+                "resolved_count": 1,
+                "source": {
+                    "dandi": None,
+                    "kind": "paths",
+                    "local": None,
+                    "paths": [
+                        {
+                            "input": str(path),
+                            "resolved": path.resolve().as_posix(),
+                        }
+                    ],
+                    "precedence": "command_line_paths",
+                    "resolved_count": 1,
+                },
+                "sql": {
+                    "disable_progress": True,
+                    "eager": False,
+                    "exclude_timeseries": False,
+                    "full_path": True,
+                    "infer_schema_length": None,
+                    "rename_general_metadata": True,
+                },
+            },
+            "message": (
+                "SQL query returned more rows than the configured row cap; "
+                "use --allow-large with an explicit --limit to return more rows."
+            ),
+        }
+    }
+
+
+def test_query_command_allow_large_returns_rows_above_default_cap(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    frame = polars.DataFrame({"id": list(range(101))})
+    monkeypatch.setattr(
+        cli_query.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeQuerySQLContext(frame),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        [
+            "query",
+            "--allow-large",
+            "--limit",
+            "101",
+            "SELECT id FROM units",
+            str(path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["allow_large"] is True
+    assert payload["limit"] == 101
+    assert payload["row_count"] == 101
+    assert payload["observed_count"] == 101
+    assert payload["rows"][0] == {"id": 0}
+    assert payload["rows"][-1] == {"id": 100}
+
+
+def test_query_command_rejects_large_limit_without_bypass() -> None:
+    exit_code, stdout, stderr = _run_cli(
+        ["query", "--limit", "101", "SELECT id FROM units"]
+    )
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "query_limit_exceeded",
+            "details": {
+                "allow_large": False,
+                "default_limit": 100,
+                "requested_limit": 101,
+            },
+            "message": (
+                "Query row limit exceeds the default cap; use --allow-large "
+                "to request more rows."
+            ),
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("limit", "requested_limit"),
+    [
+        ("0", 0),
+        ("not-an-int", "not-an-int"),
+    ],
+)
+def test_query_command_returns_invalid_limit_error(
+    limit: str,
+    requested_limit: int | str,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(
+        ["query", "--limit", limit, "SELECT id FROM units"]
+    )
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "query_limit_invalid",
+            "details": {
+                "allow_large": False,
+                "default_limit": 100,
+                "requested_limit": requested_limit,
+            },
+            "message": "Query row limit must be a positive integer.",
+        }
+    }
+
+
+def test_query_command_supports_jsonl_output(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    query = 'SELECT id, condition FROM "intervals/trials" ORDER BY id LIMIT 2'
+
+    exit_code, stdout, stderr = _run_cli(
+        ["query", "--format", "jsonl", query, str(local_hdf5_path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert [json.loads(line) for line in stdout.splitlines()] == [
+        {"condition": "A", "id": 0},
+        {"condition": "B", "id": 1},
+    ]
+
+
+def test_query_command_supports_table_output(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    query = 'SELECT id, condition FROM "intervals/trials" ORDER BY id LIMIT 2'
+
+    exit_code, stdout, stderr = _run_cli(
+        ["query", "--format", "table", query, str(local_hdf5_path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert "id" in stdout
+    assert "condition" in stdout
+    assert "A" in stdout
+    assert "B" in stdout
+
+
+def test_query_command_returns_query_failed_error(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    monkeypatch.setattr(
+        cli_query.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeQuerySQLContext(
+            polars.DataFrame({"id": [1]}),
+            error=ValueError("bad SQL"),
+        ),
+    )
+
+    exit_code, stdout, stderr = _run_cli(["query", "SELECT nope", str(path)])
+
+    assert exit_code == 3
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["error"]["code"] == "query_failed"
+    assert payload["error"]["message"] == "SQL query failed."
+    assert payload["error"]["details"]["error_type"] == "ValueError"
+    assert payload["error"]["details"]["error_message"] == "bad SQL"
+    assert payload["error"]["details"]["query"] == "SELECT nope"
+    assert payload["error"]["details"]["resolved_count"] == 1
+
+
+def test_query_command_returns_missing_source_error(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    exit_code, stdout, stderr = _run_cli(["query", "SELECT 1"])
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "source_not_configured",
+            "details": {
+                "source": {
+                    "dandi": None,
+                    "kind": "none",
+                    "local": None,
+                    "paths": [],
+                    "precedence": "none",
+                    "resolved_count": 0,
+                }
+            },
+            "message": "No lazynwb source is configured.",
+        }
+    }
+
+
+def test_query_command_debug_logs_context_execution_and_materialization(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    monkeypatch.setattr(
+        cli_query.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeQuerySQLContext(
+            polars.DataFrame({"unit_id": [1, 2]})
+        ),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["--debug", "query", "--limit", "2", "SELECT unit_id FROM units", str(path)]
+    )
+
+    assert exit_code == 0
+    assert json.loads(stdout)["rows"] == [{"unit_id": 1}, {"unit_id": 2}]
+    assert "resolving active source" in stderr
+    assert "resolved query source paths" in stderr
+    assert "starting SQL context creation for query" in stderr
+    assert "full_path=True" in stderr
+    assert "exclude_timeseries=False" in stderr
+    assert "rename_general_metadata=True" in stderr
+    assert "disable_progress=True" in stderr
+    assert "eager=False" in stderr
+    assert "completed SQL context creation for query" in stderr
+    assert "starting SQL query planning" in stderr
+    assert "completed SQL query planning" in stderr
+    assert "starting SQL query materialization" in stderr
+    assert "completed SQL query materialization" in stderr
+    assert "row_count=2" in stderr
+    assert "serializing SQL query result" in stderr
     assert "elapsed_ms=" in stderr
     assert "DEBUG:" not in stdout
 
@@ -1797,6 +2165,29 @@ class _FakeSQLContext:
 
     def tables(self) -> list[str]:
         return list(self._table_names)
+
+
+class _FakeQuerySQLContext:
+    def __init__(
+        self,
+        frame: polars.DataFrame,
+        calls: list[dict[str, object]] | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self._frame = frame
+        self._calls = calls
+        self._error = error
+
+    def execute(self, query: str, *, eager: bool | None = None) -> _FakeLazyFrame:
+        if self._calls is not None:
+            self._calls.append({"execute": query, "eager": eager})
+        if self._error is not None:
+            raise self._error
+        return _FakeLazyFrame(self._frame, self._calls)
+
+    def tables(self) -> list[str]:
+        return ["units"]
 
 
 class _FakeLazyFrame:
