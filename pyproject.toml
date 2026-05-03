@@ -171,6 +171,8 @@ addopts = [
     "--cov-config=pyproject.toml",
     "--doctest-glob=*README.md",
     "-x",
+    "-m",
+    "not integration",
     # "-n=auto", for use with pytest-xdist
 ]
 doctest_optionflags = [
@@ -180,6 +182,7 @@ doctest_optionflags = [
 ]
 testpaths = ["src", "tests"]
 markers = [
+    "integration: tests that make real network calls or require external services",
     "remote_schema_budget: opt-in remote HDF5 schema request-budget tests",
 ]
 
