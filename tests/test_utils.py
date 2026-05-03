@@ -1,5 +1,7 @@
 import logging
+import pathlib
 
+import h5py
 import pytest
 
 import lazynwb
@@ -74,6 +76,38 @@ def test_get_nwb_file_structure_filtering(local_hdf5_path):
         assert path in structure_all or any(
             p.startswith(path) for p in structure_all
         ), f"Expected paths starting with {path} not found in filtered structure"
+
+
+def test_get_internal_paths_warns_for_remote_hdf5_accessor_traversal(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hdf5_path = tmp_path / "remote-shaped.nwb"
+    with h5py.File(hdf5_path, "w") as h5_file:
+        h5_file.create_group("units").attrs["neurodata_type"] = "Units"
+
+    h5_file = h5py.File(hdf5_path, "r")
+
+    class _FakePath:
+        protocol = "s3"
+
+        def as_posix(self) -> str:
+            return "s3://bucket/remote-shaped.nwb"
+
+    class _FakeAccessor:
+        _accessor = h5_file
+        _hdmf_backend = lazynwb.file_io.FileAccessor.HDMFBackend.HDF5
+        _path = _FakePath()
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", lambda _: _FakeAccessor())
+
+    try:
+        with pytest.warns(RuntimeWarning, match="remote HDF5"):
+            structure = lazynwb.get_internal_paths("s3://bucket/remote-shaped.nwb")
+    finally:
+        h5_file.close()
+
+    assert "/units" in structure
 
 
 def test_normalize_internal_file_path():

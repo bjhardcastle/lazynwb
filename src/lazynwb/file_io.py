@@ -7,6 +7,7 @@ import logging
 import os
 import pathlib
 import threading
+import warnings
 from collections.abc import Iterable
 from typing import Any
 
@@ -403,6 +404,12 @@ def get_internal_paths(
     """
     Traverse the internal structure of an NWB file and return a mapping of paths to data accessors.
 
+    This API currently traverses accessor-backed HDF5/Zarr objects and returns live
+    accessors. For remote HDF5 sources, that traversal may be slow because it can
+    require many metadata/object lookups. A faster catalog-backed path-summary
+    implementation is planned, but this function intentionally keeps its current
+    return type and behavior for compatibility.
+
     Parameters
     ----------
     nwb_path : PathLike
@@ -427,6 +434,9 @@ def get_internal_paths(
         dataset/array objects that can be inspected for shape, dtype, etc.
     """
     file_accessor = _get_accessor(nwb_path)
+    _warn_if_remote_hdf5_internal_path_traversal(file_accessor)
+    # TODO: replace remote-HDF5 accessor traversal with a catalog-backed path
+    # summary once that internal API exists.
     paths_to_accessors = _traverse_internal_paths(
         file_accessor._accessor,
         include_table_columns=include_table_columns,
@@ -441,6 +451,23 @@ def get_internal_paths(
             if any(p.startswith(path + "/") for p in paths):
                 del paths_to_accessors[path]
     return paths_to_accessors
+
+
+def _warn_if_remote_hdf5_internal_path_traversal(
+    file_accessor: FileAccessor,
+) -> None:
+    protocol = getattr(file_accessor._path, "protocol", None)
+    if (
+        file_accessor._hdmf_backend == FileAccessor.HDMFBackend.HDF5
+        and protocol not in (None, "", "file")
+    ):
+        warnings.warn(
+            "get_internal_paths currently traverses remote HDF5 through "
+            "accessor-backed objects and may be slow; a catalog-backed path "
+            "summary is planned.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 def _traverse_internal_paths(
