@@ -1011,7 +1011,7 @@ requires-dist = [
     { name = "h5py", specifier = ">=3.10.0" },
     { name = "hdmf-zarr", marker = "extra == 'pynwb'", specifier = ">=0.12.0" },
     { name = "numcodecs", specifier = "<0.16" },
-    { name = "obstore", specifier = ">=0.8.2" },
+    { name = "obstore", specifier = ">=0.9.1" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "polars", extras = ["pandas"], specifier = ">1.32.0" },
     { name = "pydantic", specifier = ">=2.11.6" },
