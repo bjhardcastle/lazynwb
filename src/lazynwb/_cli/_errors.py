@@ -12,8 +12,17 @@ class _ExitCode(enum.IntEnum):
 
 
 class _ErrorCode(str, enum.Enum):
+    CONFIG_ALREADY_EXISTS = "config_already_exists"
+    CONFIG_INVALID = "config_invalid"
+    CONFIG_NOT_FOUND = "config_not_found"
+    CONFIG_PARSE_ERROR = "config_parse_error"
     INTERNAL_ERROR = "internal_error"
+    SOURCE_CONFIG_CONFLICT = "source_config_conflict"
+    SOURCE_CONFIG_INCOMPLETE = "source_config_incomplete"
+    SOURCE_NOT_CONFIGURED = "source_not_configured"
+    SOURCE_PATHS_UNAVAILABLE = "source_paths_unavailable"
     SOURCE_PATH_NOT_FOUND = "source_path_not_found"
+    SOURCE_ROOT_NOT_FOUND = "source_root_not_found"
     USAGE_ERROR = "usage_error"
 
 

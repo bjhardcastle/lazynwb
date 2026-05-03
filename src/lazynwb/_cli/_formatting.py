@@ -4,6 +4,9 @@ import collections.abc
 import json
 import typing
 
+import lazynwb._cli._config as cli_config
+import lazynwb._cli._sources as cli_sources
+
 
 def _write_json(
     stream: typing.TextIO,
@@ -19,6 +22,28 @@ def _source_paths_json_object(
     return {
         "command": "paths",
         "paths": list(paths),
+    }
+
+
+def _config_init_json_object(path: str) -> dict[str, typing.Any]:
+    return {
+        "command": "config init",
+        "config": {
+            "path": path,
+            "version": cli_config._CONFIG_VERSION,
+        },
+    }
+
+
+def _config_show_json_object(
+    loaded_config: cli_config._LoadedConfig,
+    resolved_source: cli_sources._ResolvedSource,
+) -> dict[str, typing.Any]:
+    return {
+        "command": "config show",
+        "commands": cli_config._commands_json_object(loaded_config.project.commands),
+        "config": cli_config._config_json_object(loaded_config),
+        "source": cli_sources._source_json_object(resolved_source),
     }
 
 
