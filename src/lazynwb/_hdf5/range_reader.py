@@ -23,11 +23,9 @@ logger = logging.getLogger(__name__)
 
 _HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
 _S3_REGION_CACHE: dict[str, str] = {}
+_ObstoreStoreCacheKey = tuple[str, tuple[tuple[str, str], ...], str, str]
 _OBSTORE_STORE_CACHE_LOCK = threading.RLock()
-_OBSTORE_STORE_CACHE: dict[
-    tuple[str, tuple[tuple[str, str], ...], str, str],
-    obstore.store.ObjectStore,
-] = {}
+_OBSTORE_STORE_CACHE: dict[_ObstoreStoreCacheKey, obstore.store.ObjectStore] = {}
 
 
 class _RangeReadError(OSError):
@@ -415,19 +413,32 @@ def _cached_store_from_url(
     retry_config: object | None = None,
     **storage_options: object,
 ) -> obstore.store.ObjectStore:
-    cache_key = (
+    cache_key = _obstore_store_cache_key(
         store_url,
-        tuple(
-            sorted((str(key), repr(value)) for key, value in storage_options.items())
-        ),
-        repr(client_options),
-        repr(retry_config),
+        client_options=client_options,
+        retry_config=retry_config,
+        storage_options=storage_options,
     )
     with _OBSTORE_STORE_CACHE_LOCK:
         cached = _OBSTORE_STORE_CACHE.get(cache_key)
         if cached is not None:
-            logger.debug("reusing cached obstore store for %s", store_url)
+            logger.debug(
+                "obstore store cache hit for %s (storage_options=%s, "
+                "client_options=%s, retry_config=%s)",
+                store_url,
+                sorted(str(key) for key in storage_options),
+                client_options is not None,
+                retry_config is not None,
+            )
             return cached
+        logger.debug(
+            "obstore store cache miss for %s (storage_options=%s, "
+            "client_options=%s, retry_config=%s)",
+            store_url,
+            sorted(str(key) for key in storage_options),
+            client_options is not None,
+            retry_config is not None,
+        )
         store = obstore.store.from_url(
             store_url,
             client_options=client_options,
@@ -437,6 +448,32 @@ def _cached_store_from_url(
         _OBSTORE_STORE_CACHE[cache_key] = store
         logger.debug("created cached obstore store for %s", store_url)
         return store
+
+
+def _obstore_store_cache_key(
+    store_url: str,
+    *,
+    client_options: object | None,
+    retry_config: object | None,
+    storage_options: Mapping[str, object],
+) -> _ObstoreStoreCacheKey:
+    return (
+        store_url,
+        tuple(
+            sorted((str(key), repr(value)) for key, value in storage_options.items())
+        ),
+        repr(client_options),
+        repr(retry_config),
+    )
+
+
+def _clear_obstore_store_cache() -> None:
+    with _OBSTORE_STORE_CACHE_LOCK:
+        logger.debug(
+            "clearing obstore store cache with %d entries",
+            len(_OBSTORE_STORE_CACHE),
+        )
+        _OBSTORE_STORE_CACHE.clear()
 
 
 def _add_discovered_s3_region(

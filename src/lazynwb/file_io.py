@@ -55,8 +55,11 @@ def clear_cache() -> None:
 
     Users can call this to reset cached h5py and zarr accessors.
     """
+    import lazynwb._hdf5.range_reader as hdf5_range_reader
+
     with _cache_lock:
         FileAccessor._clear_cache()
+        hdf5_range_reader._clear_obstore_store_cache()
 
 
 def _get_accessor(path: lazynwb.types_.PathLike) -> FileAccessor:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import logging
 import pathlib
 
 import pytest
 
+import lazynwb
 import lazynwb._hdf5.range_reader as hdf5_range_reader
 
 
@@ -97,10 +99,12 @@ def test_s3_region_discovery_preserves_explicit_region(
 
 def test_obstore_store_cache_reuses_store_for_same_bucket_options(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     stores = [object()]
     calls: list[tuple[str, dict[str, object]]] = []
-    hdf5_range_reader._OBSTORE_STORE_CACHE.clear()
+    hdf5_range_reader._clear_obstore_store_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.range_reader")
 
     def _fake_from_url(store_url: str, **kwargs: object) -> object:
         calls.append((store_url, kwargs))
@@ -125,8 +129,95 @@ def test_obstore_store_cache_reuses_store_for_same_bucket_options(
         assert first_path == "first.nwb"
         assert second_path == "second.nwb"
         assert [call[0] for call in calls] == ["s3://aind-scratch-data"]
+        assert "obstore store cache miss for s3://aind-scratch-data" in caplog.text
+        assert "obstore store cache hit for s3://aind-scratch-data" in caplog.text
     finally:
-        hdf5_range_reader._OBSTORE_STORE_CACHE.clear()
+        hdf5_range_reader._clear_obstore_store_cache()
+
+
+def test_obstore_store_cache_distinguishes_options_client_and_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = [object(), object(), object(), object()]
+    calls: list[tuple[str, dict[str, object]]] = []
+    hdf5_range_reader._clear_obstore_store_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append((store_url, kwargs))
+        return stores[len(calls) - 1]
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+
+    try:
+        first = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            region="us-west-2",
+            skip_signature=True,
+        )
+        same_options = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            region="us-west-2",
+            skip_signature=True,
+        )
+        different_region = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            region="us-east-1",
+            skip_signature=True,
+        )
+        different_client = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            client_options={"timeout": "short"},
+            region="us-west-2",
+            skip_signature=True,
+        )
+        different_retry = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            retry_config={"max_retries": 1},
+            region="us-west-2",
+            skip_signature=True,
+        )
+
+        assert same_options is first
+        assert different_region is not first
+        assert different_client is not first
+        assert different_retry is not first
+        assert len(calls) == 4
+    finally:
+        hdf5_range_reader._clear_obstore_store_cache()
+
+
+def test_clear_cache_resets_obstore_store_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = [object(), object()]
+    calls: list[str] = []
+    hdf5_range_reader._clear_obstore_store_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append(store_url)
+        return stores[len(calls) - 1]
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    config = hdf5_range_reader._RangeReaderConfig(
+        storage_options={"region": "us-west-2", "skip_signature": True},
+    )
+
+    try:
+        first_store, _ = hdf5_range_reader._store_and_path_from_url(
+            "s3://aind-scratch-data/first.nwb",
+            config,
+        )
+        lazynwb.clear_cache()
+        second_store, _ = hdf5_range_reader._store_and_path_from_url(
+            "s3://aind-scratch-data/second.nwb",
+            config,
+        )
+
+        assert first_store is stores[0]
+        assert second_store is stores[1]
+        assert calls == ["s3://aind-scratch-data", "s3://aind-scratch-data"]
+    finally:
+        hdf5_range_reader._clear_obstore_store_cache()
 
 
 def test_probe_hdf5_signature_at_zero() -> None:
