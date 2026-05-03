@@ -24,8 +24,20 @@ logger = logging.getLogger(__name__)
 _HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
 _S3_REGION_CACHE: dict[str, str] = {}
 _ObstoreStoreCacheKey = tuple[str, tuple[tuple[str, str], ...], str, str]
+_SourceIdentityCacheKey = tuple[
+    str,
+    str | None,
+    tuple[tuple[str, str], ...],
+    str,
+    str,
+]
 _OBSTORE_STORE_CACHE_LOCK = threading.RLock()
 _OBSTORE_STORE_CACHE: dict[_ObstoreStoreCacheKey, obstore.store.ObjectStore] = {}
+_SOURCE_IDENTITY_CACHE_LOCK = threading.RLock()
+_SOURCE_IDENTITY_CACHE: dict[
+    _SourceIdentityCacheKey,
+    catalog_models._SourceIdentity,
+] = {}
 
 
 class _RangeReadError(OSError):
@@ -54,6 +66,15 @@ class _RangeReaderConfig:
     storage_options: Mapping[str, object] | None = None
     client_options: object | None = None
     retry_config: object | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ObstoreUrlContext:
+    """Parsed obstore URL context after storage option normalization."""
+
+    store_url: str
+    object_path: str
+    storage_options: dict[str, object]
 
 
 @typing.runtime_checkable
@@ -96,7 +117,16 @@ class _ObstoreRangeReader:
     ) -> None:
         self._url = url
         self._config = config or _RangeReaderConfig()
-        self._store, self._object_path = _store_and_path_from_url(url, self._config)
+        context = _obstore_url_context(url, self._config)
+        self._store_url = context.store_url
+        self._object_path = context.object_path
+        self._storage_options = context.storage_options
+        self._store = _cached_store_from_url(
+            self._store_url,
+            client_options=self._config.client_options,
+            retry_config=self._config.retry_config,
+            **self._storage_options,
+        )
         self._semaphore = asyncio.Semaphore(max(1, self._config.max_concurrency))
         self.request_count = 0
         self.bytes_fetched = 0
@@ -107,14 +137,50 @@ class _ObstoreRangeReader:
         )
 
     async def get_source_identity(self) -> catalog_models._SourceIdentity:
+        cached_identity = _get_cached_source_identity(
+            self._source_identity_cache_key(resolved_url=None)
+        )
+        if cached_identity is not None:
+            logger.debug(
+                "source identity cache hit for %s (resolved_url=%r, validator=%s)",
+                self._url,
+                cached_identity.resolved_url,
+                cached_identity.validator_kind,
+            )
+            return cached_identity
+        logger.debug("source identity cache miss for %s", self._url)
         metadata = await obstore.head_async(self._store, self._object_path)
         source_identity = _source_identity_from_metadata(self._url, metadata)
+        _put_cached_source_identity(
+            self._source_identity_cache_key(resolved_url=None),
+            source_identity,
+        )
+        if source_identity.resolved_url is not None:
+            _put_cached_source_identity(
+                self._source_identity_cache_key(
+                    resolved_url=source_identity.resolved_url
+                ),
+                source_identity,
+            )
         logger.debug(
             "resolved source identity for %s: validator=%s",
             self._url,
             source_identity.validator_kind,
         )
         return source_identity
+
+    def _source_identity_cache_key(
+        self,
+        *,
+        resolved_url: str | None,
+    ) -> _SourceIdentityCacheKey:
+        return _source_identity_cache_key(
+            self._url,
+            resolved_url=resolved_url,
+            client_options=self._config.client_options,
+            retry_config=self._config.retry_config,
+            storage_options=self._storage_options,
+        )
 
     async def read_range(
         self,
@@ -377,6 +443,20 @@ def _store_and_path_from_url(
     url: str,
     config: _RangeReaderConfig,
 ) -> tuple[obstore.store.ObjectStore, str]:
+    context = _obstore_url_context(url, config)
+    store = _cached_store_from_url(
+        context.store_url,
+        client_options=config.client_options,
+        retry_config=config.retry_config,
+        **context.storage_options,
+    )
+    return store, context.object_path
+
+
+def _obstore_url_context(
+    url: str,
+    config: _RangeReaderConfig,
+) -> _ObstoreUrlContext:
     parsed = urllib.parse.urlsplit(url)
     storage_options = dict(config.storage_options or {})
     if parsed.scheme == "file":
@@ -397,13 +477,11 @@ def _store_and_path_from_url(
         raise ValueError(f"unsupported obstore URL scheme for range reader: {url!r}")
     if not object_path:
         raise ValueError(f"range reader URL must identify one object: {url!r}")
-    store = _cached_store_from_url(
-        store_url,
-        client_options=config.client_options,
-        retry_config=config.retry_config,
-        **storage_options,
+    return _ObstoreUrlContext(
+        store_url=store_url,
+        object_path=object_path,
+        storage_options=storage_options,
     )
-    return store, object_path
 
 
 def _cached_store_from_url(
@@ -474,6 +552,70 @@ def _clear_obstore_store_cache() -> None:
             len(_OBSTORE_STORE_CACHE),
         )
         _OBSTORE_STORE_CACHE.clear()
+
+
+def _source_identity_cache_key(
+    source_url: str,
+    *,
+    resolved_url: str | None,
+    client_options: object | None,
+    retry_config: object | None,
+    storage_options: Mapping[str, object],
+) -> _SourceIdentityCacheKey:
+    return (
+        source_url,
+        resolved_url,
+        tuple(
+            sorted((str(key), repr(value)) for key, value in storage_options.items())
+        ),
+        repr(client_options),
+        repr(retry_config),
+    )
+
+
+def _get_cached_source_identity(
+    cache_key: _SourceIdentityCacheKey,
+) -> catalog_models._SourceIdentity | None:
+    with _SOURCE_IDENTITY_CACHE_LOCK:
+        return _SOURCE_IDENTITY_CACHE.get(cache_key)
+
+
+def _put_cached_source_identity(
+    cache_key: _SourceIdentityCacheKey,
+    source_identity: catalog_models._SourceIdentity,
+) -> None:
+    with _SOURCE_IDENTITY_CACHE_LOCK:
+        _SOURCE_IDENTITY_CACHE[cache_key] = source_identity
+        logger.debug(
+            "stored source identity cache entry for %s (resolved_url=%r, "
+            "validator=%s)",
+            source_identity.source_url,
+            cache_key[1],
+            source_identity.validator_kind,
+        )
+
+
+def _clear_source_identity_cache() -> None:
+    with _SOURCE_IDENTITY_CACHE_LOCK:
+        logger.debug(
+            "clearing source identity cache with %d entries",
+            len(_SOURCE_IDENTITY_CACHE),
+        )
+        _SOURCE_IDENTITY_CACHE.clear()
+
+
+def _clear_cache() -> None:
+    """Reset process-lifetime range-reader caches.
+
+    Source identities are reused for the life of the process to avoid repeated
+    metadata HEAD requests. Callers that mutate or replace source objects in the
+    same process must call ``lazynwb.clear_cache()`` before reading them again.
+    Persistent SQLite caches still receive the original source identity and keep
+    the existing validator priority: version ID, strong ETag, last-modified plus
+    content length, then in-process token.
+    """
+    _clear_obstore_store_cache()
+    _clear_source_identity_cache()
 
 
 def _add_discovered_s3_region(

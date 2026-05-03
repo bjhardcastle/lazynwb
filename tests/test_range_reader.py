@@ -220,6 +220,160 @@ def test_clear_cache_resets_obstore_store_cache(
         hdf5_range_reader._clear_obstore_store_cache()
 
 
+def test_obstore_source_identity_cache_reuses_head_for_same_source(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = object()
+    head_calls: list[tuple[object, str]] = []
+    hdf5_range_reader._clear_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.range_reader")
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        return store
+
+    async def _fake_head_async(store_arg: object, path: str) -> dict[str, object]:
+        head_calls.append((store_arg, path))
+        return {
+            "size": 123,
+            "version": "version-1",
+            "location": "s3://aind-scratch-data/file.nwb",
+        }
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    config = hdf5_range_reader._RangeReaderConfig(
+        storage_options={"region": "us-west-2", "skip_signature": True},
+    )
+
+    try:
+        first_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            config,
+        )
+        first_identity = asyncio.run(first_reader.get_source_identity())
+        second_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            config,
+        )
+        second_identity = asyncio.run(second_reader.get_source_identity())
+
+        assert first_identity == second_identity
+        assert first_identity.validator_kind == "version_id"
+        assert head_calls == [(store, "file.nwb")]
+        assert "source identity cache miss for s3://aind-scratch-data/file.nwb" in caplog.text
+        assert "source identity cache hit for s3://aind-scratch-data/file.nwb" in caplog.text
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_clear_cache_resets_obstore_source_identity_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = [object(), object()]
+    head_calls: list[tuple[object, str]] = []
+    hdf5_range_reader._clear_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        return stores[min(len(head_calls), 1)]
+
+    async def _fake_head_async(store_arg: object, path: str) -> dict[str, object]:
+        head_calls.append((store_arg, path))
+        return {"size": 123, "version": f"version-{len(head_calls)}"}
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    config = hdf5_range_reader._RangeReaderConfig(
+        storage_options={"region": "us-west-2", "skip_signature": True},
+    )
+
+    try:
+        first_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            config,
+        )
+        first_identity = asyncio.run(first_reader.get_source_identity())
+        lazynwb.clear_cache()
+        second_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            config,
+        )
+        second_identity = asyncio.run(second_reader.get_source_identity())
+
+        assert first_identity.version_id == "version-1"
+        assert second_identity.version_id == "version-2"
+        assert [call[1] for call in head_calls] == ["file.nwb", "file.nwb"]
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_obstore_source_identity_cache_distinguishes_auth_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    head_calls: list[tuple[dict[str, object], str]] = []
+    hdf5_range_reader._clear_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> dict[str, object]:
+        return {"store_url": store_url, "options": kwargs}
+
+    async def _fake_head_async(
+        store_arg: dict[str, object],
+        path: str,
+    ) -> dict[str, object]:
+        options = store_arg["options"]
+        assert isinstance(options, dict)
+        head_calls.append((options, path))
+        auth_mode = "unsigned" if options.get("skip_signature") else "signed"
+        return {"size": 123, "version": f"{auth_mode}-version"}
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+
+    try:
+        unsigned_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            hdf5_range_reader._RangeReaderConfig(
+                storage_options={"region": "us-west-2", "skip_signature": True},
+            ),
+        )
+        signed_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            hdf5_range_reader._RangeReaderConfig(
+                storage_options={"region": "us-west-2", "skip_signature": False},
+            ),
+        )
+
+        unsigned_identity = asyncio.run(unsigned_reader.get_source_identity())
+        signed_identity = asyncio.run(signed_reader.get_source_identity())
+
+        assert unsigned_identity.version_id == "unsigned-version"
+        assert signed_identity.version_id == "signed-version"
+        assert len(head_calls) == 2
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_source_identity_cache_key_distinguishes_resolved_url() -> None:
+    common_kwargs = {
+        "client_options": None,
+        "retry_config": None,
+        "storage_options": {"region": "us-west-2", "skip_signature": True},
+    }
+
+    unresolved_key = hdf5_range_reader._source_identity_cache_key(
+        "s3://aind-scratch-data/file.nwb",
+        resolved_url=None,
+        **common_kwargs,
+    )
+    resolved_key = hdf5_range_reader._source_identity_cache_key(
+        "s3://aind-scratch-data/file.nwb",
+        resolved_url="https://aind-scratch-data.s3.us-west-2.amazonaws.com/file.nwb",
+        **common_kwargs,
+    )
+
+    assert unresolved_key != resolved_key
+
+
 def test_probe_hdf5_signature_at_zero() -> None:
     reader = hdf5_range_reader._BufferRangeReader(
         hdf5_range_reader._HDF5_SIGNATURE + b"\x00" * 32
