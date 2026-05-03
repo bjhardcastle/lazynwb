@@ -157,6 +157,38 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     schema_parser.set_defaults(_handler=_handle_schema)
 
+    preview_parser = subparsers.add_parser(
+        "preview",
+        help="preview bounded rows from one NWB table",
+    )
+    _add_config_argument(preview_parser)
+    preview_parser.add_argument(
+        "--format",
+        choices=("json", "table"),
+        default="json",
+        dest="output_format",
+        help="output format; defaults to json",
+    )
+    preview_parser.add_argument(
+        "--limit",
+        default=None,
+        type=_preview_limit_argument,
+        help="maximum preview rows; defaults to 5 and must be <= 50",
+    )
+    _add_source_override_arguments(preview_parser, include_paths=False)
+    preview_parser.add_argument(
+        "table",
+        metavar="TABLE",
+        help="NWB table path or SQL table alias to preview",
+    )
+    preview_parser.add_argument(
+        "paths",
+        metavar="PATH",
+        nargs="*",
+        help="explicit NWB file or store path",
+    )
+    preview_parser.set_defaults(_handler=_handle_preview)
+
     config_parser = subparsers.add_parser(
         "config",
         help="initialize or show project-local CLI configuration",
@@ -199,7 +231,9 @@ def _handle_paths(
         discover_local=True,
     )
     paths = cli_sources._paths_for_source(resolved_source)
-    output_format = args.output_format or loaded_config.project.commands.paths.output_format
+    output_format = (
+        args.output_format or loaded_config.project.commands.paths.output_format
+    )
     if output_format == "table":
         cli_formatting._write_source_paths_table(stdout, paths)
     else:
@@ -343,6 +377,107 @@ def _handle_schema(
     return cli_errors._ExitCode.OK
 
 
+def _handle_preview(
+    args: argparse.Namespace, stdout: typing.TextIO
+) -> cli_errors._ExitCode:
+    import lazynwb._cli._preview as cli_preview
+    import lazynwb._cli._schema as cli_schema
+    import lazynwb.exceptions as lazynwb_exceptions
+
+    loaded_config = cli_config._load_project_config(args.config)
+    try:
+        limit = cli_preview._validate_preview_limit(args.limit)
+    except ValueError as exc:
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.PREVIEW_LIMIT_INVALID,
+            details={
+                "default_limit": cli_preview._DEFAULT_PREVIEW_LIMIT,
+                "max_limit": cli_preview._MAX_PREVIEW_LIMIT,
+                "requested_limit": args.limit,
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message="Preview row limit must be a positive integer.",
+        ) from exc
+    except OverflowError as exc:
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.PREVIEW_LIMIT_EXCEEDED,
+            details={
+                "max_limit": cli_preview._MAX_PREVIEW_LIMIT,
+                "requested_limit": args.limit,
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message=(
+                "Preview row limit exceeds the supported maximum; "
+                f"use --limit <= {cli_preview._MAX_PREVIEW_LIMIT}."
+            ),
+        ) from exc
+
+    started_at = time.perf_counter()
+    resolved_source = cli_sources._resolve_source(
+        loaded_config,
+        _source_overrides_from_args(args, paths=tuple(args.paths)),
+        validate_paths=True,
+        discover_local=True,
+    )
+    paths = cli_sources._paths_for_source(resolved_source)
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.debug(
+        "resolved preview source paths: source_kind=%s precedence=%s "
+        "resolved_count=%d elapsed_ms=%.3f",
+        resolved_source.kind,
+        resolved_source.precedence,
+        len(paths),
+        elapsed_ms,
+    )
+
+    try:
+        preview = cli_preview._preview_table(
+            tuple(path["resolved"] for path in paths),
+            table=args.table,
+            limit=limit,
+        )
+    except lazynwb_exceptions.InternalPathError as exc:
+        table_path = cli_schema._resolve_table_path(args.table)
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.PREVIEW_NOT_FOUND,
+            details={
+                "limit": limit,
+                "requested_table": args.table,
+                "resolved_count": len(paths),
+                "resolved_table_path": table_path,
+                "source": cli_sources._source_json_object(
+                    resolved_source,
+                    paths=paths,
+                ),
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message="No NWB table was found for the resolved sources.",
+        ) from exc
+
+    logger.debug(
+        "serializing NWB table preview: output_format=%s requested_table=%s "
+        "table_path=%s row_count=%d column_count=%d limit=%d",
+        args.output_format,
+        preview.requested_table,
+        preview.resolved_table_path,
+        len(preview.rows),
+        len(preview.columns),
+        limit,
+    )
+    if args.output_format == "table":
+        cli_formatting._write_preview_table(stdout, preview)
+    else:
+        cli_formatting._write_json(
+            stdout,
+            cli_formatting._preview_json_object(
+                preview,
+                resolved_source,
+                paths=paths,
+            ),
+        )
+    return cli_errors._ExitCode.OK
+
+
 def _handle_config_init(
     args: argparse.Namespace, stdout: typing.TextIO
 ) -> cli_errors._ExitCode:
@@ -455,6 +590,13 @@ def _positive_int(value: str) -> int:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return parsed
+
+
+def _preview_limit_argument(value: str) -> int | str:
+    try:
+        return int(value)
+    except ValueError:
+        return value
 
 
 def _configure_logging(*, debug: bool, stderr: typing.TextIO) -> None:

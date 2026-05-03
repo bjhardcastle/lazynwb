@@ -10,6 +10,7 @@ import polars
 import pytest
 
 import lazynwb._cli._main as cli_main
+import lazynwb._cli._preview as cli_preview
 import lazynwb._cli._schema as cli_schema
 import lazynwb._cli._sources as cli_sources
 import lazynwb._cli._tables as cli_tables
@@ -540,6 +541,281 @@ def test_schema_command_debug_logs_source_resolution_and_schema_inspection(
     assert "completed NWB table schema inspection" in stderr
     assert "column_count=1" in stderr
     assert "serializing NWB table schema" in stderr
+    assert "elapsed_ms=" in stderr
+    assert "DEBUG:" not in stdout
+
+
+def test_preview_command_reads_local_fixture_rows_json(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(
+        ["preview", "intervals/trials", str(local_hdf5_path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    resolved_path = local_hdf5_path.resolve().as_posix()
+    assert json.loads(stdout) == {
+        "columns": [
+            "condition",
+            "id",
+            "start_time",
+            "stop_time",
+            "_nwb_path",
+            "_table_path",
+            "_table_index",
+        ],
+        "command": "preview",
+        "limit": 5,
+        "max_limit": 50,
+        "requested_table": "intervals/trials",
+        "resolved_count": 1,
+        "resolved_table_path": "intervals/trials",
+        "row_count": 5,
+        "rows": [
+            {
+                "_nwb_path": resolved_path,
+                "_table_index": 0,
+                "_table_path": "intervals/trials",
+                "condition": "A",
+                "id": 0,
+                "start_time": 0.05,
+                "stop_time": 1.85,
+            },
+            {
+                "_nwb_path": resolved_path,
+                "_table_index": 1,
+                "_table_path": "intervals/trials",
+                "condition": "B",
+                "id": 1,
+                "start_time": 2.05,
+                "stop_time": 3.8499999999999996,
+            },
+            {
+                "_nwb_path": resolved_path,
+                "_table_index": 2,
+                "_table_path": "intervals/trials",
+                "condition": "C",
+                "id": 2,
+                "start_time": 4.05,
+                "stop_time": 5.85,
+            },
+            {
+                "_nwb_path": resolved_path,
+                "_table_index": 3,
+                "_table_path": "intervals/trials",
+                "condition": "D",
+                "id": 3,
+                "start_time": 6.05,
+                "stop_time": 7.85,
+            },
+            {
+                "_nwb_path": resolved_path,
+                "_table_index": 4,
+                "_table_path": "intervals/trials",
+                "condition": "E",
+                "id": 4,
+                "start_time": 8.05,
+                "stop_time": 9.850000000000001,
+            },
+        ],
+        "source": {
+            "dandi": None,
+            "kind": "paths",
+            "local": None,
+            "paths": [
+                {
+                    "input": str(local_hdf5_path),
+                    "resolved": resolved_path,
+                }
+            ],
+            "precedence": "command_line_paths",
+            "resolved_count": 1,
+        },
+    }
+
+
+def test_preview_command_passes_default_limit_to_lazy_head(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    calls: list[dict[str, object]] = []
+
+    def _scan_nwb(**kwargs: object) -> _FakeLazyFrame:
+        calls.append(kwargs)
+        return _FakeLazyFrame(polars.DataFrame({"id": [0, 1, 2, 3, 4, 5]}), calls)
+
+    monkeypatch.setattr(cli_preview.lazyframe, "scan_nwb", _scan_nwb)
+
+    exit_code, stdout, stderr = _run_cli(["preview", "units", str(path)])
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert json.loads(stdout)["row_count"] == 5
+    assert calls == [
+        {
+            "disable_progress": True,
+            "raise_on_missing": False,
+            "source": (path.resolve().as_posix(),),
+            "table_path": "units",
+        },
+        {"head": 5},
+        {"collect": True},
+    ]
+
+
+def test_preview_command_accepts_explicit_limit_and_table_alias(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(
+        ["preview", "--limit", "2", "trials", str(local_hdf5_path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["limit"] == 2
+    assert payload["requested_table"] == "trials"
+    assert payload["resolved_table_path"] == "intervals/trials"
+    assert payload["row_count"] == 2
+    assert [row["condition"] for row in payload["rows"]] == ["A", "B"]
+
+
+def test_preview_command_returns_oversized_limit_error() -> None:
+    exit_code, stdout, stderr = _run_cli(["preview", "--limit", "51", "units"])
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "preview_limit_exceeded",
+            "details": {
+                "max_limit": 50,
+                "requested_limit": 51,
+            },
+            "message": "Preview row limit exceeds the supported maximum; use --limit <= 50.",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("limit", "requested_limit"),
+    [
+        ("0", 0),
+        ("not-an-int", "not-an-int"),
+    ],
+)
+def test_preview_command_returns_invalid_limit_error(
+    limit: str,
+    requested_limit: int | str,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(["preview", "--limit", limit, "units"])
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "preview_limit_invalid",
+            "details": {
+                "default_limit": 5,
+                "max_limit": 50,
+                "requested_limit": requested_limit,
+            },
+            "message": "Preview row limit must be a positive integer.",
+        }
+    }
+
+
+def test_preview_command_returns_missing_table_error(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(
+        ["preview", "not_a_table", str(local_hdf5_path)]
+    )
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "preview_not_found",
+            "details": {
+                "limit": 5,
+                "requested_table": "not_a_table",
+                "resolved_count": 1,
+                "resolved_table_path": "not_a_table",
+                "source": {
+                    "dandi": None,
+                    "kind": "paths",
+                    "local": None,
+                    "paths": [
+                        {
+                            "input": str(local_hdf5_path),
+                            "resolved": local_hdf5_path.resolve().as_posix(),
+                        }
+                    ],
+                    "precedence": "command_line_paths",
+                    "resolved_count": 1,
+                },
+            },
+            "message": "No NWB table was found for the resolved sources.",
+        }
+    }
+
+
+def test_preview_command_supports_table_output(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(
+        [
+            "preview",
+            "--format",
+            "table",
+            "--limit",
+            "2",
+            "intervals/trials",
+            str(local_hdf5_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert "condition" in stdout
+    assert "start_time" in stdout
+    assert "intervals/trials" in stdout
+    assert "A" in stdout
+    assert "B" in stdout
+
+
+def test_preview_command_debug_logs_read_planning_and_materialization(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+
+    monkeypatch.setattr(
+        cli_preview.lazyframe,
+        "scan_nwb",
+        lambda **kwargs: _FakeLazyFrame(polars.DataFrame({"unit_id": [1, 2]})),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["--debug", "preview", "--limit", "2", "units", str(path)]
+    )
+
+    assert exit_code == 0
+    assert json.loads(stdout)["rows"] == [{"unit_id": 1}, {"unit_id": 2}]
+    assert "resolving active source" in stderr
+    assert "resolved preview source paths" in stderr
+    assert "planning NWB table preview" in stderr
+    assert "limit=2" in stderr
+    assert "disable_progress=True" in stderr
+    assert "starting NWB table preview materialization" in stderr
+    assert "completed NWB table preview materialization" in stderr
+    assert "row_count=2" in stderr
+    assert "serializing NWB table preview" in stderr
     assert "elapsed_ms=" in stderr
     assert "DEBUG:" not in stdout
 
@@ -1135,7 +1411,9 @@ def test_explicit_paths_take_priority_over_dandi_flags_without_network(
     source_path = tmp_path / "source.nwb"
     source_path.touch()
 
-    def _unexpected_get_dandiset_assets(*args: object, **kwargs: object) -> list[object]:
+    def _unexpected_get_dandiset_assets(
+        *args: object, **kwargs: object
+    ) -> list[object]:
         raise AssertionError("DANDI helpers should not run for explicit paths")
 
     monkeypatch.setattr(
@@ -1173,7 +1451,9 @@ def test_config_paths_take_priority_over_flagged_dandi_without_network(
     source_path = tmp_path / "source.nwb"
     source_path.touch()
 
-    def _unexpected_get_dandiset_assets(*args: object, **kwargs: object) -> list[object]:
+    def _unexpected_get_dandiset_assets(
+        *args: object, **kwargs: object
+    ) -> list[object]:
         raise AssertionError("DANDI helpers should not run for config paths")
 
     monkeypatch.setattr(
@@ -1228,7 +1508,9 @@ def test_local_source_takes_priority_over_dandi_fallback_without_network(
     source_path = data_dir / "source.nwb"
     source_path.touch()
 
-    def _unexpected_get_dandiset_assets(*args: object, **kwargs: object) -> list[object]:
+    def _unexpected_get_dandiset_assets(
+        *args: object, **kwargs: object
+    ) -> list[object]:
         raise AssertionError("DANDI helpers should not run for local discovery")
 
     monkeypatch.setattr(
@@ -1279,7 +1561,9 @@ def test_incomplete_local_source_returns_machine_readable_validation_error(
         """,
     )
 
-    exit_code, stdout, stderr = _run_cli(["config", "show", "--config", str(config_path)])
+    exit_code, stdout, stderr = _run_cli(
+        ["config", "show", "--config", str(config_path)]
+    )
 
     assert exit_code == 3
     assert stderr == ""
@@ -1359,7 +1643,9 @@ def test_invalid_toml_config_returns_machine_readable_parse_error(
     config_path = tmp_path / "lazynwb.toml"
     config_path.write_text("version = [", encoding="utf-8")
 
-    exit_code, stdout, stderr = _run_cli(["config", "show", "--config", str(config_path)])
+    exit_code, stdout, stderr = _run_cli(
+        ["config", "show", "--config", str(config_path)]
+    )
 
     assert exit_code == 3
     assert stderr == ""
@@ -1511,6 +1797,26 @@ class _FakeSQLContext:
 
     def tables(self) -> list[str]:
         return list(self._table_names)
+
+
+class _FakeLazyFrame:
+    def __init__(
+        self,
+        frame: polars.DataFrame,
+        calls: list[dict[str, object]] | None = None,
+    ) -> None:
+        self._frame = frame
+        self._calls = calls
+
+    def head(self, limit: int) -> _FakeLazyFrame:
+        if self._calls is not None:
+            self._calls.append({"head": limit})
+        return _FakeLazyFrame(self._frame.head(limit), self._calls)
+
+    def collect(self) -> polars.DataFrame:
+        if self._calls is not None:
+            self._calls.append({"collect": True})
+        return self._frame
 
 
 def _write_config(path: pathlib.Path, content: str) -> None:

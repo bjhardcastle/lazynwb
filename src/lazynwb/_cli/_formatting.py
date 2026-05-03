@@ -5,6 +5,7 @@ import json
 import typing
 
 import lazynwb._cli._config as cli_config
+import lazynwb._cli._preview as cli_preview
 import lazynwb._cli._schema as cli_schema
 import lazynwb._cli._sources as cli_sources
 
@@ -95,6 +96,29 @@ def _schema_column_json_object(
     }
 
 
+def _preview_json_object(
+    preview: cli_preview._TablePreview,
+    resolved_source: cli_sources._ResolvedSource,
+    *,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+) -> dict[str, typing.Any]:
+    return {
+        "columns": list(preview.columns),
+        "command": "preview",
+        "limit": preview.limit,
+        "max_limit": cli_preview._MAX_PREVIEW_LIMIT,
+        "requested_table": preview.requested_table,
+        "resolved_count": len(paths),
+        "resolved_table_path": preview.resolved_table_path,
+        "row_count": len(preview.rows),
+        "rows": list(preview.rows),
+        "source": cli_sources._source_json_object(
+            resolved_source,
+            paths=paths,
+        ),
+    }
+
+
 def _config_init_json_object(path: str) -> dict[str, typing.Any]:
     return {
         "command": "config init",
@@ -178,14 +202,62 @@ def _write_schema_table(
         f"{headers[1]:<{widths[1]}} | "
         f"{headers[2]:<{widths[2]}}\n"
     )
-    stream.write(
-        f"{'-' * widths[0]}-+-"
-        f"{'-' * widths[1]}-+-"
-        f"{'-' * widths[2]}\n"
-    )
+    stream.write(f"{'-' * widths[0]}-+-" f"{'-' * widths[1]}-+-" f"{'-' * widths[2]}\n")
     for column_name, dtype, internal in rows:
         stream.write(
             f"{column_name:<{widths[0]}} | "
             f"{dtype:<{widths[1]}} | "
             f"{internal:<{widths[2]}}\n"
         )
+
+
+def _write_preview_table(
+    stream: typing.TextIO,
+    preview: cli_preview._TablePreview,
+) -> None:
+    columns = preview.columns
+    if not columns:
+        stream.write("(no columns)\n")
+        return
+
+    rows = tuple(
+        tuple(_preview_cell(row.get(column)) for column in columns)
+        for row in preview.rows
+    )
+    widths = tuple(
+        max(
+            len(column),
+            max((len(row[column_index]) for row in rows), default=0),
+        )
+        for column_index, column in enumerate(columns)
+    )
+
+    stream.write(
+        " | ".join(
+            f"{column:<{widths[column_index]}}"
+            for column_index, column in enumerate(columns)
+        )
+    )
+    stream.write("\n")
+    stream.write("-+-".join("-" * width for width in widths))
+    stream.write("\n")
+    for row in rows:
+        stream.write(
+            " | ".join(
+                f"{cell:<{widths[column_index]}}"
+                for column_index, cell in enumerate(row)
+            )
+        )
+        stream.write("\n")
+
+
+def _preview_cell(value: object, *, max_width: int = 80) -> str:
+    if isinstance(value, (dict, list)):
+        cell = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    elif value is None:
+        cell = "null"
+    else:
+        cell = str(value)
+    if len(cell) <= max_width:
+        return cell
+    return f"{cell[: max_width - 3]}..."
