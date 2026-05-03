@@ -28,6 +28,7 @@ _PARSED_ATTRIBUTE_VALUE_NAMES = frozenset(
         "neurodata_type",
         "nwb_version",
         "offset",
+        "rate",
         "reference",
         "resolution",
     }
@@ -41,7 +42,7 @@ _DEFAULT_OBJECT_HEADER_BOOTSTRAP_BYTES = int(
 )
 _DEFAULT_ALIGNMENT = int(os.getenv("LAZYNWB_HDF5_ALIGNMENT", 4 * 1024))
 _DEFAULT_MERGE_GAP = int(os.getenv("LAZYNWB_HDF5_MERGE_GAP", 64 * 1024))
-_PARSED_METADATA_PAYLOAD_VERSION = 1
+_PARSED_METADATA_PAYLOAD_VERSION = 2
 
 _ByteBuffer = bytes
 
@@ -532,6 +533,81 @@ class _HDF5MetadataScanner:
                     "warmed HDF5 parsed metadata for %s/%s",
                     self.source_url,
                     exact_table_path,
+                )
+
+    async def read_path_summary(
+        self,
+    ) -> tuple[catalog_models._PathSummaryEntry, ...]:
+        started = time.perf_counter()
+        superblock = await self.bootstrap()
+        entries: list[catalog_models._PathSummaryEntry] = []
+        await self._collect_path_summary_entries(
+            superblock.root_group,
+            entries,
+            include_self=False,
+        )
+        logger.debug(
+            "built parser-backed HDF5 path summary for %s with %d entries in %.3f s",
+            self.source_url,
+            len(entries),
+            time.perf_counter() - started,
+        )
+        return tuple(entries)
+
+    async def _collect_path_summary_entries(
+        self,
+        group: _GroupHandle,
+        entries: list[catalog_models._PathSummaryEntry],
+        *,
+        include_self: bool,
+    ) -> None:
+        if include_self:
+            group_header = await self.load_object_headers([group.object_header_address])
+            group_info = group_header.get(group.object_header_address)
+            attrs = dict(group_info.attributes if group_info is not None else {})
+            if group_info is not None and group_info.has_colnames:
+                attrs.setdefault("colnames", True)
+            entries.append(
+                catalog_models._PathSummaryEntry(
+                    path=group.path,
+                    is_group=True,
+                    is_dataset=False,
+                    shape=None,
+                    attrs_json=catalog_models._attrs_to_tuple(attrs),
+                )
+            )
+        members = await self.enumerate_group(group)
+        headers = await self.load_object_headers(
+            [
+                entry.object_header_address
+                for entry in members.values()
+                if self._is_defined_address(entry.object_header_address)
+            ]
+        )
+        for name, member in members.items():
+            if not self._is_defined_address(member.object_header_address):
+                continue
+            path = f"{group.path.rstrip('/')}/{name}"
+            info = headers.get(member.object_header_address)
+            if info is None:
+                continue
+            if info.is_group:
+                child_group = await self._entry_to_group_handle(path, member)
+                await self._collect_path_summary_entries(
+                    child_group,
+                    entries,
+                    include_self=True,
+                )
+                continue
+            if info.is_dataset:
+                entries.append(
+                    catalog_models._PathSummaryEntry(
+                        path=path,
+                        is_group=False,
+                        is_dataset=True,
+                        shape=info.dataspace or (),
+                        attrs_json=catalog_models._attrs_to_tuple(info.attributes),
+                    )
                 )
 
     async def bootstrap(self) -> _SuperblockInfo:

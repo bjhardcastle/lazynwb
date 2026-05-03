@@ -16,6 +16,7 @@ import lazynwb._catalog.models as catalog_models
 import lazynwb._catalog.polars as catalog_polars
 import lazynwb._hdf5.range_reader as hdf5_range_reader
 import lazynwb._hdf5.reader as hdf5_reader
+import lazynwb.conversion as conversion
 import lazynwb.table_metadata
 import lazynwb.tables
 import lazynwb.utils
@@ -172,6 +173,83 @@ def test_hdf5_backend_reader_logs_single_and_multi_table_scan_modes(
 
     assert "single-table HDF5 schema scan" in caplog.text
     assert "explicit multi-table HDF5 schema scan" in caplog.text
+
+
+def test_hdf5_backend_reader_builds_path_summary(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "catalog.sqlite")
+
+    summary = asyncio.run(reader.read_path_summary())
+    paths = {entry.path for entry in summary}
+    entries_by_path = {entry.path: entry for entry in summary}
+
+    assert "/intervals/trials" in paths
+    assert "/units" in paths
+    assert "/general" in paths
+    assert "/general/subject" in paths
+    assert "/processing/behavior/running_speed_with_rate" in paths
+    assert entries_by_path["/units"].is_group
+    assert entries_by_path["/units"].attrs["colnames"] is True
+
+
+def test_catalog_path_summary_filters_metadata_timeseries_and_specifications(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.file_io")
+    source_url = local_hdf5_path.as_uri()
+
+    summary = lazynwb.file_io._get_catalog_path_summary_if_available(
+        source_url,
+        include_arrays=True,
+        include_table_columns=False,
+        include_metadata=True,
+        include_specifications=False,
+        parents=True,
+    )
+
+    assert summary is not None
+    assert "/intervals/trials" in summary
+    assert "/units" in summary
+    assert "/general" in summary
+    assert "/general/subject" in summary
+    assert "/processing/behavior/running_speed_with_rate" in summary
+    assert "/processing/behavior/running_speed_with_rate/data" in summary
+    assert not any(path.startswith("/specifications") for path in summary)
+    assert "catalog summary" in caplog.text
+
+
+def test_common_path_discovery_uses_catalog_summary_without_accessor(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    source_url = local_hdf5_path.as_uri()
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("common path discovery should use the catalog summary")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    paths = conversion._find_common_paths(
+        (source_url,),
+        min_file_count=1,
+        disable_progress=True,
+        include_timeseries=True,
+        include_metadata=True,
+    )
+
+    assert "/intervals/trials" in paths
+    assert "/units" in paths
+    assert "/general" in paths
+    assert "/general/subject" in paths
+    assert "/processing/behavior/running_speed_with_rate" in paths
 
 
 def test_hdf5_backend_reader_scans_multiple_tables_in_one_lifecycle(

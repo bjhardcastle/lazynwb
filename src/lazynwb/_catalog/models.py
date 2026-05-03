@@ -400,6 +400,21 @@ class _TableSchemaSnapshot:
         )
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _PathSummaryEntry:
+    """Accessor-free path discovery facts for one internal HDF5/Zarr path."""
+
+    path: str
+    is_group: bool
+    is_dataset: bool
+    shape: tuple[int, ...] | None = None
+    attrs_json: tuple[tuple[str, _JsonValue], ...] = _EMPTY_ATTRS
+
+    @property
+    def attrs(self) -> types.MappingProxyType:
+        return types.MappingProxyType(dict(self.attrs_json))
+
+
 def _source_identity_from_local_path(path: pathlib.Path) -> _SourceIdentity:
     stat = path.stat()
     last_modified = datetime.datetime.fromtimestamp(

@@ -13,6 +13,7 @@ from typing import Any, Literal, cast
 import polars as pl
 import tqdm
 
+import lazynwb._catalog.models as catalog_models
 import lazynwb.base
 import lazynwb.file_io
 import lazynwb.lazyframe
@@ -463,13 +464,9 @@ def _find_common_paths(
     with concurrent.futures.ThreadPoolExecutor() as executor:
         for nwb_path in nwb_sources:
             future = executor.submit(
-                lazynwb.file_io.get_internal_paths,
-                nwb_path=nwb_path,
-                include_arrays=include_timeseries,  # We only want table-like structures
-                include_table_columns=False,
-                include_metadata=True,
-                include_specifications=False,
-                parents=True,  # Include table groups themselves
+                _get_internal_paths_for_discovery,
+                nwb_path,
+                include_timeseries,
             )
             future_to_path[future] = nwb_path
 
@@ -540,12 +537,12 @@ def _filter_table_paths(internal_paths: dict[str, Any]) -> list[str]:
                 "/trials",
                 "/epochs",
             ]
-        ) and lazynwb.file_io.is_group(accessor):
+        ) and _is_group_path_entry(accessor):
             table_paths.append(path)
             continue
 
         # Check if the accessor has table-like attributes
-        attrs = getattr(accessor, "attrs", {})
+        attrs = _path_entry_attrs(accessor)
         if "colnames" in attrs:  # Standard NWB table indicator
             table_paths.append(path)
             continue
@@ -561,22 +558,37 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
         # Check if the accessor has TimeSeries-like attributes
         if path.endswith("/data") or path.endswith("/timestamps"):
             continue
-        if not lazynwb.file_io.is_group(accessor):
+        if not _is_group_path_entry(accessor):
             continue
-        attrs = getattr(accessor, "attrs", {})
+        attrs = _path_entry_attrs(accessor)
 
         try:
             if (
                 # required attributes for TimeSeries objects
                 (
-                    "timestamps" in accessor
-                    or "rate" in getattr(accessor.get("starting_time", {}), "attrs", {})
+                    f"{path}/timestamps" in internal_paths
+                    or (
+                        "timestamps" in accessor
+                        if not isinstance(accessor, catalog_models._PathSummaryEntry)
+                        else False
+                    )
+                    or _path_entry_has_rate_starting_time(path, accessor, internal_paths)
                 )
                 or
                 # try to accommodate possible variants
                 (
                     "series" in attrs.get("neurodata_type", "").lower()
-                    and "data" in accessor
+                    and (
+                        f"{path}/data" in internal_paths
+                        or (
+                            "data" in accessor
+                            if not isinstance(
+                                accessor,
+                                catalog_models._PathSummaryEntry,
+                            )
+                            else False
+                        )
+                    )
                 )
             ):
                 timeseries_paths.append(path)
@@ -584,6 +596,55 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
             continue
 
     return timeseries_paths
+
+
+def _get_internal_paths_for_discovery(
+    nwb_path: lazynwb.types_.PathLike,
+    include_timeseries: bool,
+) -> dict[str, Any]:
+    summary = lazynwb.file_io._get_catalog_path_summary_if_available(
+        nwb_path=nwb_path,
+        include_arrays=include_timeseries,
+        include_table_columns=False,
+        include_metadata=True,
+        include_specifications=False,
+        parents=True,
+    )
+    if summary is not None:
+        logger.debug("path discovery used catalog summary for %r", nwb_path)
+        return summary
+    logger.debug("path discovery falling back to accessor traversal for %r", nwb_path)
+    return lazynwb.file_io.get_internal_paths(
+        nwb_path=nwb_path,
+        include_arrays=include_timeseries,
+        include_table_columns=False,
+        include_metadata=True,
+        include_specifications=False,
+        parents=True,
+    )
+
+
+def _is_group_path_entry(accessor: Any) -> bool:
+    if isinstance(accessor, catalog_models._PathSummaryEntry):
+        return accessor.is_group
+    return lazynwb.file_io.is_group(accessor)
+
+
+def _path_entry_attrs(accessor: Any) -> dict[str, Any]:
+    return dict(getattr(accessor, "attrs", {}))
+
+
+def _path_entry_has_rate_starting_time(
+    path: str,
+    accessor: Any,
+    internal_paths: dict[str, Any],
+) -> bool:
+    starting_time = internal_paths.get(f"{path}/starting_time")
+    if starting_time is not None:
+        return "rate" in _path_entry_attrs(starting_time)
+    if isinstance(accessor, catalog_models._PathSummaryEntry):
+        return False
+    return "rate" in getattr(accessor.get("starting_time", {}), "attrs", {})
 
 
 def _table_path_to_output_path(

@@ -18,6 +18,7 @@ import remfile
 import upath
 import zarr
 
+import lazynwb._catalog.models as catalog_models
 import lazynwb.types_
 import lazynwb.utils
 
@@ -412,11 +413,11 @@ def get_internal_paths(
     """
     Traverse the internal structure of an NWB file and return a mapping of paths to data accessors.
 
-    This API currently traverses accessor-backed HDF5/Zarr objects and returns live
-    accessors. For remote HDF5 sources, that traversal may be slow because it can
-    require many metadata/object lookups. A faster catalog-backed path-summary
-    implementation is planned, but this function intentionally keeps its current
-    return type and behavior for compatibility.
+    This API traverses accessor-backed HDF5/Zarr objects and returns live accessors.
+    For remote HDF5 sources, that traversal may be slow because it can require many
+    metadata/object lookups. Private table-discovery paths can use a catalog-backed
+    path summary, but this public function intentionally keeps its current return
+    type and behavior for compatibility.
 
     Parameters
     ----------
@@ -441,10 +442,11 @@ def get_internal_paths(
         Keys are internal paths (e.g., '/units/spike_times'), values are the actual
         dataset/array objects that can be inspected for shape, dtype, etc.
     """
+    logger.debug("get_internal_paths using accessor traversal for %r", nwb_path)
     file_accessor = _get_accessor(nwb_path)
     _warn_if_remote_hdf5_internal_path_traversal(file_accessor)
-    # TODO: replace remote-HDF5 accessor traversal with a catalog-backed path
-    # summary once that internal API exists.
+    # Public callers expect live accessors, so the catalog summary is used only by
+    # private name-discovery helpers that do not need accessor objects.
     paths_to_accessors = _traverse_internal_paths(
         file_accessor._accessor,
         include_table_columns=include_table_columns,
@@ -461,6 +463,112 @@ def get_internal_paths(
     return paths_to_accessors
 
 
+def _get_catalog_path_summary_if_available(
+    nwb_path: lazynwb.types_.PathLike,
+    include_arrays: bool = True,
+    include_table_columns: bool = False,
+    include_metadata: bool = False,
+    include_specifications: bool = False,
+    parents: bool = False,
+) -> dict[str, catalog_models._PathSummaryEntry] | None:
+    import lazynwb._hdf5.reader as hdf5_reader
+    import lazynwb.tables
+
+    if not hdf5_reader._is_fast_hdf5_candidate(nwb_path):
+        return None
+    reader = hdf5_reader._default_hdf5_backend_reader(nwb_path)
+    try:
+        entries = lazynwb.tables._run_async_value(reader.read_path_summary())
+    except hdf5_reader._NotHDF5Error:
+        logger.debug("catalog path summary rejected non-HDF5 source %r", nwb_path)
+        return None
+    except Exception as exc:
+        logger.debug("catalog path summary unavailable for %r: %r", nwb_path, exc)
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            lazynwb.tables._run_async_value(reader.close())
+    logger.debug(
+        "get_internal_paths-compatible discovery used catalog summary for %r",
+        nwb_path,
+    )
+    return _filter_catalog_path_summary_entries(
+        entries,
+        include_arrays=include_arrays,
+        include_table_columns=include_table_columns,
+        include_metadata=include_metadata,
+        include_specifications=include_specifications,
+        parents=parents,
+    )
+
+
+def _filter_catalog_path_summary_entries(
+    entries: Iterable[catalog_models._PathSummaryEntry],
+    *,
+    include_arrays: bool,
+    include_table_columns: bool,
+    include_metadata: bool,
+    include_specifications: bool,
+    parents: bool,
+) -> dict[str, catalog_models._PathSummaryEntry]:
+    entry_by_path = {entry.path: entry for entry in entries}
+    results: dict[str, catalog_models._PathSummaryEntry] = {}
+    table_paths: set[str] = set()
+    for path, entry in entry_by_path.items():
+        if "/specifications" in path and not include_specifications:
+            continue
+        shape = entry.shape
+        is_scalar = shape == () or shape == (1,)
+        is_array = shape is not None and not is_scalar
+        attrs = dict(entry.attrs)
+        is_rate_starting_time = path.endswith("/starting_time") and "rate" in attrs
+        if entry.is_dataset and is_scalar and not is_rate_starting_time:
+            continue
+        neurodata_type = attrs.get("neurodata_type", None)
+        is_neurodata = neurodata_type is not None
+        is_table = "colnames" in attrs or _looks_like_table_path(path)
+        is_metadata = is_scalar or path.startswith("/general")
+        if is_table:
+            table_paths.add(path)
+        if is_metadata and not include_metadata:
+            continue
+        if is_metadata and include_metadata:
+            results[path] = entry
+        elif is_rate_starting_time and include_arrays:
+            results[path] = entry
+        elif is_neurodata and neurodata_type not in (
+            "/",
+            "NWBFile",
+            "ProcessingModule",
+        ):
+            results[path] = entry
+        elif is_array and include_arrays:
+            results[path] = entry
+    if not include_table_columns:
+        for table_path in table_paths:
+            for path in tuple(results):
+                if path.startswith(table_path.rstrip("/") + "/"):
+                    results.pop(path, None)
+    if not parents:
+        for path in tuple(results):
+            if any(other.startswith(path.rstrip("/") + "/") for other in results):
+                results.pop(path, None)
+    return results
+
+
+def _looks_like_table_path(path: str) -> bool:
+    return any(
+        table_pattern in path
+        for table_pattern in (
+            "/intervals/",
+            "/units",
+            "/electrodes",
+            "/trials",
+            "/epochs",
+        )
+    )
+
+
 def _warn_if_remote_hdf5_internal_path_traversal(
     file_accessor: FileAccessor,
 ) -> None:
@@ -471,8 +579,8 @@ def _warn_if_remote_hdf5_internal_path_traversal(
     ):
         warnings.warn(
             "get_internal_paths currently traverses remote HDF5 through "
-            "accessor-backed objects and may be slow; a catalog-backed path "
-            "summary is planned.",
+            "accessor-backed objects and may be slow; private table discovery "
+            "uses a catalog-backed path summary where available.",
             RuntimeWarning,
             stacklevel=2,
         )
