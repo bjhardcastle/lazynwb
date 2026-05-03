@@ -38,6 +38,14 @@ class RawTableColumnMetadata:
     shape: tuple[int, ...] | None
     ndim: int | None
     attrs: dict[str, Any]
+    maxshape: tuple[int | None, ...] | None
+    chunks: tuple[int, ...] | None
+    storage_layout: str | None
+    compression: str | None
+    compression_opts: object | None
+    filters: tuple[object, ...]
+    fill_value: object | None
+    read_capabilities: tuple[str, ...]
     is_group: bool
     is_dataset: bool
     is_metadata_table: bool
@@ -49,6 +57,7 @@ class RawTableColumnMetadata:
     is_multidimensional: bool
     index_column_name: str | None
     data_column_name: str | None
+    row_element_shape: tuple[int, ...] | None
     _accessor: TableColumnAccessor = dataclasses.field(repr=False, compare=False)
 
     @property
@@ -168,6 +177,20 @@ def get_table_length_from_metadata(
     raise lazynwb.exceptions.InternalPathError("Could not determine table length")
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _StorageFacts:
+    """Backend storage facts needed later for direct read planning."""
+
+    maxshape: tuple[int | None, ...] | None
+    chunks: tuple[int, ...] | None
+    storage_layout: str | None
+    compression: str | None
+    compression_opts: object | None
+    filters: tuple[object, ...]
+    fill_value: object | None
+    read_capabilities: tuple[str, ...]
+
+
 def _metadata_from_accessor(
     accessor: TableColumnAccessor,
     backend: str,
@@ -184,6 +207,7 @@ def _metadata_from_accessor(
     dtype = getattr(accessor, "dtype", None)
     shape = _shape_as_tuple(getattr(accessor, "shape", None))
     ndim = getattr(accessor, "ndim", None)
+    storage_facts = _get_storage_facts(accessor)
     is_nominally_indexed = _is_nominally_indexed_column(name, column_names)
     is_index_column = is_nominally_indexed and name.endswith("_index")
     index_column_name = _get_index_column_name(name, column_names)
@@ -202,6 +226,14 @@ def _metadata_from_accessor(
         shape=shape,
         ndim=ndim,
         attrs=dict(getattr(accessor, "attrs", {})),
+        maxshape=storage_facts.maxshape,
+        chunks=storage_facts.chunks,
+        storage_layout=storage_facts.storage_layout,
+        compression=storage_facts.compression,
+        compression_opts=storage_facts.compression_opts,
+        filters=storage_facts.filters,
+        fill_value=storage_facts.fill_value,
+        read_capabilities=storage_facts.read_capabilities,
         is_group=is_group,
         is_dataset=not is_group and dtype is not None,
         is_metadata_table=is_metadata_table,
@@ -213,8 +245,142 @@ def _metadata_from_accessor(
         is_multidimensional=ndim is not None and ndim > 1,
         index_column_name=index_column_name,
         data_column_name=data_column_name,
+        row_element_shape=_get_row_element_shape(
+            shape=shape,
+            ndim=ndim,
+            is_index_column=is_index_column,
+        ),
         _accessor=accessor,
     )
+
+
+def _get_storage_facts(accessor: TableColumnAccessor) -> _StorageFacts:
+    maxshape = _shape_as_optional_int_tuple(getattr(accessor, "maxshape", None))
+    chunks = _shape_as_tuple(getattr(accessor, "chunks", None))
+    storage_layout = _get_storage_layout(accessor, chunks)
+    compression, compression_opts = _get_compression_facts(accessor)
+    filters = _get_filter_facts(accessor, compression, compression_opts)
+    fill_value = _get_fill_value(accessor)
+    read_capabilities = _get_read_capabilities(
+        accessor=accessor,
+        chunks=chunks,
+        compression=compression,
+        filters=filters,
+    )
+    logger.debug(
+        "storage facts for %s: layout=%s chunks=%s compression=%s filters=%s",
+        getattr(accessor, "name", type(accessor).__name__),
+        storage_layout,
+        chunks,
+        compression,
+        filters,
+    )
+    return _StorageFacts(
+        maxshape=maxshape,
+        chunks=chunks,
+        storage_layout=storage_layout,
+        compression=compression,
+        compression_opts=compression_opts,
+        filters=filters,
+        fill_value=fill_value,
+        read_capabilities=read_capabilities,
+    )
+
+
+def _get_storage_layout(
+    accessor: TableColumnAccessor,
+    chunks: tuple[int, ...] | None,
+) -> str | None:
+    if isinstance(accessor, h5py.Dataset):
+        layout = accessor.id.get_create_plist().get_layout()
+        if layout == h5py.h5d.CHUNKED:
+            return "chunked"
+        if layout == h5py.h5d.CONTIGUOUS:
+            return "contiguous"
+        if layout == h5py.h5d.COMPACT:
+            return "compact"
+        if layout == h5py.h5d.VIRTUAL:
+            return "virtual"
+        return f"hdf5:{layout}"
+    if isinstance(accessor, zarr.Array):
+        return "chunked" if chunks is not None else "array"
+    if lazynwb.file_io.is_group(accessor):
+        return "group"
+    return None
+
+
+def _get_compression_facts(
+    accessor: TableColumnAccessor,
+) -> tuple[str | None, object | None]:
+    compression = getattr(accessor, "compression", None)
+    compression_opts = getattr(accessor, "compression_opts", None)
+    if compression is not None:
+        return str(compression), compression_opts
+    compressor = getattr(accessor, "compressor", None)
+    if compressor is None:
+        return None, None
+    codec_id = getattr(compressor, "codec_id", None) or getattr(compressor, "id", None)
+    compression_name = str(codec_id or type(compressor).__name__)
+    get_config = getattr(compressor, "get_config", None)
+    if callable(get_config):
+        compression_opts = get_config()
+    else:
+        compression_opts = repr(compressor)
+    return compression_name, compression_opts
+
+
+def _get_filter_facts(
+    accessor: TableColumnAccessor,
+    compression: str | None,
+    compression_opts: object | None,
+) -> tuple[object, ...]:
+    filters: list[object] = []
+    if compression is not None:
+        filters.append(
+            {
+                "id": "compression",
+                "name": compression,
+                "options": compression_opts,
+            }
+        )
+    for attr_name in ("shuffle", "fletcher32", "scaleoffset"):
+        value = getattr(accessor, attr_name, None)
+        if value not in (None, False):
+            filters.append({"id": attr_name, "value": value})
+    zarr_filters = getattr(accessor, "filters", None)
+    if zarr_filters:
+        for zarr_filter in zarr_filters:
+            get_config = getattr(zarr_filter, "get_config", None)
+            filters.append(get_config() if callable(get_config) else repr(zarr_filter))
+    return tuple(filters)
+
+
+def _get_fill_value(accessor: TableColumnAccessor) -> object | None:
+    if hasattr(accessor, "fillvalue"):
+        return accessor.fillvalue
+    if hasattr(accessor, "fill_value"):
+        return accessor.fill_value
+    return None
+
+
+def _get_read_capabilities(
+    accessor: TableColumnAccessor,
+    chunks: tuple[int, ...] | None,
+    compression: str | None,
+    filters: tuple[object, ...],
+) -> tuple[str, ...]:
+    capabilities = ["metadata"]
+    if hasattr(accessor, "dtype"):
+        capabilities.extend(("shape", "dtype", "slice"))
+    if getattr(accessor, "ndim", None) == 0:
+        capabilities.append("scalar")
+    if chunks is not None:
+        capabilities.append("chunked")
+    if compression is not None or filters:
+        capabilities.append("filtered")
+    if lazynwb.file_io.is_group(accessor):
+        capabilities.append("children")
+    return tuple(capabilities)
 
 
 def _get_table_column_accessors(
@@ -436,6 +602,26 @@ def _shape_as_tuple(shape: Iterable[int] | None) -> tuple[int, ...] | None:
     if shape is None:
         return None
     return tuple(shape)
+
+
+def _shape_as_optional_int_tuple(
+    shape: Iterable[int | None] | None,
+) -> tuple[int | None, ...] | None:
+    if shape is None:
+        return None
+    return tuple(None if item is None else int(item) for item in shape)
+
+
+def _get_row_element_shape(
+    shape: tuple[int, ...] | None,
+    ndim: int | None,
+    is_index_column: bool,
+) -> tuple[int, ...] | None:
+    if shape is None or ndim is None or is_index_column:
+        return None
+    if ndim <= 1:
+        return ()
+    return shape[1:]
 
 
 def _is_file_accessor_like(value: object) -> bool:

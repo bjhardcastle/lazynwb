@@ -5,6 +5,7 @@ import dataclasses
 import pathlib
 
 import h5py
+import numpy as np
 import polars as pl
 import pytest
 import zarr
@@ -107,6 +108,32 @@ def test_catalog_polars_schema_converts_reference_dtype_to_string() -> None:
     dtype = catalog_models._NeutralDType(kind="reference", numpy_dtype="|O")
 
     assert catalog_polars._neutral_dtype_to_polars_base(dtype) == pl.String
+
+
+def test_neutral_dtype_model_classifies_supported_schema_dtypes() -> None:
+    cases = {
+        "numeric": np.dtype("int64"),
+        "bool": np.dtype("bool"),
+        "string": np.dtype("S8"),
+        "vlen_string": h5py.string_dtype(encoding="utf-8"),
+        "enum": h5py.enum_dtype({"a": 1, "b": 2}, basetype="i"),
+        "array": np.dtype((np.float64, (2,))),
+        "reference": h5py.ref_dtype,
+        "compound": np.dtype([("x", "i4"), ("y", "f8")]),
+        "opaque": np.dtype("V8"),
+    }
+
+    classified = {
+        expected_kind: catalog_models._NeutralDType.from_backend_dtype(dtype)
+        for expected_kind, dtype in cases.items()
+    }
+
+    assert {kind: dtype.kind for kind, dtype in classified.items()} == {
+        kind: kind for kind in cases
+    }
+    assert classified["array"].element_numpy_dtype == "<f8"
+    assert classified["array"].element_shape == (2,)
+    assert catalog_models._NeutralDType.from_backend_dtype(None).kind == "unknown"
 
 
 def test_accessor_backend_reader_requires_exact_normalized_paths(

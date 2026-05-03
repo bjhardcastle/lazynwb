@@ -92,6 +92,8 @@ class _NeutralDType:
     byte_order: str | None = None
     itemsize: int | None = None
     detail: str | None = None
+    element_numpy_dtype: str | None = None
+    element_shape: tuple[int, ...] | None = None
 
     @classmethod
     def from_backend_dtype(cls, dtype: object | None) -> _NeutralDType:
@@ -99,6 +101,39 @@ class _NeutralDType:
             return cls(kind="unknown")
         with np.errstate(all="ignore"):
             np_dtype = np.dtype(dtype)
+        string_info = h5py.check_string_dtype(np_dtype)
+        if string_info is not None:
+            kind = "vlen_string" if string_info.length is None else "string"
+            return cls(
+                kind=kind,
+                numpy_dtype=np_dtype.str,
+                byte_order=np_dtype.byteorder,
+                itemsize=np_dtype.itemsize,
+                detail=f"{string_info.encoding}[{string_info.length}]",
+            )
+        vlen_dtype = h5py.check_dtype(vlen=np_dtype)
+        if vlen_dtype is not None:
+            with np.errstate(all="ignore"):
+                element_dtype = np.dtype(vlen_dtype)
+            return cls(
+                kind="array",
+                numpy_dtype=np_dtype.str,
+                byte_order=np_dtype.byteorder,
+                itemsize=np_dtype.itemsize,
+                detail=f"vlen[{element_dtype}]",
+                element_numpy_dtype=element_dtype.str,
+            )
+        if np_dtype.subdtype is not None:
+            element_dtype, element_shape = np_dtype.subdtype
+            return cls(
+                kind="array",
+                numpy_dtype=np_dtype.str,
+                byte_order=np_dtype.byteorder,
+                itemsize=np_dtype.itemsize,
+                detail=str(np_dtype),
+                element_numpy_dtype=element_dtype.str,
+                element_shape=tuple(int(item) for item in element_shape),
+            )
         return cls(
             kind=_classify_numpy_dtype(np_dtype),
             numpy_dtype=np_dtype.str,
@@ -114,16 +149,27 @@ class _NeutralDType:
             "byte_order": self.byte_order,
             "itemsize": self.itemsize,
             "detail": self.detail,
+            "element_numpy_dtype": self.element_numpy_dtype,
+            "element_shape": (
+                list(self.element_shape) if self.element_shape is not None else None
+            ),
         }
 
     @classmethod
     def from_json_dict(cls, data: Mapping[str, object]) -> _NeutralDType:
+        element_shape = data.get("element_shape")
         return cls(
             kind=str(data["kind"]),
             numpy_dtype=_optional_str(data.get("numpy_dtype")),
             byte_order=_optional_str(data.get("byte_order")),
             itemsize=_optional_int(data.get("itemsize")),
             detail=_optional_str(data.get("detail")),
+            element_numpy_dtype=_optional_str(data.get("element_numpy_dtype")),
+            element_shape=(
+                tuple(int(item) for item in element_shape)
+                if element_shape is not None
+                else None
+            ),
         )
 
 
@@ -135,6 +181,14 @@ class _DatasetSchema:
     dtype: _NeutralDType
     shape: tuple[int, ...] | None
     ndim: int | None
+    maxshape: tuple[int | None, ...] | None = None
+    chunks: tuple[int, ...] | None = None
+    storage_layout: str | None = None
+    compression: str | None = None
+    compression_opts: _JsonValue | None = None
+    filters_json: tuple[_JsonValue, ...] = ()
+    fill_value: _JsonValue | None = None
+    read_capabilities: tuple[str, ...] = ()
     attrs_json: tuple[tuple[str, _JsonValue], ...] = _EMPTY_ATTRS
     is_group: bool = False
     is_dataset: bool = False
@@ -143,12 +197,28 @@ class _DatasetSchema:
     def attrs(self) -> types.MappingProxyType:
         return types.MappingProxyType(dict(self.attrs_json))
 
+    @property
+    def filters(self) -> tuple[_JsonValue, ...]:
+        return self.filters_json
+
     def to_json_dict(self) -> dict[str, _JsonValue]:
         return {
             "path": self.path,
             "dtype": self.dtype.to_json_dict(),
             "shape": list(self.shape) if self.shape is not None else None,
             "ndim": self.ndim,
+            "maxshape": (
+                [item if item is None else int(item) for item in self.maxshape]
+                if self.maxshape is not None
+                else None
+            ),
+            "chunks": list(self.chunks) if self.chunks is not None else None,
+            "storage_layout": self.storage_layout,
+            "compression": self.compression,
+            "compression_opts": self.compression_opts,
+            "filters": list(self.filters_json),
+            "fill_value": self.fill_value,
+            "read_capabilities": list(self.read_capabilities),
             "attrs": dict(self.attrs_json),
             "is_group": self.is_group,
             "is_dataset": self.is_dataset,
@@ -158,11 +228,31 @@ class _DatasetSchema:
     def from_json_dict(cls, data: Mapping[str, object]) -> _DatasetSchema:
         attrs = _attrs_to_tuple(data.get("attrs", {}))
         shape = data.get("shape")
+        maxshape = data.get("maxshape")
+        chunks = data.get("chunks")
         return cls(
             path=str(data["path"]),
             dtype=_NeutralDType.from_json_dict(_as_mapping(data["dtype"])),
             shape=tuple(int(item) for item in shape) if shape is not None else None,
             ndim=_optional_int(data.get("ndim")),
+            maxshape=(
+                tuple(None if item is None else int(item) for item in maxshape)
+                if maxshape is not None
+                else None
+            ),
+            chunks=(
+                tuple(int(item) for item in chunks) if chunks is not None else None
+            ),
+            storage_layout=_optional_str(data.get("storage_layout")),
+            compression=_optional_str(data.get("compression")),
+            compression_opts=_to_json_value(data.get("compression_opts")),
+            filters_json=tuple(
+                _to_json_value(item) for item in data.get("filters", ())
+            ),
+            fill_value=_to_json_value(data.get("fill_value")),
+            read_capabilities=tuple(
+                str(item) for item in data.get("read_capabilities", ())
+            ),
             attrs_json=attrs,
             is_group=bool(data.get("is_group", False)),
             is_dataset=bool(data.get("is_dataset", False)),
@@ -187,6 +277,7 @@ class _TableColumnSchema:
     is_multidimensional: bool = False
     index_column_name: str | None = None
     data_column_name: str | None = None
+    row_element_shape: tuple[int, ...] | None = None
 
     @property
     def dtype(self) -> _NeutralDType:
@@ -228,10 +319,16 @@ class _TableColumnSchema:
             "is_multidimensional": self.is_multidimensional,
             "index_column_name": self.index_column_name,
             "data_column_name": self.data_column_name,
+            "row_element_shape": (
+                list(self.row_element_shape)
+                if self.row_element_shape is not None
+                else None
+            ),
         }
 
     @classmethod
     def from_json_dict(cls, data: Mapping[str, object]) -> _TableColumnSchema:
+        row_element_shape = data.get("row_element_shape")
         return cls(
             name=str(data["name"]),
             table_path=str(data["table_path"]),
@@ -249,6 +346,11 @@ class _TableColumnSchema:
             is_multidimensional=bool(data.get("is_multidimensional", False)),
             index_column_name=_optional_str(data.get("index_column_name")),
             data_column_name=_optional_str(data.get("data_column_name")),
+            row_element_shape=(
+                tuple(int(item) for item in row_element_shape)
+                if row_element_shape is not None
+                else None
+            ),
         )
 
 
@@ -256,7 +358,7 @@ class _TableColumnSchema:
 class _TableSchemaSnapshot:
     """Versioned table schema/catalog snapshot for one exact table path."""
 
-    PAYLOAD_VERSION = 1
+    PAYLOAD_VERSION = 2
 
     source_identity: _SourceIdentity
     table_path: str
@@ -315,6 +417,14 @@ def _column_from_raw_metadata(
         dtype=_NeutralDType.from_backend_dtype(column.dtype),
         shape=column.shape,
         ndim=column.ndim,
+        maxshape=column.maxshape,
+        chunks=column.chunks,
+        storage_layout=column.storage_layout,
+        compression=column.compression,
+        compression_opts=_to_json_value(column.compression_opts),
+        filters_json=tuple(_to_json_value(item) for item in column.filters),
+        fill_value=_to_json_value(column.fill_value),
+        read_capabilities=column.read_capabilities,
         attrs_json=_attrs_to_tuple(column.attrs),
         is_group=column.is_group,
         is_dataset=column.is_dataset,
@@ -334,6 +444,7 @@ def _column_from_raw_metadata(
         is_multidimensional=column.is_multidimensional,
         index_column_name=column.index_column_name,
         data_column_name=column.data_column_name,
+        row_element_shape=column.row_element_shape,
     )
 
 
@@ -342,8 +453,6 @@ def _classify_numpy_dtype(np_dtype: np.dtype) -> str:
         return "reference"
     if h5py.check_dtype(enum=np_dtype) is not None:
         return "enum"
-    if h5py.check_string_dtype(np_dtype) is not None:
-        return "string"
     if np_dtype.fields is not None:
         return "compound"
     if np_dtype.kind == "b":

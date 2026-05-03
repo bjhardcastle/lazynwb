@@ -71,10 +71,15 @@ def _get_polars_dtype(
 def _neutral_dtype_to_polars_base(
     dtype: catalog_models._NeutralDType,
 ) -> polars._typing.PolarsDataType:
-    if dtype.kind in {"object", "reference", "string"}:
+    if dtype.kind in {"object", "reference", "string", "vlen_string"}:
         return pl.String
     if dtype.kind == "bool":
         return pl.Boolean
+    if dtype.kind in {"compound", "opaque", "unknown"}:
+        return pl.Object
+    if dtype.kind == "array" and dtype.element_numpy_dtype is not None:
+        np_dtype = np.dtype(dtype.element_numpy_dtype)
+        return polars.datatypes.convert.numpy_char_code_to_dtype(np_dtype)
     if dtype.numpy_dtype is None:
         return pl.Object
     np_dtype = np.dtype(dtype.numpy_dtype)

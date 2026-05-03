@@ -31,6 +31,60 @@ def test_hdf5_backend_reader_parses_scalar_table_from_byte_buffer(
     assert schema["start_time"] == pl.Float64
 
 
+def test_hdf5_backend_reader_preserves_units_array_catalog_facts(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "catalog.sqlite")
+
+    snapshot = asyncio.run(reader.read_table_schema_snapshot("units"))
+    schema = catalog_polars._snapshot_to_polars_schema(snapshot)
+    raw_columns = lazynwb.get_table_column_metadata(local_hdf5_path, "/units")
+    existing_schema = lazynwb.tables.get_table_schema_from_metadata(raw_columns)
+    columns_by_name = {column.name: column for column in snapshot.columns}
+
+    assert schema == existing_schema
+    assert columns_by_name["spike_times"].is_nominally_indexed
+    assert columns_by_name["spike_times"].index_column_name == "spike_times_index"
+    assert columns_by_name["spike_times"].dataset.path == "units/spike_times"
+    assert columns_by_name["spike_times"].row_element_shape == ()
+    assert "shape" in columns_by_name["spike_times"].dataset.read_capabilities
+    assert columns_by_name["obs_intervals"].row_element_shape == (2,)
+    assert columns_by_name["waveform_mean"].is_multidimensional
+    assert columns_by_name["waveform_mean"].row_element_shape == (
+        25,
+        384,
+    )
+    assert columns_by_name["waveform_mean"].dataset.storage_layout is not None
+
+
+def test_public_exclude_array_columns_filters_after_cached_hdf5_snapshot(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_path = tmp_path / "catalog.sqlite"
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(cache_path))
+    source_url = local_hdf5_path.as_uri()
+
+    schema = lazynwb.tables.get_table_schema(
+        source_url,
+        "/units",
+        exclude_array_columns=True,
+        exclude_internal_columns=True,
+    )
+    warm_reader = hdf5_reader._default_hdf5_backend_reader(source_url)
+    warm_snapshot = asyncio.run(warm_reader.read_table_schema_snapshot("units"))
+    warm_column_names = {column.name for column in warm_snapshot.columns}
+
+    assert "spike_times" not in schema
+    assert "waveform_mean" not in schema
+    assert {"spike_times", "waveform_mean", "obs_intervals"}.issubset(
+        warm_column_names
+    )
+    assert warm_reader._range_reader.request_count == 0
+
+
 def test_hdf5_backend_reader_reuses_sqlite_snapshot_without_range_reads(
     local_hdf5_path: pathlib.Path,
     tmp_path: pathlib.Path,
