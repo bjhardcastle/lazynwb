@@ -128,28 +128,46 @@ def test_hdf5_backend_reader_does_not_call_h5py_file_for_schema(
     assert {"start_time", "stop_time", "condition"}.issubset(schema)
 
 
-def test_hdf5_backend_reader_reuses_parsed_metadata_for_followup_table(
+def test_hdf5_backend_reader_single_table_schema_does_not_warm_followup_cache(
     local_hdf5_path: pathlib.Path,
     tmp_path: pathlib.Path,
 ) -> None:
     parsed_cache_path = tmp_path / "parsed-cache.sqlite"
     trials_reader = _buffer_hdf5_reader(local_hdf5_path, parsed_cache_path)
     asyncio.run(trials_reader.read_table_schema_snapshot("intervals/trials"))
+    source_identity = asyncio.run(trials_reader.get_source_identity())
 
+    cache = cache_sqlite._SQLiteSnapshotCache(parsed_cache_path)
+    followup_cache_lookup = asyncio.run(
+        cache.get_table_schema_snapshot(source_identity, "units")
+    )
     followup_units_reader = _buffer_hdf5_reader(local_hdf5_path, parsed_cache_path)
     followup_snapshot = asyncio.run(
         followup_units_reader.read_table_schema_snapshot("units")
     )
     followup_requests = followup_units_reader._range_reader.request_count
 
-    cold_units_reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "cold.sqlite")
-    cold_snapshot = asyncio.run(cold_units_reader.read_table_schema_snapshot("units"))
-    cold_requests = cold_units_reader._range_reader.request_count
+    assert not followup_cache_lookup.hit
+    assert followup_snapshot.table_path == "units"
+    assert followup_requests > 0
 
-    assert catalog_polars._snapshot_to_polars_schema(
-        followup_snapshot
-    ) == catalog_polars._snapshot_to_polars_schema(cold_snapshot)
-    assert followup_requests < cold_requests
+
+def test_hdf5_backend_reader_logs_single_and_multi_table_scan_modes(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.reader")
+    single_reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "single.sqlite")
+    asyncio.run(single_reader.read_table_schema_snapshot("intervals/trials"))
+
+    multi_reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "multi.sqlite")
+    asyncio.run(
+        multi_reader._read_table_schema_snapshots(("intervals/trials", "units"))
+    )
+
+    assert "single-table HDF5 schema scan" in caplog.text
+    assert "explicit multi-table HDF5 schema scan" in caplog.text
 
 
 def test_hdf5_backend_reader_scans_multiple_tables_in_one_lifecycle(

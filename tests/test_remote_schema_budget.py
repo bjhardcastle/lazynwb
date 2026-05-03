@@ -69,8 +69,8 @@ def test_remote_hdf5_schema_request_budget_and_warm_cache(
     for metric in (cold, warm):
         _record_metric(record_property, metric)
 
-    max_cold_requests = _env_int("LAZYNWB_REMOTE_SCHEMA_MAX_GETS", 3500)
-    max_cold_bytes = _env_int("LAZYNWB_REMOTE_SCHEMA_MAX_BYTES", 128 * 1024 * 1024)
+    max_cold_requests = _env_int("LAZYNWB_REMOTE_SCHEMA_MAX_GETS", 2500)
+    max_cold_bytes = _env_int("LAZYNWB_REMOTE_SCHEMA_MAX_BYTES", 96 * 1024 * 1024)
 
     assert cold.column_count > 0, cold.failure_detail()
     assert cold.request_count > 0, cold.failure_detail()

@@ -104,9 +104,9 @@ class _HDF5BackendReader:
         for exact_table_path in normalized_paths:
             catalog_backend._require_exact_normalized_path(exact_table_path)
         logger.debug(
-            "reading %d HDF5 table schema snapshots for %s in one reader lifecycle",
-            len(normalized_paths),
+            "explicit multi-table HDF5 schema scan for %s: tables=%d",
             self._source_url,
+            len(normalized_paths),
         )
         results: dict[str, _HDF5TableSchemaScanResult] = {}
         for exact_table_path in normalized_paths:
@@ -171,6 +171,11 @@ class _HDF5BackendReader:
         exact_table_path: str,
     ) -> catalog_models._TableSchemaSnapshot:
         catalog_backend._require_exact_normalized_path(exact_table_path)
+        logger.debug(
+            "single-table HDF5 schema scan for %s/%s",
+            self._source_url,
+            exact_table_path,
+        )
         started = time.perf_counter()
         phase_started = started
         source_identity = await self.get_source_identity()
@@ -245,7 +250,6 @@ class _HDF5BackendReader:
                 feature="hdf5_metadata_parser",
                 detail=repr(exc),
             ) from exc
-        await scanner.warm_table_metadata(_followup_table_paths(exact_table_path))
         parse_seconds = time.perf_counter() - phase_started
         table_length = _get_table_length_from_columns(column_schemas)
         snapshot = catalog_models._TableSchemaSnapshot(
@@ -363,14 +367,6 @@ def _range_reader_fetched_bytes(
     range_reader: hdf5_range_reader._RangeReader,
 ) -> int:
     return int(getattr(range_reader, "bytes_fetched", 0))
-
-
-def _followup_table_paths(exact_table_path: str) -> tuple[str, ...]:
-    if exact_table_path == "intervals/trials":
-        return ("units",)
-    if exact_table_path == "units":
-        return ("intervals/trials",)
-    return ()
 
 
 def _is_fast_hdf5_candidate(source: lazynwb.types_.PathLike) -> bool:
