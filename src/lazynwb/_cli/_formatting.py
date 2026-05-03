@@ -18,10 +18,12 @@ def _write_json(
 
 def _source_paths_json_object(
     paths: collections.abc.Iterable[collections.abc.Mapping[str, str]],
+    resolved_source: cli_sources._ResolvedSource,
 ) -> dict[str, typing.Any]:
     return {
         "command": "paths",
         "paths": list(paths),
+        "source": cli_sources._source_json_object(resolved_source),
     }
 
 

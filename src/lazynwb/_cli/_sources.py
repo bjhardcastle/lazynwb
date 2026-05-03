@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import pathlib
+import time
 import typing
 import urllib.parse
 import urllib.request
@@ -11,6 +12,8 @@ import lazynwb._cli._config as cli_config
 import lazynwb._cli._errors as cli_errors
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_LOCAL_GLOB = "**/*.nwb"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -140,6 +143,7 @@ def _source_json_object(resolved_source: _ResolvedSource) -> dict[str, typing.An
         "local": resolved_source.local,
         "paths": list(resolved_source.paths),
         "precedence": resolved_source.precedence,
+        "resolved_count": len(resolved_source.paths),
     }
 
 
@@ -235,28 +239,25 @@ def _resolve_local_source(
     base_dir: pathlib.Path | None,
     discover_local: bool,
 ) -> _ResolvedSource:
-    if root is None or glob is None:
-        missing_fields = []
-        if root is None:
-            missing_fields.append("source.local.root")
-        if glob is None:
-            missing_fields.append("source.local.glob")
+    if root is None:
+        missing_fields = ["source.local.root"]
         logger.debug("incomplete local source config: missing=%s", missing_fields)
         raise cli_errors._CLIError(
             code=cli_errors._ErrorCode.SOURCE_CONFIG_INCOMPLETE,
             details={"missing": missing_fields},
             exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
-            message="Local source configuration requires both root and glob.",
+            message="Local source configuration requires root when glob is provided.",
         )
 
+    resolved_glob = _DEFAULT_LOCAL_GLOB if glob is None else glob
     root_path = _local_path(root, base_dir=base_dir).resolve(strict=False)
     local = {
-        "glob": glob,
+        "glob": resolved_glob,
         "resolved_root": root_path.as_posix(),
         "root": root,
     }
     paths = (
-        _list_local_glob_paths(root=root, root_path=root_path, glob=glob)
+        _list_local_glob_paths(root=root, root_path=root_path, glob=resolved_glob)
         if discover_local
         else ()
     )
@@ -264,7 +265,7 @@ def _resolve_local_source(
         "resolved active local source: precedence=%s root=%s glob=%s discovered=%d",
         precedence,
         root_path,
-        glob,
+        resolved_glob,
         len(paths),
     )
     return _ResolvedSource(kind="local", precedence=precedence, paths=paths, local=local)
@@ -306,6 +307,13 @@ def _list_local_glob_paths(
     root_path: pathlib.Path,
     glob: str,
 ) -> tuple[dict[str, str], ...]:
+    start_time = time.perf_counter()
+    logger.debug(
+        "starting local source discovery: root=%s resolved_root=%s glob=%s",
+        root,
+        root_path.as_posix(),
+        glob,
+    )
     if not root_path.exists():
         logger.debug("local source root does not exist: %s", root_path)
         raise cli_errors._CLIError(
@@ -322,7 +330,14 @@ def _list_local_glob_paths(
                 "resolved": matched_path.resolve(strict=False).as_posix(),
             }
         )
-    logger.debug("local source glob matched %d path(s)", len(paths))
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    logger.debug(
+        "completed local source discovery: root=%s glob=%s match_count=%d elapsed_ms=%.3f",
+        root_path.as_posix(),
+        glob,
+        len(paths),
+        elapsed_ms,
+    )
     return tuple(paths)
 
 

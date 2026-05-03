@@ -145,7 +145,7 @@ def _handle_paths(
     else:
         cli_formatting._write_json(
             stdout,
-            cli_formatting._source_paths_json_object(paths),
+            cli_formatting._source_paths_json_object(paths, resolved_source),
         )
     return cli_errors._ExitCode.OK
 
@@ -169,7 +169,7 @@ def _handle_config_show(
         loaded_config,
         _source_overrides_from_args(args, paths=tuple(args.source_paths or ())),
         validate_paths=True,
-        discover_local=False,
+        discover_local=True,
     )
     cli_formatting._write_json(
         stdout,

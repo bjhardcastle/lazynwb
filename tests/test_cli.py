@@ -33,18 +33,27 @@ def test_paths_command_writes_resolved_paths_json_to_stdout(
 
     assert exit_code == 0
     assert stderr == ""
+    expected_paths = [
+        {
+            "input": str(first_path),
+            "resolved": first_path.resolve().as_posix(),
+        },
+        {
+            "input": str(second_path),
+            "resolved": second_path.resolve().as_posix(),
+        },
+    ]
     assert json.loads(stdout) == {
         "command": "paths",
-        "paths": [
-            {
-                "input": str(first_path),
-                "resolved": first_path.resolve().as_posix(),
-            },
-            {
-                "input": str(second_path),
-                "resolved": second_path.resolve().as_posix(),
-            },
-        ],
+        "paths": expected_paths,
+        "source": {
+            "dandi": None,
+            "kind": "paths",
+            "local": None,
+            "paths": expected_paths,
+            "precedence": "command_line_paths",
+            "resolved_count": 2,
+        },
     }
 
 
@@ -139,6 +148,7 @@ def test_config_init_writes_versioned_project_local_toml(
             "local": None,
             "paths": [],
             "precedence": "none",
+            "resolved_count": 0,
         },
     }
 
@@ -197,6 +207,7 @@ def test_config_show_resolves_config_paths_relative_to_config_file(
                 }
             ],
             "precedence": "config_paths",
+            "resolved_count": 1,
         },
     }
 
@@ -233,22 +244,35 @@ def test_paths_command_uses_config_paths_and_command_default_format(
 
     assert exit_code == 0
     assert stderr == ""
+    expected_paths = [
+        {
+            "input": "source.nwb",
+            "resolved": source_path.resolve().as_posix(),
+        }
+    ]
     assert json.loads(stdout) == {
         "command": "paths",
-        "paths": [
-            {
-                "input": "source.nwb",
-                "resolved": source_path.resolve().as_posix(),
-            }
-        ],
+        "paths": expected_paths,
+        "source": {
+            "dandi": None,
+            "kind": "paths",
+            "local": None,
+            "paths": expected_paths,
+            "precedence": "config_paths",
+            "resolved_count": 1,
+        },
     }
 
 
 def test_command_line_paths_override_config_paths(tmp_path: pathlib.Path) -> None:
     config_source_path = tmp_path / "config.nwb"
     cli_source_path = tmp_path / "cli.nwb"
+    local_dir = tmp_path / "local"
+    local_source_path = local_dir / "local.nwb"
+    local_dir.mkdir()
     config_source_path.touch()
     cli_source_path.touch()
+    local_source_path.touch()
     config_path = tmp_path / "lazynwb.toml"
     _write_config(
         config_path,
@@ -257,6 +281,10 @@ def test_command_line_paths_override_config_paths(tmp_path: pathlib.Path) -> Non
 
         [source]
         paths = ["config.nwb"]
+
+        [source.local]
+        root = "local"
+        glob = "*.nwb"
         """,
     )
 
@@ -266,14 +294,23 @@ def test_command_line_paths_override_config_paths(tmp_path: pathlib.Path) -> Non
 
     assert exit_code == 0
     assert stderr == ""
+    expected_paths = [
+        {
+            "input": str(cli_source_path),
+            "resolved": cli_source_path.resolve().as_posix(),
+        }
+    ]
     assert json.loads(stdout) == {
         "command": "paths",
-        "paths": [
-            {
-                "input": str(cli_source_path),
-                "resolved": cli_source_path.resolve().as_posix(),
-            }
-        ],
+        "paths": expected_paths,
+        "source": {
+            "dandi": None,
+            "kind": "paths",
+            "local": None,
+            "paths": expected_paths,
+            "precedence": "command_line_paths",
+            "resolved_count": 1,
+        },
     }
 
 
@@ -304,18 +341,127 @@ def test_local_root_glob_source_discovers_paths_when_no_config_paths(
 
     assert exit_code == 0
     assert stderr == ""
+    expected_paths = [
+        {
+            "input": "data/a.nwb",
+            "resolved": first_path.resolve().as_posix(),
+        },
+        {
+            "input": "data/b.nwb",
+            "resolved": second_path.resolve().as_posix(),
+        },
+    ]
     assert json.loads(stdout) == {
         "command": "paths",
-        "paths": [
-            {
-                "input": "data/a.nwb",
-                "resolved": first_path.resolve().as_posix(),
+        "paths": expected_paths,
+        "source": {
+            "dandi": None,
+            "kind": "local",
+            "local": {
+                "glob": "*.nwb",
+                "resolved_root": data_dir.resolve().as_posix(),
+                "root": "data",
             },
-            {
-                "input": "data/b.nwb",
-                "resolved": second_path.resolve().as_posix(),
+            "paths": expected_paths,
+            "precedence": "config_local",
+            "resolved_count": 2,
+        },
+    }
+
+
+def test_command_line_root_defaults_to_recursive_nwb_glob(
+    tmp_path: pathlib.Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    nested_dir = data_dir / "nested"
+    nested_dir.mkdir(parents=True)
+    top_level_path = data_dir / "top.nwb"
+    nested_path = nested_dir / "child.nwb"
+    ignored_path = nested_dir / "ignored.txt"
+    top_level_path.touch()
+    nested_path.touch()
+    ignored_path.touch()
+
+    exit_code, stdout, stderr = _run_cli(["paths", "--root", str(data_dir)])
+
+    assert exit_code == 0
+    assert stderr == ""
+    expected_paths = [
+        {
+            "input": f"{data_dir}/nested/child.nwb",
+            "resolved": nested_path.resolve().as_posix(),
+        },
+        {
+            "input": f"{data_dir}/top.nwb",
+            "resolved": top_level_path.resolve().as_posix(),
+        },
+    ]
+    assert json.loads(stdout) == {
+        "command": "paths",
+        "paths": expected_paths,
+        "source": {
+            "dandi": None,
+            "kind": "local",
+            "local": {
+                "glob": "**/*.nwb",
+                "resolved_root": data_dir.resolve().as_posix(),
+                "root": str(data_dir),
             },
-        ],
+            "paths": expected_paths,
+            "precedence": "command_line_local",
+            "resolved_count": 2,
+        },
+    }
+
+
+def test_config_show_reports_local_discovery_metadata_and_paths(
+    tmp_path: pathlib.Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    nested_dir = data_dir / "nested"
+    nested_dir.mkdir(parents=True)
+    top_level_path = data_dir / "b.nwb"
+    nested_path = nested_dir / "a.nwb"
+    top_level_path.touch()
+    nested_path.touch()
+    config_path = tmp_path / "lazynwb.toml"
+    _write_config(
+        config_path,
+        """
+        version = 1
+
+        [source.local]
+        root = "data"
+        """,
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["config", "show", "--config", str(config_path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    expected_paths = [
+        {
+            "input": "data/b.nwb",
+            "resolved": top_level_path.resolve().as_posix(),
+        },
+        {
+            "input": "data/nested/a.nwb",
+            "resolved": nested_path.resolve().as_posix(),
+        },
+    ]
+    assert json.loads(stdout)["source"] == {
+        "dandi": None,
+        "kind": "local",
+        "local": {
+            "glob": "**/*.nwb",
+            "resolved_root": data_dir.resolve().as_posix(),
+            "root": "data",
+        },
+        "paths": expected_paths,
+        "precedence": "config_local",
+        "resolved_count": 2,
     }
 
 
@@ -366,6 +512,7 @@ def test_dandi_config_show_supports_anonymous_s3_and_flag_overrides(
         "local": None,
         "paths": [],
         "precedence": "command_line_dandi",
+        "resolved_count": 0,
     }
 
 
@@ -379,7 +526,7 @@ def test_incomplete_local_source_returns_machine_readable_validation_error(
         version = 1
 
         [source.local]
-        root = "data"
+        glob = "*.nwb"
         """,
     )
 
@@ -390,8 +537,39 @@ def test_incomplete_local_source_returns_machine_readable_validation_error(
     assert json.loads(stdout) == {
         "error": {
             "code": "source_config_incomplete",
-            "details": {"missing": ["source.local.glob"]},
-            "message": "Local source configuration requires both root and glob.",
+            "details": {"missing": ["source.local.root"]},
+            "message": "Local source configuration requires root when glob is provided.",
+        }
+    }
+
+
+def test_missing_local_root_returns_machine_readable_validation_error(
+    tmp_path: pathlib.Path,
+) -> None:
+    config_path = tmp_path / "lazynwb.toml"
+    missing_root = tmp_path / "missing"
+    _write_config(
+        config_path,
+        """
+        version = 1
+
+        [source.local]
+        root = "missing"
+        """,
+    )
+
+    exit_code, stdout, stderr = _run_cli(["paths", "--config", str(config_path)])
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "source_root_not_found",
+            "details": {
+                "resolved_root": missing_root.resolve(strict=False).as_posix(),
+                "root": "missing",
+            },
+            "message": "The configured local source root does not exist.",
         }
     }
 
@@ -469,6 +647,40 @@ def test_config_resolution_debug_logs_go_to_stderr(
     assert json.loads(stdout)["source"]["precedence"] == "config_paths"
     assert "loading lazynwb config" in stderr
     assert "resolved active path source" in stderr
+    assert "DEBUG:" not in stdout
+
+
+def test_local_discovery_debug_logs_timing_and_match_count(
+    tmp_path: pathlib.Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    first_path = data_dir / "a.nwb"
+    second_path = data_dir / "b.nwb"
+    first_path.touch()
+    second_path.touch()
+    config_path = tmp_path / "lazynwb.toml"
+    _write_config(
+        config_path,
+        """
+        version = 1
+
+        [source.local]
+        root = "data"
+        """,
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["--debug", "paths", "--config", str(config_path)]
+    )
+
+    assert exit_code == 0
+    assert json.loads(stdout)["source"]["resolved_count"] == 2
+    assert "starting local source discovery" in stderr
+    assert "completed local source discovery" in stderr
+    assert "glob=**/*.nwb" in stderr
+    assert "match_count=2" in stderr
+    assert "elapsed_ms=" in stderr
     assert "DEBUG:" not in stdout
 
 
