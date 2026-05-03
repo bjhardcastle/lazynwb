@@ -192,6 +192,8 @@ class _DatasetSchema:
     attrs_json: tuple[tuple[str, _JsonValue], ...] = _EMPTY_ATTRS
     is_group: bool = False
     is_dataset: bool = False
+    hdf5_data_offset: int | None = None
+    hdf5_storage_size: int | None = None
 
     @property
     def attrs(self) -> types.MappingProxyType:
@@ -222,6 +224,8 @@ class _DatasetSchema:
             "attrs": dict(self.attrs_json),
             "is_group": self.is_group,
             "is_dataset": self.is_dataset,
+            "hdf5_data_offset": self.hdf5_data_offset,
+            "hdf5_storage_size": self.hdf5_storage_size,
         }
 
     @classmethod
@@ -256,6 +260,8 @@ class _DatasetSchema:
             attrs_json=attrs,
             is_group=bool(data.get("is_group", False)),
             is_dataset=bool(data.get("is_dataset", False)),
+            hdf5_data_offset=_optional_int(data.get("hdf5_data_offset")),
+            hdf5_storage_size=_optional_int(data.get("hdf5_storage_size")),
         )
 
 
@@ -358,7 +364,7 @@ class _TableColumnSchema:
 class _TableSchemaSnapshot:
     """Versioned table schema/catalog snapshot for one exact table path."""
 
-    PAYLOAD_VERSION = 2
+    PAYLOAD_VERSION = 3
 
     source_identity: _SourceIdentity
     table_path: str

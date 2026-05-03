@@ -841,13 +841,20 @@ class _HDF5MetadataScanner:
         path: str,
         header: _ObjectHeaderInfo,
     ) -> _DatasetDescriptor:
+        layout = dict(header.layout) if header.layout is not None else None
+        if (
+            layout is not None
+            and isinstance(layout.get("address"), int)
+            and layout.get("kind") == "contiguous"
+        ):
+            layout["file_offset"] = self._absolute(int(layout["address"]))
         return _DatasetDescriptor(
             name=name,
             path=path,
             shape=header.dataspace or (),
             datatype=header.datatype or _H5Datatype(kind="opaque", size=0),
             attributes=dict(header.attributes),
-            layout=header.layout,
+            layout=layout,
             fill_value=header.fill_value,
             filters=header.filters,
         )
@@ -1247,6 +1254,8 @@ def _column_schema_from_descriptor(
         attrs_json=catalog_models._attrs_to_tuple(descriptor.attributes),
         is_group=False,
         is_dataset=True,
+        hdf5_data_offset=storage_facts["hdf5_data_offset"],
+        hdf5_storage_size=storage_facts["hdf5_storage_size"],
     )
     if is_metadata_table and descriptor.ndim <= 1:
         logger.debug(
@@ -1297,6 +1306,12 @@ def _storage_facts_from_descriptor(descriptor: _DatasetDescriptor) -> dict[str, 
     layout = descriptor.layout or {}
     storage_layout = layout.get("kind")
     chunks = layout.get("chunk_shape") if storage_layout == "chunked" else None
+    hdf5_data_offset = layout.get("file_offset")
+    hdf5_storage_size = layout.get("storage_size")
+    if not isinstance(hdf5_data_offset, int):
+        hdf5_data_offset = None
+    if not isinstance(hdf5_storage_size, int):
+        hdf5_storage_size = None
     if isinstance(chunks, list):
         chunks = tuple(int(item) for item in chunks)
     compression, compression_opts = _compression_facts_from_filter_ids(
@@ -1318,16 +1333,26 @@ def _storage_facts_from_descriptor(descriptor: _DatasetDescriptor) -> dict[str, 
     read_capabilities = ["metadata", "shape", "dtype", "slice"]
     if descriptor.ndim == 0:
         read_capabilities.append("scalar")
+    if (
+        storage_layout == "contiguous"
+        and hdf5_data_offset is not None
+        and hdf5_storage_size is not None
+        and not filters
+    ):
+        read_capabilities.append("direct_contiguous")
     if chunks is not None:
         read_capabilities.append("chunked")
     if filters:
         read_capabilities.append("filtered")
     logger.debug(
-        "HDF5 parser storage facts for %s: layout=%s chunks=%s filters=%s",
+        "HDF5 parser storage facts for %s: layout=%s chunks=%s filters=%s "
+        "offset=%s storage_size=%s",
         descriptor.path,
         storage_layout,
         chunks,
         filters,
+        hdf5_data_offset,
+        hdf5_storage_size,
     )
     return {
         "chunks": chunks,
@@ -1336,6 +1361,8 @@ def _storage_facts_from_descriptor(descriptor: _DatasetDescriptor) -> dict[str, 
         "compression_opts": compression_opts,
         "filters": tuple(catalog_models._to_json_value(item) for item in filters),
         "read_capabilities": tuple(read_capabilities),
+        "hdf5_data_offset": hdf5_data_offset,
+        "hdf5_storage_size": hdf5_storage_size,
     }
 
 

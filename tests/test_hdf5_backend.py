@@ -29,11 +29,15 @@ def test_hdf5_backend_reader_parses_scalar_table_from_byte_buffer(
 
     snapshot = asyncio.run(reader.read_table_schema_snapshot("intervals/trials"))
     schema = catalog_polars._snapshot_to_polars_schema(snapshot)
+    columns_by_name = {column.name: column for column in snapshot.columns}
 
     assert snapshot.backend == "hdf5"
     assert snapshot.table_path == "intervals/trials"
     assert {"start_time", "stop_time", "condition"}.issubset(schema)
     assert schema["start_time"] == pl.Float64
+    assert columns_by_name["start_time"].dataset.hdf5_data_offset is not None
+    assert columns_by_name["start_time"].dataset.hdf5_storage_size is not None
+    assert "direct_contiguous" in columns_by_name["start_time"].dataset.read_capabilities
 
 
 def test_hdf5_backend_reader_preserves_units_array_catalog_facts(
@@ -299,6 +303,99 @@ def test_public_get_df_uses_fast_hdf5_catalog_for_materialization(
 
     assert df.height > 0
     assert {"start_time", lazynwb.NWB_PATH_COLUMN_NAME}.issubset(df.columns)
+
+
+def test_public_get_df_materializes_supported_hdf5_scalars_without_accessor(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+    source_url = local_hdf5_path.as_uri()
+    reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "catalog.sqlite")
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("supported scalar HDF5 columns should use range reads")
+
+    monkeypatch.setattr(hdf5_reader, "_default_hdf5_backend_reader", lambda _: reader)
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    df = lazynwb.get_df(
+        source_url,
+        "/intervals/trials",
+        exact_path=True,
+        include_column_names=("start_time", "stop_time"),
+        as_polars=True,
+    )
+
+    assert df.select("start_time", "stop_time").height > 0
+    assert 0 < reader._range_reader.request_count < 1000
+    assert reader._range_reader.bytes_fetched < local_hdf5_path.stat().st_size
+    assert "direct HDF5 scalar materialization" in caplog.text
+    assert "fallback columns=[]" in caplog.text
+
+
+def test_hdf5_direct_scalar_materialization_matches_h5py_reference(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    source_url = local_hdf5_path.as_uri()
+
+    trials_df = lazynwb.get_df(
+        source_url,
+        "/intervals/trials",
+        exact_path=True,
+        include_column_names=("start_time", "stop_time"),
+        as_polars=True,
+    )
+    units_df = lazynwb.get_df(
+        source_url,
+        "/units",
+        exact_path=True,
+        include_column_names=("id",),
+        as_polars=True,
+    )
+
+    with h5py.File(local_hdf5_path, "r") as h5_file:
+        expected_start = h5_file["intervals/trials/start_time"][:].tolist()
+        expected_stop = h5_file["intervals/trials/stop_time"][:].tolist()
+        expected_unit_id = h5_file["units/id"][:].tolist()
+
+    assert trials_df["start_time"].to_list() == expected_start
+    assert trials_df["stop_time"].to_list() == expected_stop
+    assert units_df["id"].to_list() == expected_unit_id
+
+
+def test_hdf5_direct_scalar_materializes_bool_column_from_ranges(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nwb_path = tmp_path / "bool-table.nwb"
+    with h5py.File(nwb_path, "w") as h5_file:
+        group = h5_file.create_group("table")
+        group.create_dataset("flag", data=np.array([True, False, True], dtype=np.bool_))
+
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    source_url = nwb_path.as_uri()
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("supported bool HDF5 columns should use range reads")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    df = lazynwb.get_df(
+        source_url,
+        "/table",
+        exact_path=True,
+        include_column_names=("flag",),
+        as_polars=True,
+    )
+
+    assert df["flag"].to_list() == [True, False, True]
 
 
 def test_scan_nwb_uses_fast_hdf5_catalog_for_materialization(
