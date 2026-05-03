@@ -41,6 +41,38 @@ class _NotHDF5Error(_HDF5ParserError):
     """Raised when signature probing rejects a source as non-HDF5."""
 
 
+@dataclasses.dataclass(slots=True)
+class _HDF5TableSchemaScanError(RuntimeError):
+    """Structured per-table error from an internal multi-table schema scan."""
+
+    source_url: str
+    table_path: str
+    feature: str
+    detail: str
+
+    def __str__(self) -> str:
+        return (
+            f"HDF5 table schema scan failed for {self.source_url!r} at "
+            f"{self.table_path!r}: {self.feature}: {self.detail}"
+        )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _HDF5TableSchemaScanResult:
+    """Per-table result from a same-source schema scan lifecycle."""
+
+    table_path: str
+    snapshot: catalog_models._TableSchemaSnapshot | None
+    error: Exception | None
+    request_count: int
+    fetched_bytes: int
+    elapsed_seconds: float
+
+    @property
+    def ok(self) -> bool:
+        return self.snapshot is not None and self.error is None
+
+
 class _HDF5BackendReader:
     """Fast HDF5 catalog reader backed by byte-range reads."""
 
@@ -63,6 +95,76 @@ class _HDF5BackendReader:
         if self._source_identity is None:
             self._source_identity = await self._range_reader.get_source_identity()
         return self._source_identity
+
+    async def _read_table_schema_snapshots(
+        self,
+        exact_table_paths: tuple[str, ...],
+    ) -> dict[str, _HDF5TableSchemaScanResult]:
+        normalized_paths = tuple(dict.fromkeys(exact_table_paths))
+        for exact_table_path in normalized_paths:
+            catalog_backend._require_exact_normalized_path(exact_table_path)
+        logger.debug(
+            "reading %d HDF5 table schema snapshots for %s in one reader lifecycle",
+            len(normalized_paths),
+            self._source_url,
+        )
+        results: dict[str, _HDF5TableSchemaScanResult] = {}
+        for exact_table_path in normalized_paths:
+            request_count_before = _range_reader_request_count(self._range_reader)
+            fetched_bytes_before = _range_reader_fetched_bytes(self._range_reader)
+            started = time.perf_counter()
+            snapshot: catalog_models._TableSchemaSnapshot | None = None
+            error: Exception | None = None
+            try:
+                snapshot = await self.read_table_schema_snapshot(exact_table_path)
+            except KeyError as exc:
+                error = _HDF5TableSchemaScanError(
+                    source_url=self._source_url,
+                    table_path=exact_table_path,
+                    feature="missing_table",
+                    detail=repr(exc),
+                )
+            except _HDF5ParserError as exc:
+                error = exc
+            except Exception as exc:
+                error = _HDF5TableSchemaScanError(
+                    source_url=self._source_url,
+                    table_path=exact_table_path,
+                    feature="unexpected_error",
+                    detail=repr(exc),
+                )
+            request_count = (
+                _range_reader_request_count(self._range_reader) - request_count_before
+            )
+            fetched_bytes = (
+                _range_reader_fetched_bytes(self._range_reader) - fetched_bytes_before
+            )
+            result = _HDF5TableSchemaScanResult(
+                table_path=exact_table_path,
+                snapshot=snapshot,
+                error=error,
+                request_count=request_count,
+                fetched_bytes=fetched_bytes,
+                elapsed_seconds=time.perf_counter() - started,
+            )
+            results[exact_table_path] = result
+            if error is None:
+                logger.debug(
+                    "same-source HDF5 schema scan built %s/%s "
+                    "(requests=%d bytes=%d)",
+                    self._source_url,
+                    exact_table_path,
+                    request_count,
+                    fetched_bytes,
+                )
+            else:
+                logger.debug(
+                    "same-source HDF5 schema scan error for %s/%s: %r",
+                    self._source_url,
+                    exact_table_path,
+                    error,
+                )
+        return results
 
     async def read_table_schema_snapshot(  # noqa: C901
         self,
@@ -249,6 +351,18 @@ def _get_table_length_from_columns(
             )
             return column.shape[0]
     raise lazynwb.exceptions.InternalPathError("Could not determine table length")
+
+
+def _range_reader_request_count(
+    range_reader: hdf5_range_reader._RangeReader,
+) -> int:
+    return int(getattr(range_reader, "request_count", 0))
+
+
+def _range_reader_fetched_bytes(
+    range_reader: hdf5_range_reader._RangeReader,
+) -> int:
+    return int(getattr(range_reader, "bytes_fetched", 0))
 
 
 def _followup_table_paths(exact_table_path: str) -> tuple[str, ...]:

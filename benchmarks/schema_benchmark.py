@@ -250,7 +250,7 @@ def _run_phase(
     work_items: Sequence[_SchemaWorkItem],
 ) -> tuple[_PhaseSummary, tuple[_SchemaMetric, ...]]:
     t0 = time.perf_counter()
-    metrics = tuple(asyncio.run(_read_schema_metric(phase, item)) for item in work_items)
+    metrics = tuple(asyncio.run(_read_phase_metrics(phase, work_items)))
     summary = _PhaseSummary(
         phase=phase,
         elapsed_seconds=time.perf_counter() - t0,
@@ -261,31 +261,70 @@ def _run_phase(
     return summary, metrics
 
 
-async def _read_schema_metric(
+async def _read_phase_metrics(
+    phase: str,
+    work_items: Sequence[_SchemaWorkItem],
+) -> tuple[_SchemaMetric, ...]:
+    metrics: list[_SchemaMetric] = []
+    for source_url, source_items in _group_by_source(work_items):
+        reader = hdf5_reader._default_hdf5_backend_reader(source_url)
+        normalized_paths = tuple(
+            utils.normalize_internal_file_path(item.table_path) for item in source_items
+        )
+        try:
+            results = await reader._read_table_schema_snapshots(normalized_paths)
+        finally:
+            await reader.close()
+        for item, normalized_path in zip(source_items, normalized_paths, strict=True):
+            result = results[normalized_path]
+            if result.error is not None:
+                raise RuntimeError(
+                    f"schema benchmark failed for {source_url}/{normalized_path}: "
+                    f"{result.error}"
+                ) from result.error
+            if result.snapshot is None:
+                raise RuntimeError(
+                    f"schema benchmark did not produce a snapshot for "
+                    f"{source_url}/{normalized_path}"
+                )
+            metrics.append(
+                _metric_from_scan_result(
+                    phase=phase,
+                    work_item=item,
+                    result=result,
+                )
+            )
+    return tuple(metrics)
+
+
+def _group_by_source(
+    work_items: Sequence[_SchemaWorkItem],
+) -> tuple[tuple[str, tuple[_SchemaWorkItem, ...]], ...]:
+    grouped: dict[str, list[_SchemaWorkItem]] = {}
+    for item in work_items:
+        grouped.setdefault(item.source_url, []).append(item)
+    return tuple((source_url, tuple(items)) for source_url, items in grouped.items())
+
+
+def _metric_from_scan_result(
+    *,
     phase: str,
     work_item: _SchemaWorkItem,
+    result: hdf5_reader._HDF5TableSchemaScanResult,
 ) -> _SchemaMetric:
-    reader = hdf5_reader._default_hdf5_backend_reader(work_item.source_url)
-    normalized_table_path = utils.normalize_internal_file_path(work_item.table_path)
-    t0 = time.perf_counter()
-    try:
-        snapshot = await reader.read_table_schema_snapshot(normalized_table_path)
-    finally:
-        await reader.close()
-    elapsed_seconds = time.perf_counter() - t0
-    request_count = int(getattr(reader._range_reader, "request_count", 0))
-    fetched_bytes = int(getattr(reader._range_reader, "bytes_fetched", 0))
+    if result.snapshot is None:
+        raise ValueError("scan result must contain a snapshot")
     return _SchemaMetric(
         phase=phase,
         table_path=work_item.table_path,
         source_url=work_item.source_url,
-        elapsed_seconds=elapsed_seconds,
-        request_count=request_count,
-        fetched_bytes=fetched_bytes,
-        cache_status="hit" if request_count == 0 else "miss",
-        column_count=len(snapshot.columns),
-        table_length=snapshot.table_length,
-        validator_kind=snapshot.source_identity.validator_kind,
+        elapsed_seconds=result.elapsed_seconds,
+        request_count=result.request_count,
+        fetched_bytes=result.fetched_bytes,
+        cache_status="hit" if result.request_count == 0 else "miss",
+        column_count=len(result.snapshot.columns),
+        table_length=result.snapshot.table_length,
+        validator_kind=result.snapshot.source_identity.validator_kind,
     )
 
 

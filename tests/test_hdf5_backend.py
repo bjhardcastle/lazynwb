@@ -151,6 +151,86 @@ def test_hdf5_backend_reader_reuses_parsed_metadata_for_followup_table(
     assert followup_requests < cold_requests
 
 
+def test_hdf5_backend_reader_scans_multiple_tables_in_one_lifecycle(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    shared_reader = _buffer_hdf5_reader(
+        local_hdf5_path,
+        tmp_path / "shared-catalog.sqlite",
+    )
+
+    results = asyncio.run(
+        shared_reader._read_table_schema_snapshots(("intervals/trials", "units"))
+    )
+    shared_requests = shared_reader._range_reader.request_count
+
+    cold_trials_reader = _buffer_hdf5_reader(
+        local_hdf5_path,
+        tmp_path / "cold-trials.sqlite",
+    )
+    asyncio.run(cold_trials_reader.read_table_schema_snapshot("intervals/trials"))
+    cold_units_reader = _buffer_hdf5_reader(
+        local_hdf5_path,
+        tmp_path / "cold-units.sqlite",
+    )
+    asyncio.run(cold_units_reader.read_table_schema_snapshot("units"))
+    independent_requests = (
+        cold_trials_reader._range_reader.request_count
+        + cold_units_reader._range_reader.request_count
+    )
+
+    assert set(results) == {"intervals/trials", "units"}
+    assert results["intervals/trials"].ok
+    assert results["units"].ok
+    assert results["intervals/trials"].snapshot is not None
+    assert results["units"].snapshot is not None
+    assert results["intervals/trials"].request_count > 0
+    assert results["units"].request_count < cold_units_reader._range_reader.request_count
+    assert shared_requests < independent_requests
+
+
+def test_hdf5_backend_multi_table_helper_writes_individual_schema_cache_entries(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    cache_path = tmp_path / "shared-catalog.sqlite"
+    shared_reader = _buffer_hdf5_reader(local_hdf5_path, cache_path)
+
+    asyncio.run(
+        shared_reader._read_table_schema_snapshots(("intervals/trials", "units"))
+    )
+    warm_units_reader = _buffer_hdf5_reader(local_hdf5_path, cache_path)
+    warm_units_snapshot = asyncio.run(
+        warm_units_reader.read_table_schema_snapshot("units")
+    )
+
+    assert warm_units_snapshot.table_path == "units"
+    assert warm_units_reader._range_reader.request_count == 0
+
+
+def test_hdf5_backend_multi_table_helper_reports_missing_table_per_result(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "catalog.sqlite")
+
+    results = asyncio.run(
+        reader._read_table_schema_snapshots(("intervals/trials", "not_a_table"))
+    )
+
+    assert results["intervals/trials"].ok
+    assert results["not_a_table"].snapshot is None
+    assert isinstance(
+        results["not_a_table"].error,
+        hdf5_reader._HDF5TableSchemaScanError,
+    )
+    assert results["not_a_table"].error is not None
+    assert results["not_a_table"].error.source_url == local_hdf5_path.as_uri()
+    assert results["not_a_table"].error.table_path == "not_a_table"
+    assert results["not_a_table"].error.feature == "missing_table"
+
+
 def test_public_get_table_schema_uses_fast_hdf5_for_obstore_file_url(
     local_hdf5_path: pathlib.Path,
     tmp_path: pathlib.Path,
