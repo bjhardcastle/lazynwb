@@ -224,6 +224,12 @@ def _add_source_override_arguments(
         help="DANDI dandiset version; omit to defer latest-version resolution",
     )
     parser.add_argument(
+        "--dandi-path-pattern",
+        default=None,
+        dest="dandi_path_pattern",
+        help="DANDI asset path pattern matched against archive asset paths",
+    )
+    parser.add_argument(
         "--anonymous-s3",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -243,6 +249,7 @@ def _source_overrides_from_args(
         local_glob=getattr(args, "local_glob", None),
         dandi_dandiset_id=getattr(args, "dandi_dandiset_id", None),
         dandi_version=getattr(args, "dandi_version", None),
+        dandi_path_pattern=getattr(args, "dandi_path_pattern", None),
         dandi_anonymous_s3=getattr(args, "dandi_anonymous_s3", None),
     )
 

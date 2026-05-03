@@ -25,6 +25,7 @@ paths = []
 [source.dandi]
 # dandiset_id = "000363"
 # version = "draft"
+# path_pattern = "sub-*/*.nwb"
 anonymous_s3 = true
 
 [commands.paths]
@@ -42,6 +43,7 @@ class _LocalSourceConfig:
 class _DandiSourceConfig:
     dandiset_id: str | None = None
     version: str | None = None
+    path_pattern: str | None = None
     anonymous_s3: bool = True
 
 
@@ -292,7 +294,7 @@ def _parse_dandi_source_config(
     table = _expect_table(value, path=path, field="source.dandi")
     _reject_unknown_keys(
         table,
-        allowed_keys=("dandiset_id", "version", "anonymous_s3"),
+        allowed_keys=("dandiset_id", "version", "path_pattern", "anonymous_s3"),
         path=path,
         table_name="source.dandi",
     )
@@ -310,6 +312,11 @@ def _parse_dandi_source_config(
             field="source.dandi.dandiset_id",
         ),
         version=_expect_optional_str(table.get("version"), path=path, field="source.dandi.version"),
+        path_pattern=_expect_optional_str(
+            table.get("path_pattern"),
+            path=path,
+            field="source.dandi.path_pattern",
+        ),
         anonymous_s3=anonymous_s3,
     )
 

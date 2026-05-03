@@ -20,10 +20,14 @@ def _source_paths_json_object(
     paths: collections.abc.Iterable[collections.abc.Mapping[str, str]],
     resolved_source: cli_sources._ResolvedSource,
 ) -> dict[str, typing.Any]:
+    resolved_paths = tuple(paths)
     return {
         "command": "paths",
-        "paths": list(paths),
-        "source": cli_sources._source_json_object(resolved_source),
+        "paths": list(resolved_paths),
+        "source": cli_sources._source_json_object(
+            resolved_source,
+            paths=resolved_paths,
+        ),
     }
 
 

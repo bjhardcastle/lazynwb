@@ -19,6 +19,8 @@ class _ErrorCode(str, enum.Enum):
     INTERNAL_ERROR = "internal_error"
     SOURCE_CONFIG_CONFLICT = "source_config_conflict"
     SOURCE_CONFIG_INCOMPLETE = "source_config_incomplete"
+    SOURCE_DANDI_NO_ASSETS = "source_dandi_no_assets"
+    SOURCE_DANDI_URL_UNAVAILABLE = "source_dandi_url_unavailable"
     SOURCE_NOT_CONFIGURED = "source_not_configured"
     SOURCE_PATHS_UNAVAILABLE = "source_paths_unavailable"
     SOURCE_PATH_NOT_FOUND = "source_path_not_found"

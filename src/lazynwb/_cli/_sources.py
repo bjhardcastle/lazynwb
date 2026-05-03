@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import concurrent.futures
 import dataclasses
+import fnmatch
 import logging
 import pathlib
 import time
@@ -10,6 +12,9 @@ import urllib.request
 
 import lazynwb._cli._config as cli_config
 import lazynwb._cli._errors as cli_errors
+import lazynwb.dandi as dandi
+import lazynwb.file_io as file_io
+import lazynwb.utils as utils
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +28,7 @@ class _SourceOverrides:
     local_glob: str | None = None
     dandi_dandiset_id: str | None = None
     dandi_version: str | None = None
+    dandi_path_pattern: str | None = None
     dandi_anonymous_s3: bool | None = None
 
 
@@ -47,7 +53,7 @@ def _resolve_source(
         loaded_config.exists,
         len(overrides.paths),
     )
-    override_mode = _source_override_mode(overrides)
+    override_mode = _direct_source_override_mode(overrides)
     if override_mode == "paths":
         return _resolve_path_source(
             paths=overrides.paths,
@@ -70,20 +76,6 @@ def _resolve_source(
             base_dir=None if overrides.local_root is not None else loaded_config.base_dir,
             discover_local=discover_local,
         )
-    if override_mode == "dandi":
-        return _resolve_dandi_source(
-            dandiset_id=overrides.dandi_dandiset_id
-            if overrides.dandi_dandiset_id is not None
-            else loaded_config.project.source.dandi.dandiset_id,
-            version=overrides.dandi_version
-            if overrides.dandi_version is not None
-            else loaded_config.project.source.dandi.version,
-            anonymous_s3=overrides.dandi_anonymous_s3
-            if overrides.dandi_anonymous_s3 is not None
-            else loaded_config.project.source.dandi.anonymous_s3,
-            precedence="command_line_dandi",
-        )
-
     source_config = loaded_config.project.source
     if source_config.paths:
         return _resolve_path_source(
@@ -102,14 +94,26 @@ def _resolve_source(
             discover_local=discover_local,
         )
 
-    if source_config.dandi.dandiset_id is not None or source_config.dandi.version is not None:
+    if _has_dandi_source(overrides=overrides, config=source_config.dandi):
+        precedence = (
+            "command_line_dandi"
+            if _has_dandi_override(overrides)
+            else "config_dandi"
+        )
         return _resolve_dandi_source(
-            dandiset_id=source_config.dandi.dandiset_id,
-            version=source_config.dandi.version,
+            dandiset_id=overrides.dandi_dandiset_id
+            if overrides.dandi_dandiset_id is not None
+            else source_config.dandi.dandiset_id,
+            version=overrides.dandi_version
+            if overrides.dandi_version is not None
+            else source_config.dandi.version,
+            path_pattern=overrides.dandi_path_pattern
+            if overrides.dandi_path_pattern is not None
+            else source_config.dandi.path_pattern,
             anonymous_s3=source_config.dandi.anonymous_s3
             if overrides.dandi_anonymous_s3 is None
             else overrides.dandi_anonymous_s3,
-            precedence="config_dandi",
+            precedence=precedence,
         )
 
     logger.debug("no active lazynwb source is configured")
@@ -122,12 +126,7 @@ def _paths_for_source(
     if resolved_source.kind in ("paths", "local"):
         return resolved_source.paths
     if resolved_source.kind == "dandi":
-        raise cli_errors._CLIError(
-            code=cli_errors._ErrorCode.SOURCE_PATHS_UNAVAILABLE,
-            details={"source": _source_json_object(resolved_source)},
-            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
-            message="The active DANDI source cannot be expanded to paths without remote lookup.",
-        )
+        return _list_dandi_source_paths(resolved_source)
     raise cli_errors._CLIError(
         code=cli_errors._ErrorCode.SOURCE_NOT_CONFIGURED,
         details={"source": _source_json_object(resolved_source)},
@@ -136,14 +135,19 @@ def _paths_for_source(
     )
 
 
-def _source_json_object(resolved_source: _ResolvedSource) -> dict[str, typing.Any]:
+def _source_json_object(
+    resolved_source: _ResolvedSource,
+    *,
+    paths: tuple[typing.Mapping[str, str], ...] | None = None,
+) -> dict[str, typing.Any]:
+    resolved_paths = resolved_source.paths if paths is None else paths
     return {
         "dandi": resolved_source.dandi,
         "kind": resolved_source.kind,
         "local": resolved_source.local,
-        "paths": list(resolved_source.paths),
+        "paths": list(resolved_paths),
         "precedence": resolved_source.precedence,
-        "resolved_count": len(resolved_source.paths),
+        "resolved_count": len(resolved_paths),
     }
 
 
@@ -185,16 +189,14 @@ def _list_explicit_paths(
     return tuple(resolved_paths)
 
 
-def _source_override_mode(overrides: _SourceOverrides) -> str | None:
+def _direct_source_override_mode(overrides: _SourceOverrides) -> str | None:
     has_paths = bool(overrides.paths)
     has_local = overrides.local_root is not None or overrides.local_glob is not None
-    has_dandi = overrides.dandi_dandiset_id is not None or overrides.dandi_version is not None
     active_modes = [
         name
         for name, is_active in (
             ("paths", has_paths),
             ("local", has_local),
-            ("dandi", has_dandi),
         )
         if is_active
     ]
@@ -275,6 +277,7 @@ def _resolve_dandi_source(
     *,
     dandiset_id: str | None,
     version: str | None,
+    path_pattern: str | None,
     anonymous_s3: bool,
     precedence: str,
 ) -> _ResolvedSource:
@@ -289,16 +292,281 @@ def _resolve_dandi_source(
     dandi = {
         "anonymous_s3": anonymous_s3,
         "dandiset_id": dandiset_id,
+        "path_pattern": path_pattern,
         "version": version,
     }
+    _apply_dandi_file_io_config(anonymous_s3=anonymous_s3)
     logger.debug(
-        "resolved active DANDI source: precedence=%s dandiset_id=%s version=%s anonymous_s3=%s",
+        "resolved active DANDI source: precedence=%s dandiset_id=%s version=%s "
+        "path_pattern=%s anonymous_s3=%s",
         precedence,
         dandiset_id,
         version,
+        path_pattern,
         anonymous_s3,
     )
     return _ResolvedSource(kind="dandi", precedence=precedence, dandi=dandi)
+
+
+def _has_dandi_source(
+    *,
+    overrides: _SourceOverrides,
+    config: cli_config._DandiSourceConfig,
+) -> bool:
+    return any(
+        value is not None
+        for value in (
+            overrides.dandi_dandiset_id,
+            overrides.dandi_version,
+            overrides.dandi_path_pattern,
+            config.dandiset_id,
+            config.version,
+            config.path_pattern,
+        )
+    )
+
+
+def _has_dandi_override(overrides: _SourceOverrides) -> bool:
+    return any(
+        value is not None
+        for value in (
+            overrides.dandi_dandiset_id,
+            overrides.dandi_version,
+            overrides.dandi_path_pattern,
+            overrides.dandi_anonymous_s3,
+        )
+    )
+
+
+def _apply_dandi_file_io_config(*, anonymous_s3: bool) -> None:
+    previous_anon = file_io.config.anon
+    file_io.config.anon = anonymous_s3
+    logger.debug(
+        "applied DANDI anonymous S3 setting to file I/O config: anonymous_s3=%s "
+        "previous_anon=%s",
+        anonymous_s3,
+        previous_anon,
+    )
+
+
+def _list_dandi_source_paths(
+    resolved_source: _ResolvedSource,
+) -> tuple[dict[str, str], ...]:
+    if resolved_source.dandi is None:
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.INTERNAL_ERROR,
+            details={"source": _source_json_object(resolved_source)},
+            exit_code=cli_errors._ExitCode.INTERNAL_ERROR,
+            message="DANDI source metadata is unavailable.",
+        )
+
+    dandiset_id = typing.cast(str, resolved_source.dandi["dandiset_id"])
+    version = typing.cast(str | None, resolved_source.dandi["version"])
+    path_pattern = typing.cast(str | None, resolved_source.dandi["path_pattern"])
+    anonymous_s3 = typing.cast(bool, resolved_source.dandi["anonymous_s3"])
+    start_time = time.perf_counter()
+    logger.debug(
+        "starting DANDI source resolution: dandiset_id=%s version=%s "
+        "path_pattern=%s anonymous_s3=%s",
+        dandiset_id,
+        version,
+        path_pattern,
+        anonymous_s3,
+    )
+
+    assets = _get_dandi_assets(dandiset_id=dandiset_id, version=version)
+    logger.debug(
+        "fetched DANDI asset metadata: dandiset_id=%s version=%s asset_count=%d",
+        dandiset_id,
+        version,
+        len(assets),
+    )
+    nwb_assets = _filter_dandi_nwb_assets(assets)
+    logger.debug(
+        "filtered DANDI assets to NWB paths: before=%d after=%d",
+        len(assets),
+        len(nwb_assets),
+    )
+    matched_assets = _filter_dandi_assets_by_pattern(
+        nwb_assets,
+        path_pattern=path_pattern,
+    )
+    if path_pattern is not None:
+        logger.debug(
+            "filtered DANDI assets by path pattern: pattern=%s before=%d after=%d",
+            path_pattern,
+            len(nwb_assets),
+            len(matched_assets),
+        )
+
+    if not matched_assets:
+        logger.debug(
+            "DANDI source resolution found no matching NWB assets: dandiset_id=%s "
+            "version=%s path_pattern=%s asset_count=%d nwb_asset_count=%d",
+            dandiset_id,
+            version,
+            path_pattern,
+            len(assets),
+            len(nwb_assets),
+        )
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.SOURCE_DANDI_NO_ASSETS,
+            details={
+                "asset_count": len(assets),
+                "dandiset_id": dandiset_id,
+                "nwb_asset_count": len(nwb_assets),
+                "path_pattern": path_pattern,
+                "version": version,
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message="No NWB assets matched the active DANDI source.",
+        )
+
+    urls = _get_dandi_asset_s3_urls(
+        dandiset_id=dandiset_id,
+        version=version,
+        assets=matched_assets,
+    )
+    paths = tuple(
+        {
+            "asset_id": _dandi_asset_id(asset),
+            "input": _dandi_asset_path(asset),
+            "resolved": url,
+        }
+        for asset, url in zip(matched_assets, urls, strict=True)
+    )
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    logger.debug(
+        "resolved DANDI S3 URLs: dandiset_id=%s version=%s url_count=%d "
+        "elapsed_ms=%.3f",
+        dandiset_id,
+        version,
+        len(paths),
+        elapsed_ms,
+    )
+    return paths
+
+
+def _get_dandi_assets(
+    *,
+    dandiset_id: str,
+    version: str | None,
+) -> tuple[dict[str, typing.Any], ...]:
+    return tuple(dandi._get_dandiset_assets(dandiset_id, version, order="path"))
+
+
+def _filter_dandi_nwb_assets(
+    assets: tuple[dict[str, typing.Any], ...],
+) -> tuple[dict[str, typing.Any], ...]:
+    return tuple(
+        sorted(
+            (asset for asset in assets if _is_dandi_nwb_asset(asset)),
+            key=_dandi_asset_sort_key,
+        )
+    )
+
+
+def _filter_dandi_assets_by_pattern(
+    assets: tuple[dict[str, typing.Any], ...],
+    *,
+    path_pattern: str | None,
+) -> tuple[dict[str, typing.Any], ...]:
+    if path_pattern is None:
+        return assets
+    return tuple(
+        asset
+        for asset in assets
+        if fnmatch.fnmatchcase(_dandi_asset_path(asset), path_pattern)
+    )
+
+
+def _is_dandi_nwb_asset(asset: dict[str, typing.Any]) -> bool:
+    path = asset.get("path")
+    return isinstance(path, str) and path.lower().endswith(".nwb")
+
+
+def _dandi_asset_sort_key(asset: dict[str, typing.Any]) -> tuple[str, str]:
+    return (_dandi_asset_path(asset), _dandi_asset_id(asset))
+
+
+def _dandi_asset_path(asset: dict[str, typing.Any]) -> str:
+    path = asset.get("path")
+    if not isinstance(path, str) or not path:
+        return _dandi_asset_id(asset)
+    return path
+
+
+def _dandi_asset_id(asset: dict[str, typing.Any]) -> str:
+    asset_id = asset.get("asset_id")
+    if isinstance(asset_id, str) and asset_id:
+        return asset_id
+    return ""
+
+
+def _get_dandi_asset_s3_urls(
+    *,
+    dandiset_id: str,
+    version: str | None,
+    assets: tuple[dict[str, typing.Any], ...],
+) -> tuple[str, ...]:
+    urls: list[str | None] = [None] * len(assets)
+    executor = utils.get_threadpool_executor()
+    future_to_asset = {
+        executor.submit(
+            dandi._get_asset_s3_url,
+            dandiset_id,
+            _dandi_asset_id(asset),
+            version,
+        ): (index, asset)
+        for index, asset in enumerate(assets)
+    }
+    for future in concurrent.futures.as_completed(future_to_asset):
+        index, asset = future_to_asset[future]
+        try:
+            url = future.result()
+        except Exception as exc:
+            logger.debug(
+                "failed to resolve DANDI S3 URL: dandiset_id=%s version=%s "
+                "asset_id=%s path=%s",
+                dandiset_id,
+                version,
+                _dandi_asset_id(asset),
+                _dandi_asset_path(asset),
+                exc_info=True,
+            )
+            raise cli_errors._CLIError(
+                code=cli_errors._ErrorCode.SOURCE_DANDI_URL_UNAVAILABLE,
+                details={
+                    "asset_id": _dandi_asset_id(asset),
+                    "dandiset_id": dandiset_id,
+                    "path": _dandi_asset_path(asset),
+                    "version": version,
+                },
+                exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+                message="A DANDI asset did not provide a usable S3 URL.",
+            ) from exc
+        if not isinstance(url, str) or not url:
+            logger.debug(
+                "DANDI S3 URL helper returned an empty URL: dandiset_id=%s "
+                "version=%s asset_id=%s path=%s",
+                dandiset_id,
+                version,
+                _dandi_asset_id(asset),
+                _dandi_asset_path(asset),
+            )
+            raise cli_errors._CLIError(
+                code=cli_errors._ErrorCode.SOURCE_DANDI_URL_UNAVAILABLE,
+                details={
+                    "asset_id": _dandi_asset_id(asset),
+                    "dandiset_id": dandiset_id,
+                    "path": _dandi_asset_path(asset),
+                    "version": version,
+                },
+                exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+                message="A DANDI asset did not provide a usable S3 URL.",
+            )
+        urls[index] = url
+    return tuple(typing.cast(str, url) for url in urls)
 
 
 def _list_local_glob_paths(
