@@ -125,6 +125,19 @@ to reproduce or run against your own files:
 python benchmarks/streaming_benchmark.py [NWB_PATH]
 ```
 
+Schema inference latency for the remote dynamic-routing workload can be measured
+with [benchmarks/schema_benchmark.py](benchmarks/schema_benchmark.py):
+```
+uv run python benchmarks/schema_benchmark.py
+LAZYNWB_SCHEMA_BENCH_JSON=metrics.json uv run python benchmarks/schema_benchmark.py
+LAZYNWB_SCHEMA_BENCH_UNITS_SOURCES_FILE=tests/paths.txt uv run python benchmarks/schema_benchmark.py
+```
+
+The schema benchmark uses an isolated temporary catalog cache, defaults to
+anonymous public object-store access, and reports cold/warm totals plus per-source
+range GET counts, fetched bytes, and timings. Useful environment variables are
+documented in the script docstring.
+
 ## Why not to use lazynwb
 
 - some convenience features of `pynwb` will not be available, for example object references in tables
