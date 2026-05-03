@@ -5,6 +5,7 @@ import dataclasses
 import datetime
 import logging
 import math
+import os
 import pathlib
 import threading
 import time
@@ -23,6 +24,15 @@ logger = logging.getLogger(__name__)
 
 _HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
 _S3_REGION_CACHE: dict[str, str] = {}
+_S3_REGION_CACHE_LOCK = threading.RLock()
+_CUSTOM_S3_ENDPOINT_OPTION_NAMES = frozenset(
+    {
+        "aws_endpoint",
+        "aws_endpoint_url",
+        "endpoint",
+        "endpoint_url",
+    }
+)
 _ObstoreStoreCacheKey = tuple[str, tuple[tuple[str, str], ...], str, str]
 _SourceIdentityCacheKey = tuple[
     str,
@@ -604,6 +614,15 @@ def _clear_source_identity_cache() -> None:
         _SOURCE_IDENTITY_CACHE.clear()
 
 
+def _clear_s3_region_cache() -> None:
+    with _S3_REGION_CACHE_LOCK:
+        logger.debug(
+            "clearing S3 bucket region cache with %d entries",
+            len(_S3_REGION_CACHE),
+        )
+        _S3_REGION_CACHE.clear()
+
+
 def _clear_cache() -> None:
     """Reset process-lifetime range-reader caches.
 
@@ -616,23 +635,66 @@ def _clear_cache() -> None:
     """
     _clear_obstore_store_cache()
     _clear_source_identity_cache()
+    _clear_s3_region_cache()
 
 
 def _add_discovered_s3_region(
     bucket: str,
     storage_options: dict[str, object],
 ) -> dict[str, object]:
-    if "region" in storage_options or "aws_region" in storage_options or not bucket:
+    if not bucket:
+        logger.debug("S3 bucket region not discoverable: bucket name is empty")
+        return storage_options
+    if _has_custom_s3_endpoint(storage_options):
+        logger.debug(
+            "skipping S3 bucket region discovery for %s because a custom endpoint "
+            "is configured",
+            bucket,
+        )
         return storage_options
     region = _discover_s3_bucket_region(bucket)
-    if region is not None:
-        storage_options["region"] = region
+    if region is None:
+        logger.debug(
+            "S3 bucket region not discoverable for %s; preserving configured region",
+            bucket,
+        )
+        return storage_options
+    configured_region = storage_options.get("region", storage_options.get("aws_region"))
+    if configured_region is not None and str(configured_region) != region:
+        logger.debug(
+            "overriding configured S3 region for %s from %r to discovered bucket "
+            "region %s",
+            bucket,
+            configured_region,
+            region,
+        )
+    elif configured_region is None:
+        logger.debug("using discovered S3 bucket region for %s: %s", bucket, region)
+    else:
+        logger.debug("confirmed configured S3 region for %s: %s", bucket, region)
+    storage_options.pop("aws_region", None)
+    storage_options["region"] = region
     return storage_options
 
 
+def _has_custom_s3_endpoint(storage_options: Mapping[str, object]) -> bool:
+    if os.getenv("AWS_ENDPOINT_URL") or os.getenv("AWS_ENDPOINT"):
+        return True
+    option_names = {str(key).lower() for key in storage_options}
+    if option_names & _CUSTOM_S3_ENDPOINT_OPTION_NAMES:
+        return True
+    config = storage_options.get("config")
+    if isinstance(config, Mapping):
+        config_names = {str(key).lower() for key in config}
+        return bool(config_names & _CUSTOM_S3_ENDPOINT_OPTION_NAMES)
+    return False
+
+
 def _discover_s3_bucket_region(bucket: str) -> str | None:
-    cached = _S3_REGION_CACHE.get(bucket)
+    with _S3_REGION_CACHE_LOCK:
+        cached = _S3_REGION_CACHE.get(bucket)
     if cached is not None:
+        logger.debug("reusing cached S3 bucket region for %s: %s", bucket, cached)
         return cached
     request = urllib.request.Request(
         f"https://{bucket}.s3.amazonaws.com",
@@ -647,8 +709,11 @@ def _discover_s3_bucket_region(bucket: str) -> str | None:
         logger.debug("could not discover S3 bucket region for %s: %r", bucket, exc)
         return None
     if region:
-        _S3_REGION_CACHE[bucket] = region
+        with _S3_REGION_CACHE_LOCK:
+            _S3_REGION_CACHE[bucket] = region
         logger.debug("discovered S3 bucket region for %s: %s", bucket, region)
+    else:
+        logger.debug("S3 bucket region not discoverable for %s: no response header", bucket)
     return region
 
 

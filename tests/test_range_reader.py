@@ -66,6 +66,7 @@ def test_source_identity_from_obstore_metadata() -> None:
 def test_s3_region_discovery_adds_region_when_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
     monkeypatch.setattr(
         hdf5_range_reader,
         "_discover_s3_bucket_region",
@@ -80,9 +81,12 @@ def test_s3_region_discovery_adds_region_when_missing(
     assert options == {"skip_signature": True, "region": "us-west-2"}
 
 
-def test_s3_region_discovery_preserves_explicit_region(
+def test_s3_region_discovery_overrides_wrong_configured_region(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.range_reader")
     monkeypatch.setattr(
         hdf5_range_reader,
         "_discover_s3_bucket_region",
@@ -94,7 +98,159 @@ def test_s3_region_discovery_preserves_explicit_region(
         storage_options={"skip_signature": True, "region": "eu-west-1"},
     )
 
-    assert options == {"skip_signature": True, "region": "eu-west-1"}
+    assert options == {"skip_signature": True, "region": "us-west-2"}
+    assert "overriding configured S3 region for aind-scratch-data" in caplog.text
+
+
+def test_s3_region_discovery_translates_aws_region_for_normal_s3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-east-2",
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="aind-private-data",
+        storage_options={"skip_signature": False, "aws_region": "us-west-2"},
+    )
+
+    assert options == {"skip_signature": False, "region": "us-east-2"}
+
+
+def test_s3_region_discovery_preserves_custom_endpoint_region(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.range_reader")
+
+    def _fail_discovery(bucket: str) -> str:
+        raise AssertionError("custom S3 endpoints should not discover AWS regions")
+
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        _fail_discovery,
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="local-bucket",
+        storage_options={
+            "endpoint": "http://localhost:9000",
+            "region": "local",
+            "skip_signature": True,
+        },
+    )
+
+    assert options == {
+        "endpoint": "http://localhost:9000",
+        "region": "local",
+        "skip_signature": True,
+    }
+    assert "custom endpoint is configured" in caplog.text
+
+
+def test_s3_region_discovery_preserves_endpoint_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    monkeypatch.setenv("AWS_ENDPOINT_URL", "http://localhost:9000")
+
+    def _fail_discovery(bucket: str) -> str:
+        raise AssertionError("custom S3 endpoint env should skip AWS region discovery")
+
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        _fail_discovery,
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="local-bucket",
+        storage_options={"region": "local"},
+    )
+
+    assert options == {"region": "local"}
+
+
+def test_s3_region_discovery_caches_region_by_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.range_reader")
+    calls: list[str] = []
+
+    class _FakeS3RegionResponse:
+        def __init__(self, region: str) -> None:
+            self.headers = {"x-amz-bucket-region": region}
+
+        def __enter__(self) -> _FakeS3RegionResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def _fake_urlopen(
+        request: hdf5_range_reader.urllib.request.Request,
+        timeout: float,
+    ) -> _FakeS3RegionResponse:
+        del timeout
+        url = request.full_url
+        calls.append(url)
+        if url == "https://bucket-a.s3.amazonaws.com":
+            return _FakeS3RegionResponse("us-west-2")
+        if url == "https://bucket-b.s3.amazonaws.com":
+            return _FakeS3RegionResponse("us-east-1")
+        raise AssertionError(url)
+
+    monkeypatch.setattr(hdf5_range_reader.urllib.request, "urlopen", _fake_urlopen)
+
+    first = hdf5_range_reader._add_discovered_s3_region(
+        bucket="bucket-a",
+        storage_options={},
+    )
+    second = hdf5_range_reader._add_discovered_s3_region(
+        bucket="bucket-b",
+        storage_options={},
+    )
+    cached = hdf5_range_reader._add_discovered_s3_region(
+        bucket="bucket-a",
+        storage_options={},
+    )
+
+    assert first == {"region": "us-west-2"}
+    assert second == {"region": "us-east-1"}
+    assert cached == {"region": "us-west-2"}
+    assert calls == [
+        "https://bucket-a.s3.amazonaws.com",
+        "https://bucket-b.s3.amazonaws.com",
+    ]
+    assert "reusing cached S3 bucket region for bucket-a" in caplog.text
+
+
+def test_s3_region_discovery_logs_not_discoverable(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.range_reader")
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        lambda bucket: None,
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="unknown-bucket",
+        storage_options={"region": "us-west-2"},
+    )
+
+    assert options == {"region": "us-west-2"}
+    assert "S3 bucket region not discoverable for unknown-bucket" in caplog.text
 
 
 def test_obstore_store_cache_reuses_store_for_same_bucket_options(
@@ -111,6 +267,11 @@ def test_obstore_store_cache_reuses_store_for_same_bucket_options(
         return stores[0]
 
     monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
     config = hdf5_range_reader._RangeReaderConfig(
         storage_options={"region": "us-west-2", "skip_signature": True},
     )
@@ -198,6 +359,11 @@ def test_clear_cache_resets_obstore_store_cache(
         return stores[len(calls) - 1]
 
     monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
     config = hdf5_range_reader._RangeReaderConfig(
         storage_options={"region": "us-west-2", "skip_signature": True},
     )
@@ -242,6 +408,11 @@ def test_obstore_source_identity_cache_reuses_head_for_same_source(
 
     monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
     monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
     config = hdf5_range_reader._RangeReaderConfig(
         storage_options={"region": "us-west-2", "skip_signature": True},
     )
@@ -283,6 +454,11 @@ def test_clear_cache_resets_obstore_source_identity_cache(
 
     monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
     monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
     config = hdf5_range_reader._RangeReaderConfig(
         storage_options={"region": "us-west-2", "skip_signature": True},
     )
@@ -328,6 +504,11 @@ def test_obstore_source_identity_cache_distinguishes_auth_options(
 
     monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
     monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
 
     try:
         unsigned_reader = hdf5_range_reader._ObstoreRangeReader(

@@ -455,9 +455,16 @@ from lazynwb.file_io import config
 config.use_obstore = True                         # use obstore for S3/GCS/Azure (default: False)
 config.use_remfile = False                        # use remfile for HTTP byte-range requests (default: True)
 config.anon = True                                # anonymous access across backends
-config.fsspec_storage_options = {"region": "us-west-2"}  # backend-specific extras if needed
+config.fsspec_storage_options = {"request_payer": True}  # backend-specific extras if needed
 config.disable_cache = False                      # disable FileAccessor caching (default: False)
 ```
+
+For normal AWS S3 buckets, the region belongs to the bucket, not the caller's
+current AWS session. The fast HDF5 range reader discovers and caches bucket
+regions per bucket, so avoid setting a generic `{"region": "..."}` for workflows
+that may mix buckets from different AWS regions. Keep explicit region or endpoint
+settings for S3-compatible storage such as localstack, MinIO, or R2, where they
+describe that custom service rather than an AWS bucket location.
 
 ---
 
