@@ -516,20 +516,61 @@ def _is_direct_hdf5_scalar_column(
     return True
 
 
+def _is_direct_hdf5_indexed_data_column(
+    column: catalog_models._TableColumnSchema,
+    columns_by_name: Mapping[str, catalog_models._TableColumnSchema],
+) -> bool:
+    if column.is_index_column or not column.is_nominally_indexed:
+        return False
+    if column.is_multidimensional:
+        return False
+    if column.dtype.kind not in {"numeric", "bool"}:
+        return False
+    if column.dtype.numpy_dtype is None:
+        return False
+    if column.ndim != 1:
+        return False
+    if "direct_contiguous" not in column.dataset.read_capabilities:
+        return False
+    index_column_name = column.index_column_name or f"{column.name}_index"
+    index_column = columns_by_name.get(index_column_name)
+    if index_column is None:
+        return False
+    if not index_column.is_index_column:
+        return False
+    if index_column.dtype.kind not in {"numeric", "bool"}:
+        return False
+    if index_column.dtype.numpy_dtype is None:
+        return False
+    return "direct_contiguous" in index_column.dataset.read_capabilities
+
+
 def _split_direct_hdf5_columns(
     columns: Iterable[catalog_models._TableColumnSchema],
 ) -> tuple[
     tuple[catalog_models._TableColumnSchema, ...],
     tuple[catalog_models._TableColumnSchema, ...],
+    tuple[catalog_models._TableColumnSchema, ...],
 ]:
+    columns = tuple(columns)
+    columns_by_name = {column.name: column for column in columns}
     direct_columns: list[catalog_models._TableColumnSchema] = []
+    direct_indexed_columns: list[catalog_models._TableColumnSchema] = []
     fallback_columns: list[catalog_models._TableColumnSchema] = []
+    direct_indexed_raw_names: set[str] = set()
     for column in columns:
+        if _is_direct_hdf5_indexed_data_column(column, columns_by_name):
+            direct_indexed_columns.append(column)
+            direct_indexed_raw_names.add(column.name)
+            direct_indexed_raw_names.add(column.index_column_name or f"{column.name}_index")
+    for column in columns:
+        if column.name in direct_indexed_raw_names:
+            continue
         if _is_direct_hdf5_scalar_column(column):
             direct_columns.append(column)
         else:
             fallback_columns.append(column)
-    return tuple(direct_columns), tuple(fallback_columns)
+    return tuple(direct_columns), tuple(direct_indexed_columns), tuple(fallback_columns)
 
 
 def _source_path_strings(
@@ -548,11 +589,14 @@ def _source_path_strings(
 
 def _read_direct_hdf5_column_data(
     path: lazynwb.types_.PathLike,
-    columns: Iterable[catalog_models._TableColumnSchema],
+    scalar_columns: Iterable[catalog_models._TableColumnSchema],
+    indexed_columns: Iterable[catalog_models._TableColumnSchema],
+    columns_by_name: Mapping[str, catalog_models._TableColumnSchema],
     table_row_indices: Sequence[int] | None,
 ) -> dict[str, Any]:
-    columns = tuple(columns)
-    if not columns:
+    scalar_columns = tuple(scalar_columns)
+    indexed_columns = tuple(indexed_columns)
+    if not scalar_columns and not indexed_columns:
         return {}
     reader = hdf5_reader._default_hdf5_backend_reader(path)
     request_count_before = int(getattr(reader._range_reader, "request_count", 0))
@@ -561,16 +605,20 @@ def _read_direct_hdf5_column_data(
         column_data = _run_async_value(
             _read_direct_hdf5_column_data_async(
                 reader._range_reader,
-                columns,
+                scalar_columns,
+                indexed_columns,
+                columns_by_name,
                 table_row_indices,
             )
         )
     finally:
         _run_async_value(reader.close())
     logger.debug(
-        "direct HDF5 scalar materialization for %r: columns=%s requests=%d bytes=%d",
+        "direct HDF5 materialization for %r: scalar_columns=%s indexed_columns=%s "
+        "requests=%d bytes=%d",
         path,
-        [column.name for column in columns],
+        [column.name for column in scalar_columns],
+        [column.name for column in indexed_columns],
         int(getattr(reader._range_reader, "request_count", 0)) - request_count_before,
         int(getattr(reader._range_reader, "bytes_fetched", 0)) - fetched_bytes_before,
     )
@@ -579,17 +627,27 @@ def _read_direct_hdf5_column_data(
 
 async def _read_direct_hdf5_column_data_async(
     range_reader: hdf5_range_reader._RangeReader,
-    columns: tuple[catalog_models._TableColumnSchema, ...],
+    scalar_columns: tuple[catalog_models._TableColumnSchema, ...],
+    indexed_columns: tuple[catalog_models._TableColumnSchema, ...],
+    columns_by_name: Mapping[str, catalog_models._TableColumnSchema],
     table_row_indices: Sequence[int] | None,
 ) -> dict[str, Any]:
-    return {
+    column_data = {
         column.name: await _read_direct_hdf5_column_array(
             range_reader,
             column,
             table_row_indices,
         )
-        for column in columns
+        for column in scalar_columns
     }
+    for column in indexed_columns:
+        column_data[column.name] = await _read_direct_hdf5_indexed_column(
+            range_reader,
+            column,
+            columns_by_name[column.index_column_name or f"{column.name}_index"],
+            table_row_indices,
+        )
+    return column_data
 
 
 async def _read_direct_hdf5_column_array(
@@ -644,6 +702,146 @@ async def _read_direct_hdf5_column_array(
             count=1,
         )[0]
     return values
+
+
+async def _read_direct_hdf5_indexed_column(
+    range_reader: hdf5_range_reader._RangeReader,
+    data_column: catalog_models._TableColumnSchema,
+    index_column: catalog_models._TableColumnSchema,
+    table_row_indices: Sequence[int] | None,
+) -> list[list[Any]]:
+    request_count_before = int(getattr(range_reader, "request_count", 0))
+    fetched_bytes_before = int(getattr(range_reader, "bytes_fetched", 0))
+    index_values = np.asarray(
+        await _read_direct_hdf5_column_array(range_reader, index_column, None),
+        dtype=np.intp,
+    )
+    index_array = np.empty(index_values.size + 1, dtype=np.intp)
+    index_array[0] = 0
+    index_array[1:] = index_values
+    if table_row_indices is None:
+        row_indices = np.arange(index_values.size, dtype=np.intp)
+    else:
+        row_indices = _normalize_indexed_table_row_indices(
+            table_row_indices,
+            row_count=index_values.size,
+        )
+    if row_indices.size == 0:
+        logger.debug(
+            "direct HDF5 indexed materialization for %r selected zero rows",
+            data_column.name,
+        )
+        return []
+
+    row_starts = index_array[row_indices]
+    row_ends = index_array[row_indices + 1]
+    row_lengths = row_ends - row_starts
+    requested_element_count = int(row_lengths.sum())
+    if requested_element_count == 0:
+        logger.debug(
+            "direct HDF5 indexed materialization for %r selected %d empty rows",
+            data_column.name,
+            len(row_indices),
+        )
+        return [[] for _ in row_indices]
+
+    spans = _coalesce_indexed_data_spans(
+        row_starts,
+        row_ends,
+        max_gap=0,
+    )
+    full_element_count = int(index_array[-1])
+    spanned_element_count = sum(end - start for start, end in spans)
+    if _should_read_full_indexed_data(
+        full_element_count=full_element_count,
+        spanned_element_count=spanned_element_count,
+    ):
+        spans = [(0, full_element_count)]
+
+    span_payloads = await _read_direct_hdf5_element_spans(
+        range_reader,
+        data_column,
+        spans,
+    )
+    column_data = _split_direct_indexed_span_payloads(
+        row_starts=row_starts,
+        row_ends=row_ends,
+        spans=spans,
+        span_payloads=span_payloads,
+    )
+    logger.debug(
+        "direct HDF5 indexed materialization for %r: rows=%d spans=%d "
+        "requested_elements=%d spanned_elements=%d full_elements=%d "
+        "range_requests=%d fetched_bytes=%d",
+        data_column.name,
+        len(row_indices),
+        len(spans),
+        requested_element_count,
+        spanned_element_count,
+        full_element_count,
+        int(getattr(range_reader, "request_count", 0)) - request_count_before,
+        int(getattr(range_reader, "bytes_fetched", 0)) - fetched_bytes_before,
+    )
+    return column_data
+
+
+async def _read_direct_hdf5_element_spans(
+    range_reader: hdf5_range_reader._RangeReader,
+    column: catalog_models._TableColumnSchema,
+    spans: Sequence[tuple[int, int]],
+) -> list[npt.NDArray[Any]]:
+    if not spans:
+        return []
+    dataset = column.dataset
+    if dataset.hdf5_data_offset is None:
+        raise ValueError(f"column {column.name!r} is missing HDF5 byte offset")
+    np_dtype = np.dtype(column.dtype.numpy_dtype)
+    itemsize = int(np_dtype.itemsize)
+    byte_ranges = tuple(
+        hdf5_range_reader._ByteRange(
+            dataset.hdf5_data_offset + (start * itemsize),
+            dataset.hdf5_data_offset + (end * itemsize),
+        )
+        for start, end in spans
+    )
+    payloads = await range_reader.read_ranges(byte_ranges)
+    return [
+        np.frombuffer(
+            payloads[byte_range],
+            dtype=np_dtype,
+            count=end - start,
+        ).copy()
+        for byte_range, (start, end) in zip(byte_ranges, spans, strict=True)
+    ]
+
+
+def _split_direct_indexed_span_payloads(
+    *,
+    row_starts: npt.NDArray[np.intp],
+    row_ends: npt.NDArray[np.intp],
+    spans: Sequence[tuple[int, int]],
+    span_payloads: Sequence[npt.NDArray[Any]],
+) -> list[list[Any]]:
+    if not spans:
+        return [[] for _ in row_starts]
+    span_starts = np.asarray([start for start, _ in spans], dtype=np.intp)
+    column_data: list[list[Any]] = []
+    for start, end in zip(row_starts, row_ends):
+        if end <= start:
+            column_data.append([])
+            continue
+        span_index = int(np.searchsorted(span_starts, start, side="right") - 1)
+        span_start, span_end = spans[span_index]
+        if span_start > start or end > span_end:
+            raise AssertionError(
+                "direct indexed span planner produced a span that does not contain "
+                "a requested row"
+            )
+        payload = span_payloads[span_index]
+        column_data.append(
+            payload[int(start) - span_start : int(end) - span_start].tolist()
+        )
+    return column_data
 
 
 def _row_indices_to_byte_ranges(
@@ -706,18 +904,23 @@ def _get_fast_table_data_if_available(
             exact_table_path,
         )
 
-    direct_catalog_columns, fallback_catalog_columns = _split_direct_hdf5_columns(
-        filtered_catalog_columns
-    )
+    (
+        direct_catalog_columns,
+        direct_indexed_catalog_columns,
+        fallback_catalog_columns,
+    ) = _split_direct_hdf5_columns(filtered_catalog_columns)
     direct_column_data = _read_direct_hdf5_column_data(
         path,
         direct_catalog_columns,
+        direct_indexed_catalog_columns,
+        {column.name: column for column in filtered_catalog_columns},
         table_row_indices,
     )
     logger.debug(
         "fast HDF5 materialization selected direct scalar columns=%s "
-        "fallback columns=%s for %r/%s",
+        "direct indexed columns=%s fallback columns=%s for %r/%s",
         [column.name for column in direct_catalog_columns],
+        [column.name for column in direct_indexed_catalog_columns],
         [column.name for column in fallback_catalog_columns],
         path,
         exact_table_path,

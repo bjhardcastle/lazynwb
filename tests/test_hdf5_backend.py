@@ -333,7 +333,7 @@ def test_public_get_df_materializes_supported_hdf5_scalars_without_accessor(
     assert df.select("start_time", "stop_time").height > 0
     assert 0 < reader._range_reader.request_count < 1000
     assert reader._range_reader.bytes_fetched < local_hdf5_path.stat().st_size
-    assert "direct HDF5 scalar materialization" in caplog.text
+    assert "direct HDF5 materialization" in caplog.text
     assert "fallback columns=[]" in caplog.text
 
 
@@ -396,6 +396,109 @@ def test_hdf5_direct_scalar_materializes_bool_column_from_ranges(
     )
 
     assert df["flag"].to_list() == [True, False, True]
+
+
+def test_hdf5_direct_indexed_materialization_matches_h5py_reference(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+    source_url = local_hdf5_path.as_uri()
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("supported indexed HDF5 columns should use range reads")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    df = lazynwb.get_df(
+        source_url,
+        "/units",
+        exact_path=True,
+        include_column_names=("spike_times",),
+        as_polars=True,
+    )
+
+    with h5py.File(local_hdf5_path, "r") as h5_file:
+        expected = _h5py_indexed_column(
+            h5_file["units/spike_times"][:],
+            h5_file["units/spike_times_index"][:],
+        )
+
+    assert df["spike_times"].to_list() == expected
+    assert "direct HDF5 indexed materialization" in caplog.text
+    assert "direct indexed columns=['spike_times']" in caplog.text
+
+
+def test_hdf5_direct_indexed_materializes_selected_rows_and_empty_rows(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nwb_path = tmp_path / "ragged-table.nwb"
+    with h5py.File(nwb_path, "w") as h5_file:
+        group = h5_file.create_group("units")
+        group.create_dataset("spike_times", data=np.array([0.1, 0.2, 0.3]))
+        group.create_dataset(
+            "spike_times_index",
+            data=np.array([0, 2, 2, 3], dtype=np.uint8),
+        )
+
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    source_url = nwb_path.as_uri()
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("supported indexed HDF5 columns should use range reads")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    df = lazynwb.get_df(
+        source_url,
+        "/units",
+        exact_path=True,
+        include_column_names=("spike_times",),
+        nwb_path_to_row_indices={source_url: [0, 1, 3]},
+        as_polars=True,
+    )
+
+    assert df["spike_times"].to_list() == [[], [0.1, 0.2], [0.3]]
+
+
+def test_scan_nwb_predicate_projection_uses_direct_indexed_ranges(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    nwb_path = tmp_path / "filtered-ragged-table.nwb"
+    with h5py.File(nwb_path, "w") as h5_file:
+        group = h5_file.create_group("units")
+        group.create_dataset("id", data=np.arange(4, dtype=np.int64))
+        group.create_dataset("spike_times", data=np.array([0.1, 0.2, 0.3, 0.4]))
+        group.create_dataset(
+            "spike_times_index",
+            data=np.array([1, 3, 3, 4], dtype=np.uint8),
+        )
+
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+    source_url = nwb_path.as_uri()
+    lf = (
+        lazynwb.scan_nwb(source_url, "/units", disable_progress=True)
+        .filter(pl.col("id") == 1)
+        .select("spike_times")
+    )
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("filtered indexed projection should use range reads")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    df = lf.collect()
+
+    assert df["spike_times"].to_list() == [[0.2, 0.3]]
+    assert "direct HDF5 indexed materialization" in caplog.text
+    assert "requested_elements=2" in caplog.text
 
 
 def test_scan_nwb_uses_fast_hdf5_catalog_for_materialization(
@@ -731,6 +834,19 @@ def _snapshot_schema(snapshot: catalog_models._TableSchemaSnapshot) -> pl.Schema
 def _existing_schema(path: pathlib.Path, table_path: str) -> pl.Schema:
     raw_columns = lazynwb.get_table_column_metadata(path, table_path)
     return lazynwb.tables.get_table_schema_from_metadata(raw_columns)
+
+
+def _h5py_indexed_column(
+    data: np.ndarray,
+    index_values: np.ndarray,
+) -> list[list[float]]:
+    starts = np.empty(index_values.size + 1, dtype=np.intp)
+    starts[0] = 0
+    starts[1:] = index_values
+    return [
+        data[int(start) : int(end)].tolist()
+        for start, end in zip(starts[:-1], starts[1:])
+    ]
 
 
 def _write_schema_table(path: pathlib.Path, dtype: type[np.generic]) -> pathlib.Path:
