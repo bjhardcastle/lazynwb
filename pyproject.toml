@@ -179,6 +179,9 @@ doctest_optionflags = [
     "ELLIPSIS",
 ]
 testpaths = ["src", "tests"]
+markers = [
+    "remote_schema_budget: opt-in remote HDF5 schema request-budget tests",
+]
 
 [tool.mypy]
 check_untyped_defs = false
