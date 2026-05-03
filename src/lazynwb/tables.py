@@ -56,6 +56,9 @@ INTERNAL_COLUMN_NAMES = {
 INTERVALS_TABLE_INDEX_COLUMN_NAME = "_intervals" + TABLE_INDEX_COLUMN_NAME
 UNITS_TABLE_INDEX_COLUMN_NAME = "_units" + TABLE_INDEX_COLUMN_NAME
 
+_INDEXED_COLUMN_FULL_READ_MIN_COVERAGE = 0.8
+_INDEXED_COLUMN_MAX_COALESCE_GAP_ELEMENTS = 1_048_576
+
 
 @typing.overload
 def get_df(
@@ -784,7 +787,7 @@ def _get_indexed_column_data(
     index_column_accessor: zarr.Array | h5py.Dataset,
     table_row_indices: Sequence[int] | None = None,
     low_memory: bool = False,
-) -> list[npt.NDArray[np.float64]]:
+) -> list[list[Any]]:
     """Get the data for an indexed column in a table, given the data and index array accessors.
 
     - default behavior is to return the data for all rows in the table
@@ -803,40 +806,200 @@ def _get_indexed_column_data(
             ...
         }
     """
-    # get indices in the data array for all requested rows, so we can read from accessor in one go:
-    index_array: npt.NDArray[np.int32] = np.concatenate(
-        ([0], index_column_accessor[:])
-    )  # small enough to read in one go
+    # The index column is one value per table row, so it is small enough to read in one go.
+    index_values = np.asarray(index_column_accessor[:], dtype=np.intp)
+    index_array = np.empty(index_values.size + 1, dtype=np.intp)
+    index_array[0] = 0
+    index_array[1:] = index_values
     if table_row_indices is None:
-        table_row_indices = list(
-            range(len(index_array) - 1)
-        )  # -1 because of the inserted 0 above
-    data_indices: list[int] = []
-    for i in table_row_indices:
-        data_indices.extend(range(index_array[i], index_array[i + 1]))
-    assert len(data_indices) == np.sum(
-        np.diff(index_array)[table_row_indices]
-    ), "length of data_indices is incorrect"
+        row_lengths = np.diff(index_array)
+        logger.debug(
+            "reading full indexed column data: rows=%d elements=%d",
+            len(row_lengths),
+            int(index_array[-1]) if len(index_array) else 0,
+        )
+        return _split_indexed_data_array(data_column_accessor[:], row_lengths)
 
-    # read actual data and split into sub-vectors for each row of the table:
+    row_indices = _normalize_indexed_table_row_indices(
+        table_row_indices,
+        row_count=len(index_array) - 1,
+    )
+    if row_indices.size == 0:
+        return []
+
+    row_starts = index_array[row_indices]
+    row_ends = index_array[row_indices + 1]
+    row_lengths = row_ends - row_starts
+    selected_element_count = int(row_lengths.sum())
+    if selected_element_count == 0:
+        return [[] for _ in row_indices]
+
     if low_memory:
+        logger.debug(
+            "reading indexed column subset row-by-row: rows=%d elements=%d",
+            len(row_indices),
+            selected_element_count,
+        )
+        return _read_indexed_rows_by_slice(data_column_accessor, row_starts, row_ends)
 
-        def _get_data(start_idx, end_idx):
-            return data_column_accessor[data_indices[start_idx:end_idx]].tolist()
+    spans = _coalesce_indexed_data_spans(
+        row_starts,
+        row_ends,
+        max_gap=_get_indexed_data_coalesce_gap(data_column_accessor),
+    )
+    full_element_count = int(index_array[-1])
+    spanned_element_count = sum(end - start for start, end in spans)
 
-    else:
-        # reading all data is faster than accessing non-sequential indices (tested for local hdf5)
-        data_array: npt.NDArray[np.float64] = data_column_accessor[:][data_indices]
+    if _should_read_full_indexed_data(
+        full_element_count=full_element_count,
+        spanned_element_count=spanned_element_count,
+    ):
+        logger.debug(
+            "reading full indexed column data for subset because %d spans cover "
+            "%d/%d elements",
+            len(spans),
+            spanned_element_count,
+            full_element_count,
+        )
+        full_data = data_column_accessor[:]
+        return [
+            full_data[start:end].tolist()
+            for start, end in zip(row_starts, row_ends)
+        ]
 
-        def _get_data(start_idx, end_idx):
-            return data_array[start_idx:end_idx].tolist()
+    logger.debug(
+        "reading indexed column subset with %d spans: rows=%d requested_elements=%d "
+        "spanned_elements=%d full_elements=%d",
+        len(spans),
+        len(row_indices),
+        selected_element_count,
+        spanned_element_count,
+        full_element_count,
+    )
+    return _read_indexed_rows_from_spans(
+        data_column_accessor=data_column_accessor,
+        row_starts=row_starts,
+        row_ends=row_ends,
+        spans=spans,
+    )
 
-    column_data = []
-    start_idx = 0
-    for run_length in np.diff(index_array)[table_row_indices]:
-        end_idx = start_idx + run_length
-        column_data.append(_get_data(start_idx, end_idx))
-        start_idx = end_idx
+
+def _normalize_indexed_table_row_indices(
+    table_row_indices: Sequence[int],
+    row_count: int,
+) -> npt.NDArray[np.intp]:
+    row_indices = np.asarray(table_row_indices, dtype=np.intp)
+    if row_indices.ndim == 0:
+        row_indices = row_indices.reshape(1)
+    if row_indices.ndim != 1:
+        raise ValueError("table_row_indices must be a one-dimensional sequence")
+    if row_indices.size and (row_indices.min() < 0 or row_indices.max() >= row_count):
+        raise IndexError(
+            f"table_row_indices contains values outside table row range 0:{row_count}"
+        )
+    return row_indices
+
+
+def _split_indexed_data_array(
+    data_array: npt.NDArray[Any],
+    row_lengths: npt.NDArray[np.intp],
+) -> list[list[Any]]:
+    column_data: list[list[Any]] = []
+    start = 0
+    for row_length in row_lengths:
+        end = start + int(row_length)
+        column_data.append(data_array[start:end].tolist())
+        start = end
+    return column_data
+
+
+def _read_indexed_rows_by_slice(
+    data_column_accessor: zarr.Array | h5py.Dataset,
+    row_starts: npt.NDArray[np.intp],
+    row_ends: npt.NDArray[np.intp],
+) -> list[list[Any]]:
+    return [
+        data_column_accessor[int(start) : int(end)].tolist()
+        if end > start
+        else []
+        for start, end in zip(row_starts, row_ends)
+    ]
+
+
+def _get_indexed_data_coalesce_gap(
+    data_column_accessor: zarr.Array | h5py.Dataset,
+) -> int:
+    chunks = getattr(data_column_accessor, "chunks", None)
+    if not chunks:
+        return 0
+    first_chunk = chunks[0]
+    if first_chunk is None:
+        return 0
+    return min(int(first_chunk), _INDEXED_COLUMN_MAX_COALESCE_GAP_ELEMENTS)
+
+
+def _coalesce_indexed_data_spans(
+    row_starts: npt.NDArray[np.intp],
+    row_ends: npt.NDArray[np.intp],
+    max_gap: int,
+) -> list[tuple[int, int]]:
+    spans = sorted(
+        (int(start), int(end))
+        for start, end in zip(row_starts, row_ends)
+        if end > start
+    )
+    if not spans:
+        return []
+
+    coalesced = [spans[0]]
+    for start, end in spans[1:]:
+        current_start, current_end = coalesced[-1]
+        if start <= current_end + max_gap:
+            coalesced[-1] = (current_start, max(current_end, end))
+        else:
+            coalesced.append((start, end))
+    return coalesced
+
+
+def _should_read_full_indexed_data(
+    full_element_count: int,
+    spanned_element_count: int,
+) -> bool:
+    if full_element_count <= 0:
+        return False
+    return (
+        spanned_element_count / full_element_count
+        >= _INDEXED_COLUMN_FULL_READ_MIN_COVERAGE
+    )
+
+
+def _read_indexed_rows_from_spans(
+    data_column_accessor: zarr.Array | h5py.Dataset,
+    row_starts: npt.NDArray[np.intp],
+    row_ends: npt.NDArray[np.intp],
+    spans: Sequence[tuple[int, int]],
+) -> list[list[Any]]:
+    if not spans:
+        return [[] for _ in row_starts]
+
+    span_starts = np.asarray([start for start, _ in spans], dtype=np.intp)
+    span_payloads = [data_column_accessor[start:end] for start, end in spans]
+    column_data: list[list[Any]] = []
+    for start, end in zip(row_starts, row_ends):
+        if end <= start:
+            column_data.append([])
+            continue
+        span_index = int(np.searchsorted(span_starts, start, side="right") - 1)
+        span_start, span_end = spans[span_index]
+        if span_start > start or end > span_end:
+            raise AssertionError(
+                "indexed data span planner produced a span that does not contain "
+                "a requested row"
+            )
+        payload = span_payloads[span_index]
+        column_data.append(
+            payload[int(start) - span_start : int(end) - span_start].tolist()
+        )
     return column_data
 
 

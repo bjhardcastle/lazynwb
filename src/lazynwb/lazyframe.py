@@ -7,6 +7,7 @@ import polars as pl
 import polars._typing
 import polars.io.plugins
 
+import lazynwb.file_io
 import lazynwb.tables
 import lazynwb.types_
 
@@ -160,11 +161,28 @@ def scan_nwb(
             )
         else:
             filtered_files = source
+        nwb_path_to_row_indices = None
+        nwb_data_sources = filtered_files
+        if predicate is None and n_rows is not None:
+            nwb_path_to_row_indices = _get_limited_path_to_row_indices(
+                source=filtered_files,
+                table_path=table_path,
+                n_rows=n_rows,
+            )
+            nwb_data_sources = tuple(nwb_path_to_row_indices)
+            logger.debug(
+                "Limiting initial %r materialization to %d rows across %d files",
+                table_path,
+                n_rows,
+                len(nwb_path_to_row_indices),
+            )
+
         df = lazynwb.tables.get_df(
-            nwb_data_sources=filtered_files,
+            nwb_data_sources=nwb_data_sources,
             search_term=table_path,
             exact_path=True,
             include_column_names=initial_columns or None,
+            nwb_path_to_row_indices=nwb_path_to_row_indices,
             disable_progress=disable_progress,
             ignore_errors=ignore_errors,
             as_polars=True,
@@ -249,6 +267,29 @@ def scan_nwb(
     return polars.io.plugins.register_io_source(
         io_source=source_generator, schema=schema
     )
+
+
+def _get_limited_path_to_row_indices(
+    source: Iterable[lazynwb.types_.PathLike],
+    table_path: str,
+    n_rows: int,
+) -> dict[str, list[int]]:
+    remaining_rows = n_rows
+    path_to_row_indices: dict[str, list[int]] = {}
+    for file in source:
+        if remaining_rows <= 0:
+            break
+        try:
+            table_length = lazynwb.tables._get_table_length(file, table_path)
+        except KeyError:
+            continue
+        row_count = min(remaining_rows, table_length)
+        if row_count > 0:
+            path_to_row_indices[
+                lazynwb.file_io.from_pathlike(file).as_posix()
+            ] = list(range(row_count))
+        remaining_rows -= row_count
+    return path_to_row_indices
 
 
 def read_nwb(
