@@ -16,6 +16,7 @@ import lazynwb._catalog.models as catalog_models
 import lazynwb._catalog.polars as catalog_polars
 import lazynwb._hdf5.range_reader as hdf5_range_reader
 import lazynwb._hdf5.reader as hdf5_reader
+import lazynwb.table_metadata
 import lazynwb.tables
 import lazynwb.utils
 
@@ -186,7 +187,9 @@ def test_hdf5_backend_reader_scans_multiple_tables_in_one_lifecycle(
     assert results["intervals/trials"].snapshot is not None
     assert results["units"].snapshot is not None
     assert results["intervals/trials"].request_count > 0
-    assert results["units"].request_count < cold_units_reader._range_reader.request_count
+    assert (
+        results["units"].request_count < cold_units_reader._range_reader.request_count
+    )
     assert shared_requests < independent_requests
 
 
@@ -249,6 +252,63 @@ def test_public_get_table_schema_uses_fast_hdf5_for_obstore_file_url(
 
     assert {"start_time", "stop_time", "condition"}.issubset(schema)
     assert schema["start_time"] == pl.Float64
+
+
+def test_public_get_df_uses_fast_hdf5_catalog_for_materialization(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    source_url = local_hdf5_path.as_uri()
+
+    def _fail_metadata_traversal(*args: object, **kwargs: object) -> None:
+        raise AssertionError("get_df should plan exact HDF5 reads from the catalog")
+
+    monkeypatch.setattr(
+        lazynwb.table_metadata,
+        "get_table_column_metadata",
+        _fail_metadata_traversal,
+    )
+
+    df = lazynwb.get_df(
+        source_url,
+        "/intervals/trials",
+        exact_path=True,
+        include_column_names=("start_time",),
+        as_polars=True,
+    )
+
+    assert df.height > 0
+    assert {"start_time", lazynwb.NWB_PATH_COLUMN_NAME}.issubset(df.columns)
+
+
+def test_scan_nwb_uses_fast_hdf5_catalog_for_materialization(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    source_url = local_hdf5_path.as_uri()
+
+    def _fail_metadata_traversal(*args: object, **kwargs: object) -> None:
+        raise AssertionError("scan_nwb should plan exact HDF5 reads from the catalog")
+
+    monkeypatch.setattr(
+        lazynwb.table_metadata,
+        "get_table_column_metadata",
+        _fail_metadata_traversal,
+    )
+
+    df = (
+        lazynwb.scan_nwb(source_url, "/intervals/trials", disable_progress=True)
+        .select("start_time")
+        .head(1)
+        .collect()
+    )
+
+    assert df.shape == (1, 1)
+    assert df.schema["start_time"] == pl.Float64
 
 
 def test_hdf5_backend_reader_matches_metadata_and_timeseries_schema_parity(

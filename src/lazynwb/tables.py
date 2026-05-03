@@ -20,6 +20,8 @@ import polars.datatypes.convert
 import tqdm
 import zarr
 
+import lazynwb._catalog.backend as catalog_backend
+import lazynwb._catalog.models as catalog_models
 import lazynwb._catalog.polars as catalog_polars
 import lazynwb._hdf5.reader as hdf5_reader
 import lazynwb._zarr.reader as zarr_reader
@@ -32,6 +34,12 @@ import lazynwb.utils
 pd.options.mode.copy_on_write = True
 
 FrameType = TypeVar("FrameType", pl.DataFrame, pl.LazyFrame, pd.DataFrame)
+ColumnMetadataType = TypeVar(
+    "ColumnMetadataType",
+    lazynwb.table_metadata.RawTableColumnMetadata,
+    catalog_models._TableColumnSchema,
+)
+AsyncValueType = TypeVar("AsyncValueType")
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +268,7 @@ def get_df(
 
 
 def _get_timeseries_length_from_metadata(
-    columns: Iterable[lazynwb.table_metadata.RawTableColumnMetadata],
+    columns: Iterable[ColumnMetadataType],
 ) -> int | None:
     for column in columns:
         if column.name == "data" and column.shape:
@@ -269,11 +277,11 @@ def _get_timeseries_length_from_metadata(
 
 
 def _filter_table_metadata_for_materialization(
-    columns: Iterable[lazynwb.table_metadata.RawTableColumnMetadata],
+    columns: Iterable[ColumnMetadataType],
     exclude_array_columns: bool,
     exclude_column_names: Iterable[str] | None,
     include_column_names: Iterable[str] | None,
-) -> tuple[lazynwb.table_metadata.RawTableColumnMetadata, ...]:
+) -> tuple[ColumnMetadataType, ...]:
     columns = tuple(columns)
     remaining_column_names = {column.name for column in columns}
     has_include_filter = include_column_names is not None
@@ -318,95 +326,227 @@ def _is_string_or_object_dtype(dtype: object | None) -> bool:
     return getattr(dtype, "kind", None) in ("S", "O", "U") or dtype in ("S", "O", "U")
 
 
-def _get_table_data(
-    path: lazynwb.types_.PathLike,
-    search_term: str,
-    exact_path: bool = False,
-    include_column_names: str | Iterable[str] | None = None,
-    exclude_column_names: str | Iterable[str] | None = None,
-    exclude_array_columns: bool = True,
-    table_row_indices: Sequence[int] | None = None,
-    low_memory: bool = False,
-    as_polars: bool = False,
-) -> dict[str, Any]:
-    t0 = time.time()
-    file = lazynwb.file_io._get_accessor(path)
-    if (
-        not exact_path
-        and lazynwb.utils.normalize_internal_file_path(search_term) not in file
-    ):
-        path_to_accessor = lazynwb.file_io.get_internal_paths(path)
-        matches = difflib.get_close_matches(
-            search_term, path_to_accessor.keys(), n=1, cutoff=0.3
-        )
-        if not matches:
-            raise KeyError(f"Table {search_term!r} not found in {file._path}")
-        match_ = matches[0]
-        if (
-            search_term not in match_
-            or len([k for k in path_to_accessor if match_ in k]) > 1
-        ):
-            # only warn if there are multiple matches or if user-provided search term is not a
-            # substring of the match
-            logger.warning(f"Using {match_!r} instead of {search_term!r}")
-        search_term = match_
-    columns = lazynwb.table_metadata.get_table_column_metadata(
-        file_path=file,
-        table_path=search_term,
-        use_thread_pool=False,
-    )
-    column_by_name = {column.name: column for column in columns}
-    is_metadata_table = any(column.is_metadata_table for column in columns)
-    timeseries_len = _get_timeseries_length_from_metadata(columns)
+def _normalize_column_name_filter(
+    column_names: str | Iterable[str] | None,
+) -> tuple[str, ...] | None:
+    if isinstance(column_names, str):
+        return (column_names,)
+    if column_names is None:
+        return None
+    return tuple(column_names)
 
-    if isinstance(exclude_column_names, str):
-        exclude_column_names = (exclude_column_names,)
-    elif exclude_column_names is not None:
-        exclude_column_names = tuple(exclude_column_names)
-    if isinstance(include_column_names, str):
-        include_column_names = (include_column_names,)
-    elif include_column_names is not None:
-        include_column_names = tuple(include_column_names)
+
+def _validate_column_name_filters(
+    include_column_names: Iterable[str] | None,
+    exclude_column_names: Iterable[str] | None,
+) -> None:
     if include_column_names and exclude_column_names:
         ambiguous_column_names = set(include_column_names).intersection(
             exclude_column_names
         )
         if ambiguous_column_names:
             raise ValueError(
-                f"Column names {ambiguous_column_names} are both included and excluded: unclear how to proceed"
+                f"Column names {ambiguous_column_names} are both included "
+                "and excluded: unclear how to proceed"
             )
 
-    # get filtered set of column names:
-    if include_column_names and set(include_column_names).issubset(
-        INTERNAL_COLUMN_NAMES
-    ):
-        only_internal_columns_requested = True
-    else:
-        only_internal_columns_requested = False
 
-    columns = _filter_table_metadata_for_materialization(
-        columns=columns,
+def _only_internal_columns_requested(
+    include_column_names: Iterable[str] | None,
+) -> bool:
+    return bool(
+        include_column_names
+        and set(include_column_names).issubset(INTERNAL_COLUMN_NAMES)
+    )
+
+
+def _run_async_value(
+    coroutine: typing.Coroutine[object, object, AsyncValueType],
+) -> AsyncValueType:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+    future = lazynwb.utils.get_threadpool_executor().submit(asyncio.run, coroutine)
+    return future.result()
+
+
+async def _read_table_schema_snapshot_and_close(
+    reader: catalog_backend._BackendReader,
+    exact_table_path: str,
+) -> catalog_models._TableSchemaSnapshot:
+    try:
+        return await reader.read_table_schema_snapshot(exact_table_path)
+    finally:
+        await reader.close()
+
+
+def _get_fast_catalog_snapshot_if_available(
+    file_path: lazynwb.types_.PathLike,
+    exact_table_path: str,
+) -> catalog_models._TableSchemaSnapshot | None:
+    if zarr_reader._is_fast_zarr_candidate(file_path):
+        reader: catalog_backend._BackendReader = (
+            zarr_reader._default_zarr_backend_reader(file_path)
+        )
+        logger.debug(
+            "using fast Zarr catalog snapshot for materialization planning: %r/%s",
+            file_path,
+            exact_table_path,
+        )
+        return _run_async_value(
+            _read_table_schema_snapshot_and_close(reader, exact_table_path)
+        )
+    if not hdf5_reader._is_fast_hdf5_candidate(file_path):
+        return None
+    reader = hdf5_reader._default_hdf5_backend_reader(file_path)
+    try:
+        logger.debug(
+            "using fast HDF5 catalog snapshot for materialization planning: %r/%s",
+            file_path,
+            exact_table_path,
+        )
+        return _run_async_value(
+            _read_table_schema_snapshot_and_close(reader, exact_table_path)
+        )
+    except hdf5_reader._NotHDF5Error:
+        logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
+        return None
+
+
+def _raw_metadata_from_catalog_column(
+    column: catalog_models._TableColumnSchema,
+    accessor: lazynwb.table_metadata.TableColumnAccessor,
+) -> lazynwb.table_metadata.RawTableColumnMetadata:
+    return lazynwb.table_metadata.RawTableColumnMetadata(
+        name=column.name,
+        table_path=column.table_path,
+        source_path=column.source_path,
+        backend=column.backend,
+        dtype=getattr(accessor, "dtype", None),
+        shape=column.shape,
+        ndim=column.ndim,
+        attrs=dict(column.attrs),
+        maxshape=column.dataset.maxshape,
+        chunks=column.dataset.chunks,
+        storage_layout=column.dataset.storage_layout,
+        compression=column.dataset.compression,
+        compression_opts=column.dataset.compression_opts,
+        filters=column.dataset.filters,
+        fill_value=column.dataset.fill_value,
+        read_capabilities=column.dataset.read_capabilities,
+        is_group=column.is_group,
+        is_dataset=column.is_dataset,
+        is_metadata_table=column.is_metadata_table,
+        is_timeseries=column.is_timeseries,
+        is_timeseries_with_rate=column.is_timeseries_with_rate,
+        is_timeseries_length_aligned=column.is_timeseries_length_aligned,
+        is_nominally_indexed=column.is_nominally_indexed,
+        is_index_column=column.is_index_column,
+        is_multidimensional=column.is_multidimensional,
+        index_column_name=column.index_column_name,
+        data_column_name=column.data_column_name,
+        row_element_shape=column.row_element_shape,
+        _accessor=accessor,
+    )
+
+
+def _get_fast_table_data_if_available(
+    path: lazynwb.types_.PathLike,
+    exact_table_path: str,
+    include_column_names: Iterable[str] | None,
+    exclude_column_names: Iterable[str] | None,
+    exclude_array_columns: bool,
+    table_row_indices: Sequence[int] | None,
+    low_memory: bool,
+    as_polars: bool,
+) -> dict[str, Any] | None:
+    snapshot = _get_fast_catalog_snapshot_if_available(path, exact_table_path)
+    if snapshot is None:
+        return None
+
+    filtered_catalog_columns = _filter_table_metadata_for_materialization(
+        columns=snapshot.columns,
         exclude_array_columns=exclude_array_columns,
         exclude_column_names=exclude_column_names,
         include_column_names=include_column_names,
     )
-    selected_column_names = {column.name for column in columns}
+    if not filtered_catalog_columns and not _only_internal_columns_requested(
+        include_column_names
+    ):
+        logger.debug(
+            "fast catalog materialization for %r/%s selected no raw columns",
+            path,
+            exact_table_path,
+        )
 
-    # indexed columns (columns containing lists) need to be handled differently:
+    file = lazynwb.file_io._get_accessor(path)
+    materialization_columns = tuple(
+        _raw_metadata_from_catalog_column(column, file[column.dataset.path])
+        for column in filtered_catalog_columns
+        if column.dataset.path
+    )
+    logger.debug(
+        "materializing %d/%d raw columns from fast catalog snapshot for %s/%s",
+        len(materialization_columns),
+        len(snapshot.columns),
+        file._path,
+        exact_table_path,
+    )
+    return _materialize_table_data_from_columns(
+        source_path=file._path.resolve().as_posix(),
+        log_source_path=file._path.as_posix(),
+        normalized_table_path=exact_table_path,
+        all_columns=snapshot.columns,
+        selected_columns=materialization_columns,
+        include_column_names=include_column_names,
+        exclude_column_names=exclude_column_names,
+        table_row_indices=table_row_indices,
+        exclude_array_columns=exclude_array_columns,
+        low_memory=low_memory,
+        as_polars=as_polars,
+        table_length_from_metadata=snapshot.table_length,
+    )
+
+
+def _materialize_table_data_from_columns(  # noqa: C901
+    *,
+    source_path: str,
+    log_source_path: str,
+    normalized_table_path: str,
+    all_columns: Iterable[ColumnMetadataType],
+    selected_columns: Iterable[lazynwb.table_metadata.RawTableColumnMetadata],
+    include_column_names: Iterable[str] | None,
+    exclude_column_names: Iterable[str] | None,
+    table_row_indices: Sequence[int] | None,
+    exclude_array_columns: bool,
+    low_memory: bool,
+    as_polars: bool,
+    table_length_from_metadata: int | None = None,
+) -> dict[str, Any]:
+    all_columns = tuple(all_columns)
+    selected_columns = tuple(selected_columns)
+    column_by_name = {column.name: column for column in selected_columns}
+    is_metadata_table = any(column.is_metadata_table for column in all_columns)
+    timeseries_len = _get_timeseries_length_from_metadata(all_columns)
+    only_internal_columns_requested = _only_internal_columns_requested(
+        include_column_names
+    )
+
+    selected_column_names = {column.name for column in selected_columns}
     indexed_column_names = lazynwb.table_metadata._get_indexed_column_names(
         selected_column_names
     )
     non_indexed_columns = tuple(
-        column for column in columns if column.name not in indexed_column_names
+        column for column in selected_columns if column.name not in indexed_column_names
     )
-    # some columns have >2 dims but no index - they also need to be handled differently
     multi_dim_columns: list[lazynwb.table_metadata.RawTableColumnMetadata] = []
 
     column_data: dict[str, npt.NDArray | list] = {}
     logger.debug(
         "materializing non-indexed columns for %s/%s: %s",
-        file._path,
-        search_term,
+        log_source_path,
+        normalized_table_path,
         [column.name for column in non_indexed_columns],
     )
     if table_row_indices is not None:
@@ -414,10 +554,9 @@ def _get_table_data(
         table_length = len(table_row_indices)
     else:
         _idx = slice(None)
-        table_length = None
+        table_length = table_length_from_metadata
     for column in non_indexed_columns:
         if column.ndim is None:
-            # accessor is not a Dataset
             continue
         if column.is_multidimensional:
             logger.debug(
@@ -429,35 +568,32 @@ def _get_table_data(
             continue
         if column.is_timeseries and not column.is_timeseries_length_aligned:
             logger.debug(
-                "skipping column %r with shape %s from TimeSeries table: length does not match data length %s",
+                "skipping column %r with shape %s from TimeSeries table: "
+                "length does not match data length %s",
                 column.name,
                 column.shape,
                 timeseries_len,
             )
             continue
         if column.name == "starting_time" and column.is_timeseries_with_rate:
-            # without timestamps, the default TimeSeries object has two keys: 'data' and
-            # 'starting_time' which is another Group.
-            # we need to generate a timestamps column to make it usable:
             starting_time = column.accessor[()]
             rate = column.attrs["rate"]
+            if timeseries_len is None:
+                raise lazynwb.exceptions.InternalPathError(
+                    f"Could not determine TimeSeries length for {normalized_table_path!r}"
+                )
             timestamps = np.linspace(
                 starting_time, starting_time + timeseries_len / rate, num=timeseries_len
             )
             column_data["timestamps"] = timestamps[_idx]
-            # TODO: lazyframes should have a plan for this rather than a materialized array
             continue
         if _is_string_or_object_dtype(column.dtype):
             if not column.shape:
                 column_data[column.name] = column.accessor.asstr()[()]
-                # this isn't a table: we're picking up single values, e.g. metadata in general/subject
                 continue
             try:
                 column_data[column.name] = column.accessor.asstr()[_idx]
             except (AttributeError, TypeError):
-                # - no way to tell apart hdf5 reference columns, but if the above fails, we cast to
-                # string differently, resulting in '<HDF5 object reference>'
-                # - zarr Array as no attribute 'asstr'
                 column_data[column.name] = column.accessor[_idx].astype(str)
         else:
             column_data[column.name] = column.accessor[_idx]
@@ -472,14 +608,15 @@ def _get_table_data(
         )
         logger.debug(
             "materializing indexed columns for %s/%s: %s",
-            file._path,
-            search_term,
+            log_source_path,
+            normalized_table_path,
             [column.name for column in data_columns],
         )
         for column in data_columns:
             if column.is_timeseries and not column.is_timeseries_length_aligned:
                 logger.debug(
-                    "skipping column %r with shape %s from TimeSeries table: length does not match data length %s",
+                    "skipping column %r with shape %s from TimeSeries table: "
+                    "length does not match data length %s",
                     column.name,
                     column.shape,
                     timeseries_len,
@@ -489,13 +626,8 @@ def _get_table_data(
                 try:
                     data_column_accessor = column.accessor.asstr()
                 except TypeError:
-                    # no way to tell apart hdf5 reference columns, but if the above fails, we cast to
-                    # string differently, resulting in '<HDF5 object reference>'
                     data_column_accessor = column.accessor.astype(str)
                 except AttributeError:
-                    # zarr Array has no attribute 'asstr', and .astype(str) creates
-                    # a wrapper that fails on chunk decoding - read directly instead
-                    # (zarr already returns strings for object-dtype arrays)
                     data_column_accessor = column.accessor
             else:
                 data_column_accessor = column.accessor
@@ -511,8 +643,8 @@ def _get_table_data(
     ):
         logger.debug(
             "materializing multi-dimensional array columns for %s/%s: %s",
-            file._path,
-            search_term,
+            log_source_path,
+            normalized_table_path,
             [column.name for column in multi_dim_columns],
         )
         for column in multi_dim_columns:
@@ -524,29 +656,27 @@ def _get_table_data(
             column_data[column.name] = multi_dim_column_data
 
     if is_metadata_table:
-        # we picked up single values, or 1-dim arrays (e.g. keywords) - put each one in a list
         column_data = {k: [v] for k, v in column_data.items() if v is not None}
 
     if only_internal_columns_requested:
         if table_length is None:
             table_length = lazynwb.table_metadata.get_table_length_from_metadata(
-                columns=column_by_name.values()
+                typing.cast(
+                    Iterable[lazynwb.table_metadata.RawTableColumnMetadata], all_columns
+                )
             )
     else:
         try:
             table_length = len(next(iter(column_data.values())))
         except StopIteration:
             raise lazynwb.exceptions.InternalPathError(
-                f"Table matching {search_term!r} not found in {file._path}"
+                f"Table matching {normalized_table_path!r} not found "
+                f"in {log_source_path}"
             ) from None
 
-    # add identifiers to each row, so they can be linked back their source at a later time:
     identifier_column_data = {
-        NWB_PATH_COLUMN_NAME: [file._path.resolve().as_posix()] * table_length,
-        TABLE_PATH_COLUMN_NAME: [
-            lazynwb.utils.normalize_internal_file_path(search_term)
-        ]
-        * table_length,
+        NWB_PATH_COLUMN_NAME: [source_path] * table_length,
+        TABLE_PATH_COLUMN_NAME: [normalized_table_path] * table_length,
         TABLE_INDEX_COLUMN_NAME: (
             table_row_indices
             if table_row_indices is not None
@@ -554,14 +684,99 @@ def _get_table_data(
         ),
     }
     if exclude_column_names is not None:
-        # remove any identifiers that are also in the exclude list:
         for column_name in set(exclude_column_names) & set(identifier_column_data):
             identifier_column_data.pop(column_name)
 
-    logger.debug(
-        f"fetched data for {file._path}/{search_term} in {time.time() - t0:.2f} s"
-    )
     return column_data | identifier_column_data
+
+
+def _get_table_data(
+    path: lazynwb.types_.PathLike,
+    search_term: str,
+    exact_path: bool = False,
+    include_column_names: str | Iterable[str] | None = None,
+    exclude_column_names: str | Iterable[str] | None = None,
+    exclude_array_columns: bool = True,
+    table_row_indices: Sequence[int] | None = None,
+    low_memory: bool = False,
+    as_polars: bool = False,
+) -> dict[str, Any]:
+    t0 = time.time()
+    normalized_search_term = lazynwb.utils.normalize_internal_file_path(search_term)
+    include_column_names = _normalize_column_name_filter(include_column_names)
+    exclude_column_names = _normalize_column_name_filter(exclude_column_names)
+    _validate_column_name_filters(include_column_names, exclude_column_names)
+
+    if exact_path:
+        fast_data = _get_fast_table_data_if_available(
+            path=path,
+            exact_table_path=normalized_search_term,
+            include_column_names=include_column_names,
+            exclude_column_names=exclude_column_names,
+            exclude_array_columns=exclude_array_columns,
+            table_row_indices=table_row_indices,
+            low_memory=low_memory,
+            as_polars=as_polars,
+        )
+        if fast_data is not None:
+            logger.debug(
+                "fetched data for %r/%s via fast catalog materialization in %.2f s",
+                path,
+                normalized_search_term,
+                time.time() - t0,
+            )
+            return fast_data
+
+    file = lazynwb.file_io._get_accessor(path)
+    if not exact_path and normalized_search_term not in file:
+        path_to_accessor = lazynwb.file_io.get_internal_paths(path)
+        matches = difflib.get_close_matches(
+            search_term, path_to_accessor.keys(), n=1, cutoff=0.3
+        )
+        if not matches:
+            raise KeyError(f"Table {search_term!r} not found in {file._path}")
+        match_ = matches[0]
+        if (
+            search_term not in match_
+            or len([k for k in path_to_accessor if match_ in k]) > 1
+        ):
+            # only warn if there are multiple matches or if user-provided search term is not a
+            # substring of the match
+            logger.warning(f"Using {match_!r} instead of {search_term!r}")
+        search_term = match_
+        normalized_search_term = lazynwb.utils.normalize_internal_file_path(search_term)
+    columns = lazynwb.table_metadata.get_table_column_metadata(
+        file_path=file,
+        table_path=normalized_search_term,
+        use_thread_pool=False,
+    )
+    filtered_columns = _filter_table_metadata_for_materialization(
+        columns=columns,
+        exclude_array_columns=exclude_array_columns,
+        exclude_column_names=exclude_column_names,
+        include_column_names=include_column_names,
+    )
+
+    data = _materialize_table_data_from_columns(
+        source_path=file._path.resolve().as_posix(),
+        log_source_path=file._path.as_posix(),
+        normalized_table_path=normalized_search_term,
+        all_columns=columns,
+        selected_columns=filtered_columns,
+        include_column_names=include_column_names,
+        exclude_column_names=exclude_column_names,
+        table_row_indices=table_row_indices,
+        exclude_array_columns=exclude_array_columns,
+        low_memory=low_memory,
+        as_polars=as_polars,
+    )
+    logger.debug(
+        "fetched data for %s/%s via accessor materialization in %.2f s",
+        file._path,
+        normalized_search_term,
+        time.time() - t0,
+    )
+    return data
 
 
 def _get_indexed_column_data(
@@ -878,6 +1093,16 @@ def _get_table_length(
     file_path: lazynwb.types_.PathLike,
     table_path: str,
 ) -> int:
+    normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
+    snapshot = _get_fast_catalog_snapshot_if_available(file_path, normalized_table_path)
+    if snapshot is not None and snapshot.table_length is not None:
+        logger.debug(
+            "resolved table length for %r/%s from fast catalog snapshot: %d",
+            file_path,
+            normalized_table_path,
+            snapshot.table_length,
+        )
+        return snapshot.table_length
     columns = lazynwb.table_metadata.get_table_column_metadata(file_path, table_path)
     return lazynwb.table_metadata.get_table_length_from_metadata(columns)
 
@@ -1024,7 +1249,9 @@ def _get_fast_hdf5_table_schema_if_available(
         return None
     reader = hdf5_reader._default_hdf5_backend_reader(file_path)
     try:
-        snapshot = asyncio.run(reader.read_table_schema_snapshot(table_path))
+        snapshot = _run_async_value(
+            _read_table_schema_snapshot_and_close(reader, table_path)
+        )
     except hdf5_reader._NotHDF5Error:
         logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
         return None
@@ -1038,7 +1265,9 @@ def _get_fast_zarr_table_schema_if_available(
     if not zarr_reader._is_fast_zarr_candidate(file_path):
         return None
     reader = zarr_reader._default_zarr_backend_reader(file_path)
-    snapshot = asyncio.run(reader.read_table_schema_snapshot(table_path))
+    snapshot = _run_async_value(
+        _read_table_schema_snapshot_and_close(reader, table_path)
+    )
     return catalog_polars._snapshot_to_polars_schema(snapshot)
 
 
