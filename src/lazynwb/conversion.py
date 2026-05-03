@@ -407,42 +407,39 @@ def get_sql_context(
     logger.info(
         f"Found {len(common_table_paths)} common table paths: {sorted(common_table_paths)}"
     )
-    if not full_path:
-        # Normalize paths to just the last part if full_path is False
-        common_table_paths = {
-            lazynwb.utils.normalize_internal_file_path(path)
-            for path in common_table_paths
-        }
-
-    if rename_general_metadata:
-        renaming_map = {"general": "session"}
-        common_table_paths = {
-            renaming_map.get(path, path) for path in common_table_paths
-        }
-
     if table_names is not None:
         # Filter to only include specified table names
-        norm_table_names = {
-            (
-                lazynwb.utils.normalize_internal_file_path(name)
-                if full_path
-                else name.split("/")[-1]
+        requested_table_names = set(table_names)
+        registered_table_names = {
+            _sql_table_name(
+                path,
+                full_path=full_path,
+                rename_general_metadata=rename_general_metadata,
             )
-            for name in table_names
+            for path in common_table_paths
         }
-        if not set(table_names).issubset(norm_table_names):
+        if not requested_table_names.issubset(registered_table_names):
             raise ValueError(
-                f"{table_names=} do not all match paths in NWB files: {norm_table_names}"
+                f"{table_names=} do not all match paths in NWB files: {registered_table_names}"
                 f" ({full_path=} can be toggled to use just the last part of the path)"
             )
-        common_table_paths = sorted(set(common_table_paths) & set(table_names))
+        common_table_paths = {
+            path
+            for path in common_table_paths
+            if _sql_table_name(
+                path,
+                full_path=full_path,
+                rename_general_metadata=rename_general_metadata,
+            )
+            in requested_table_names
+        }
 
     sql_context = pl.SQLContext(**sqlcontext_kwargs)
     for table_path in sorted(common_table_paths):
-        table_name = (
-            lazynwb.utils.normalize_internal_file_path(table_path)
-            if full_path
-            else table_path.split("/")[-1]
+        table_name = _sql_table_name(
+            table_path,
+            full_path=full_path,
+            rename_general_metadata=rename_general_metadata,
         )
 
         logger.info(f"Adding {table_path} as {table_name}")
@@ -460,6 +457,19 @@ def get_sql_context(
         )
 
     return sql_context
+
+
+def _sql_table_name(
+    table_path: str,
+    *,
+    full_path: bool,
+    rename_general_metadata: bool,
+) -> str:
+    normalized_path = lazynwb.utils.normalize_internal_file_path(table_path)
+    table_name = normalized_path if full_path else normalized_path.split("/")[-1]
+    if rename_general_metadata and normalized_path == "general":
+        return "session"
+    return table_name
 
 
 def _find_common_paths(

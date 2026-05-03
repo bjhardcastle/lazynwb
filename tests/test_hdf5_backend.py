@@ -299,7 +299,7 @@ def test_sql_context_uses_explicit_hdf5_multi_table_schema_scan(
     for table_name in (
         "intervals/trials",
         "units",
-        "general",
+        "session",
         "processing/behavior/running_speed_with_rate",
     ):
         assert table_name in sql_context.tables()

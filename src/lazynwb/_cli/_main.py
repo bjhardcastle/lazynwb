@@ -4,6 +4,7 @@ import argparse
 import collections.abc
 import logging
 import sys
+import time
 import typing
 
 import lazynwb._cli._config as cli_config
@@ -97,6 +98,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     paths_parser.set_defaults(_handler=_handle_paths)
 
+    tables_parser = subparsers.add_parser(
+        "tables",
+        help="list SQL-ready NWB table names",
+    )
+    _add_config_argument(tables_parser)
+    tables_parser.add_argument(
+        "--format",
+        choices=("json", "table"),
+        default="json",
+        dest="output_format",
+        help="output format; defaults to json",
+    )
+    tables_parser.add_argument(
+        "--infer-schema-length",
+        default=None,
+        type=_positive_int,
+        help="number of resolved sources to use for table discovery",
+    )
+    _add_source_override_arguments(tables_parser, include_paths=False)
+    tables_parser.add_argument(
+        "paths",
+        metavar="PATH",
+        nargs="*",
+        help="explicit NWB file or store path",
+    )
+    tables_parser.set_defaults(_handler=_handle_tables)
+
     config_parser = subparsers.add_parser(
         "config",
         help="initialize or show project-local CLI configuration",
@@ -146,6 +174,68 @@ def _handle_paths(
         cli_formatting._write_json(
             stdout,
             cli_formatting._source_paths_json_object(paths, resolved_source),
+        )
+    return cli_errors._ExitCode.OK
+
+
+def _handle_tables(
+    args: argparse.Namespace, stdout: typing.TextIO
+) -> cli_errors._ExitCode:
+    import lazynwb._cli._tables as cli_tables
+
+    loaded_config = cli_config._load_project_config(args.config)
+    started_at = time.perf_counter()
+    resolved_source = cli_sources._resolve_source(
+        loaded_config,
+        _source_overrides_from_args(args, paths=tuple(args.paths)),
+        validate_paths=True,
+        discover_local=True,
+    )
+    paths = cli_sources._paths_for_source(resolved_source)
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.debug(
+        "resolved table source paths: source_kind=%s precedence=%s "
+        "resolved_count=%d elapsed_ms=%.3f",
+        resolved_source.kind,
+        resolved_source.precedence,
+        len(paths),
+        elapsed_ms,
+    )
+
+    sql_defaults = cli_tables._sql_defaults_json_object(
+        infer_schema_length=args.infer_schema_length,
+    )
+    tables = cli_tables._list_sql_tables(
+        tuple(path["resolved"] for path in paths),
+        infer_schema_length=args.infer_schema_length,
+    )
+    if not tables:
+        logger.debug("SQL context table discovery returned no tables")
+        raise cli_errors._CLIError(
+            code=cli_errors._ErrorCode.TABLES_NOT_FOUND,
+            details={
+                "resolved_count": len(paths),
+                "source": cli_sources._source_json_object(
+                    resolved_source,
+                    paths=paths,
+                ),
+                "sql": sql_defaults,
+            },
+            exit_code=cli_errors._ExitCode.VALIDATION_ERROR,
+            message="No SQL-ready NWB tables were found for the resolved sources.",
+        )
+
+    if args.output_format == "table":
+        cli_formatting._write_sql_tables_table(stdout, tables)
+    else:
+        cli_formatting._write_json(
+            stdout,
+            cli_formatting._sql_tables_json_object(
+                tables,
+                resolved_source,
+                paths=paths,
+                sql_defaults=sql_defaults,
+            ),
         )
     return cli_errors._ExitCode.OK
 
@@ -252,6 +342,16 @@ def _source_overrides_from_args(
         dandi_path_pattern=getattr(args, "dandi_path_pattern", None),
         dandi_anonymous_s3=getattr(args, "dandi_anonymous_s3", None),
     )
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def _configure_logging(*, debug: bool, stderr: typing.TextIO) -> None:

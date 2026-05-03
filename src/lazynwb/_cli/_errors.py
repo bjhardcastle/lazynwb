@@ -25,6 +25,7 @@ class _ErrorCode(str, enum.Enum):
     SOURCE_PATHS_UNAVAILABLE = "source_paths_unavailable"
     SOURCE_PATH_NOT_FOUND = "source_path_not_found"
     SOURCE_ROOT_NOT_FOUND = "source_root_not_found"
+    TABLES_NOT_FOUND = "tables_not_found"
     USAGE_ERROR = "usage_error"
 
 

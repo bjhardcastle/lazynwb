@@ -10,6 +10,7 @@ import pytest
 
 import lazynwb._cli._main as cli_main
 import lazynwb._cli._sources as cli_sources
+import lazynwb._cli._tables as cli_tables
 import lazynwb.file_io
 
 
@@ -94,6 +95,251 @@ def test_debug_logs_go_to_stderr_while_stdout_stays_json(
     assert exit_code == 0
     assert json.loads(stdout)["paths"][0]["resolved"] == path.resolve().as_posix()
     assert "DEBUG:lazynwb._cli" in stderr
+    assert "DEBUG:" not in stdout
+
+
+def test_tables_command_lists_sql_ready_tables_json(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    exit_code, stdout, stderr = _run_cli(["tables", str(local_hdf5_path)])
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    table_names = [table["name"] for table in payload["tables"]]
+    assert table_names == sorted(table_names)
+    assert payload["command"] == "tables"
+    assert payload["resolved_count"] == 1
+    assert payload["source"] == {
+        "dandi": None,
+        "kind": "paths",
+        "local": None,
+        "paths": [
+            {
+                "input": str(local_hdf5_path),
+                "resolved": local_hdf5_path.resolve().as_posix(),
+            }
+        ],
+        "precedence": "command_line_paths",
+        "resolved_count": 1,
+    }
+    assert payload["sql"] == {
+        "disable_progress": True,
+        "eager": False,
+        "exclude_timeseries": False,
+        "full_path": True,
+        "infer_schema_length": None,
+        "rename_general_metadata": True,
+    }
+    assert payload["table_count"] == len(table_names)
+    assert "intervals/trials" in table_names
+    assert "processing/behavior/running_speed_with_rate" in table_names
+    assert "processing/behavior/running_speed_with_timestamps" in table_names
+    assert "session" in table_names
+    assert "general" not in table_names
+
+
+def test_tables_command_supports_table_output(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeSQLContext(("units", "intervals/trials")),
+    )
+
+    exit_code, stdout, stderr = _run_cli(["tables", "--format", "table", str(path)])
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert "name" in stdout
+    assert "path" in stdout
+    assert "intervals/trials" in stdout
+    assert "units" in stdout
+
+
+def test_tables_command_passes_agent_friendly_sql_defaults(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    calls: list[dict[str, object]] = []
+
+    def _get_sql_context(
+        nwb_sources: tuple[str, ...],
+        **kwargs: object,
+    ) -> _FakeSQLContext:
+        calls.append({"nwb_sources": nwb_sources, **kwargs})
+        return _FakeSQLContext(("units",))
+
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        _get_sql_context,
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["tables", "--infer-schema-length", "1", str(path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert json.loads(stdout)["tables"] == [{"name": "units", "path": "units"}]
+    assert calls == [
+        {
+            "disable_progress": True,
+            "eager": False,
+            "exclude_timeseries": False,
+            "full_path": True,
+            "infer_schema_length": 1,
+            "nwb_sources": (path.resolve().as_posix(),),
+            "rename_general_metadata": True,
+        }
+    ]
+
+
+def test_tables_command_uses_config_paths_when_no_path_args(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    config_path = tmp_path / "lazynwb.toml"
+    _write_config(
+        config_path,
+        """
+        version = 1
+
+        [source]
+        paths = ["source.nwb"]
+        """,
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def _get_sql_context(
+        nwb_sources: tuple[str, ...],
+        **kwargs: object,
+    ) -> _FakeSQLContext:
+        calls.append(nwb_sources)
+        return _FakeSQLContext(("units",))
+
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        _get_sql_context,
+    )
+
+    exit_code, stdout, stderr = _run_cli(["tables", "--config", str(config_path)])
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert json.loads(stdout)["source"]["precedence"] == "config_paths"
+    assert calls == [(path.resolve().as_posix(),)]
+
+
+def test_tables_command_returns_missing_source_error(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    exit_code, stdout, stderr = _run_cli(["tables"])
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "source_not_configured",
+            "details": {
+                "source": {
+                    "dandi": None,
+                    "kind": "none",
+                    "local": None,
+                    "paths": [],
+                    "precedence": "none",
+                    "resolved_count": 0,
+                }
+            },
+            "message": "No lazynwb source is configured.",
+        }
+    }
+
+
+def test_tables_command_returns_missing_table_error(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeSQLContext(()),
+    )
+
+    exit_code, stdout, stderr = _run_cli(["tables", str(path)])
+
+    assert exit_code == 3
+    assert stderr == ""
+    assert json.loads(stdout) == {
+        "error": {
+            "code": "tables_not_found",
+            "details": {
+                "resolved_count": 1,
+                "source": {
+                    "dandi": None,
+                    "kind": "paths",
+                    "local": None,
+                    "paths": [
+                        {
+                            "input": str(path),
+                            "resolved": path.resolve().as_posix(),
+                        }
+                    ],
+                    "precedence": "command_line_paths",
+                    "resolved_count": 1,
+                },
+                "sql": {
+                    "disable_progress": True,
+                    "eager": False,
+                    "exclude_timeseries": False,
+                    "full_path": True,
+                    "infer_schema_length": None,
+                    "rename_general_metadata": True,
+                },
+            },
+            "message": "No SQL-ready NWB tables were found for the resolved sources.",
+        }
+    }
+
+
+def test_tables_command_debug_logs_source_resolution_and_sql_discovery(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeSQLContext(("units",)),
+    )
+
+    exit_code, stdout, stderr = _run_cli(["--debug", "tables", str(path)])
+
+    assert exit_code == 0
+    assert json.loads(stdout)["tables"] == [{"name": "units", "path": "units"}]
+    assert "resolving active source" in stderr
+    assert "resolved table source paths" in stderr
+    assert "starting SQL context table discovery" in stderr
+    assert "disable_progress=True" in stderr
+    assert "completed SQL context table discovery" in stderr
+    assert "elapsed_ms=" in stderr
     assert "DEBUG:" not in stdout
 
 
@@ -1056,6 +1302,14 @@ def _run_cli(args: list[str]) -> tuple[int, str, str]:
     stderr = io.StringIO()
     exit_code = cli_main.main(args, stdout=stdout, stderr=stderr)
     return exit_code, stdout.getvalue(), stderr.getvalue()
+
+
+class _FakeSQLContext:
+    def __init__(self, table_names: tuple[str, ...]) -> None:
+        self._table_names = table_names
+
+    def tables(self) -> list[str]:
+        return list(self._table_names)
 
 
 def _write_config(path: pathlib.Path, content: str) -> None:
