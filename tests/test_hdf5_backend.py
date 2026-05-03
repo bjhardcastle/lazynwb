@@ -190,6 +190,85 @@ def test_hdf5_backend_timeseries_schema_skips_unaligned_columns(
     assert "short_sidecar" not in schema
 
 
+def test_public_multifile_fast_hdf5_preserves_schema_merge_semantics(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.WARNING, logger="lazynwb.tables")
+    float_file = _write_schema_table(tmp_path / "float.nwb", np.float64)
+    int_file_0 = _write_schema_table(tmp_path / "int-0.nwb", np.int64)
+    int_file_1 = _write_schema_table(tmp_path / "int-1.nwb", np.int64)
+    source_urls = tuple(
+        path.as_uri() for path in (float_file, int_file_0, int_file_1)
+    )
+
+    schema = lazynwb.tables.get_table_schema(source_urls, "/table")
+    first_only_schema = lazynwb.tables.get_table_schema(
+        source_urls,
+        "/table",
+        first_n_files_to_infer_schema=1,
+        exclude_internal_columns=True,
+    )
+
+    assert schema["value"] == pl.Int64
+    assert schema[lazynwb.tables.NWB_PATH_COLUMN_NAME] == pl.String
+    assert schema[lazynwb.tables.TABLE_PATH_COLUMN_NAME] == pl.String
+    assert schema[lazynwb.tables.TABLE_INDEX_COLUMN_NAME] == pl.UInt32
+    assert first_only_schema == pl.Schema({"value": pl.Float64})
+    assert "Column 'value' has inconsistent types across files" in caplog.text
+
+
+def test_public_fast_hdf5_missing_table_preserves_raise_on_missing(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    source_url = local_hdf5_path.as_uri()
+
+    with pytest.raises(lazynwb.exceptions.InternalPathError, match="not found in"):
+        lazynwb.tables.get_table_schema(
+            source_url,
+            "/not_a_table",
+            raise_on_missing=False,
+        )
+    with pytest.raises(lazynwb.exceptions.InternalPathError, match="not found in"):
+        lazynwb.tables.get_table_schema(
+            source_url,
+            "/not_a_table",
+            raise_on_missing=True,
+        )
+
+
+def test_public_multifile_fast_hdf5_reuses_per_source_cache_entries(
+    local_hdf5_paths: list[pathlib.Path],
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    source_urls = tuple(path.as_uri() for path in local_hdf5_paths)
+
+    lazynwb.tables.get_table_schema(
+        source_urls,
+        "/intervals/trials",
+        exclude_internal_columns=True,
+    )
+    lazynwb.tables.get_table_schema(
+        source_urls[1:],
+        "/intervals/trials",
+        exclude_internal_columns=True,
+    )
+    warm_reader = hdf5_reader._default_hdf5_backend_reader(source_urls[1])
+    warm_snapshot = asyncio.run(
+        warm_reader.read_table_schema_snapshot("intervals/trials")
+    )
+
+    assert warm_snapshot.table_path == "intervals/trials"
+    assert warm_reader._range_reader.request_count == 0
+
+
 def test_hdf5_backend_reader_fails_fast_with_structured_parser_error(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -267,3 +346,10 @@ def _snapshot_schema(snapshot: catalog_models._TableSchemaSnapshot) -> pl.Schema
 def _existing_schema(path: pathlib.Path, table_path: str) -> pl.Schema:
     raw_columns = lazynwb.get_table_column_metadata(path, table_path)
     return lazynwb.tables.get_table_schema_from_metadata(raw_columns)
+
+
+def _write_schema_table(path: pathlib.Path, dtype: type[np.generic]) -> pathlib.Path:
+    with h5py.File(path, "w") as h5_file:
+        group = h5_file.create_group("table")
+        group.create_dataset("value", data=np.array([1, 2], dtype=dtype))
+    return path

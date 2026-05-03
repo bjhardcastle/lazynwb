@@ -894,26 +894,45 @@ def _get_table_schema_helper(
     file_path: lazynwb.types_.PathLike, table_path: str, raise_on_missing: bool
 ) -> dict[str, Any] | None:
     normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
-    fast_schema = _get_fast_hdf5_table_schema_if_available(
-        file_path=file_path,
-        table_path=normalized_table_path,
-    )
-    if fast_schema is not None:
-        return fast_schema
+    try:
+        fast_schema = _get_fast_hdf5_table_schema_if_available(
+            file_path=file_path,
+            table_path=normalized_table_path,
+        )
+    except KeyError:
+        return _handle_missing_schema_table(
+            file_path=file_path,
+            table_path=table_path,
+            raise_on_missing=raise_on_missing,
+        )
+    else:
+        if fast_schema is not None:
+            return fast_schema
     try:
         columns = lazynwb.table_metadata.get_table_column_metadata(
             file_path, normalized_table_path
         )
     except KeyError:
-        if raise_on_missing:
-            raise lazynwb.exceptions.InternalPathError(
-                f"Table {table_path!r} not found in {file_path!r}"
-            ) from None
-        else:
-            logger.info(f"Table {table_path!r} not found in {file_path!r}: skipping")
-            return None
+        return _handle_missing_schema_table(
+            file_path=file_path,
+            table_path=table_path,
+            raise_on_missing=raise_on_missing,
+        )
     else:
         return get_table_schema_from_metadata(columns)
+
+
+def _handle_missing_schema_table(
+    file_path: lazynwb.types_.PathLike,
+    table_path: str,
+    raise_on_missing: bool,
+) -> None:
+    if raise_on_missing:
+        raise lazynwb.exceptions.InternalPathError(
+            f"Table {table_path!r} not found in {file_path!r}"
+        ) from None
+    logger.info("Table %r not found in %r: skipping", table_path, file_path)
+    return None
 
 
 def _get_fast_hdf5_table_schema_if_available(

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import pathlib
+import threading
 
 import aiosqlite
 
@@ -13,6 +14,9 @@ import lazynwb._catalog.models as catalog_models
 import lazynwb.types_
 
 logger = logging.getLogger(__name__)
+
+_SQLITE_LOCK = threading.RLock()
+_SQLITE_TIMEOUT_SECONDS = 30
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -35,9 +39,13 @@ class _SQLiteSnapshotCache:
 
     async def initialize(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._path) as db:
-            await self._initialize_connection(db)
-            await db.commit()
+        with _SQLITE_LOCK:
+            async with aiosqlite.connect(
+                self._path,
+                timeout=_SQLITE_TIMEOUT_SECONDS,
+            ) as db:
+                await self._initialize_connection(db)
+                await db.commit()
 
     async def get_table_schema_snapshot(
         self,
@@ -52,53 +60,60 @@ class _SQLiteSnapshotCache:
                 table_path,
             )
             return _CacheLookupResult(snapshot=None, reason="unreliable_identity")
-        async with aiosqlite.connect(self._path) as db:
-            db.row_factory = aiosqlite.Row
-            await self._initialize_connection(db)
-            source_row = await self._get_source_row(db, source_identity)
-            if source_row is None:
-                reason = await self._classify_missing_source(db, source_identity)
+        with _SQLITE_LOCK:
+            async with aiosqlite.connect(
+                self._path,
+                timeout=_SQLITE_TIMEOUT_SECONDS,
+            ) as db:
+                db.row_factory = aiosqlite.Row
+                await self._initialize_connection(db)
+                source_row = await self._get_source_row(db, source_identity)
+                if source_row is None:
+                    reason = await self._classify_missing_source(db, source_identity)
+                    logger.debug(
+                        "table schema cache miss for %s/%s: %s",
+                        source_identity.source_url,
+                        table_path,
+                        reason,
+                    )
+                    return _CacheLookupResult(snapshot=None, reason=reason)
+                snapshot_row = await self._get_table_schema_row(
+                    db,
+                    source_id=int(source_row["source_id"]),
+                    table_path=table_path,
+                )
+                if snapshot_row is None:
+                    logger.debug(
+                        "table schema cache miss for %s/%s: no snapshot row",
+                        source_identity.source_url,
+                        table_path,
+                    )
+                    return _CacheLookupResult(snapshot=None, reason="snapshot_miss")
+                payload_version = int(snapshot_row["payload_version"])
+                if (
+                    payload_version
+                    != catalog_models._TableSchemaSnapshot.PAYLOAD_VERSION
+                ):
+                    logger.debug(
+                        "table schema cache miss for %s/%s: payload version %d != %d",
+                        source_identity.source_url,
+                        table_path,
+                        payload_version,
+                        catalog_models._TableSchemaSnapshot.PAYLOAD_VERSION,
+                    )
+                    return _CacheLookupResult(
+                        snapshot=None,
+                        reason="payload_version_mismatch",
+                    )
+                payload = json.loads(str(snapshot_row["payload_json"]))
+                snapshot = catalog_models._TableSchemaSnapshot.from_json_dict(payload)
                 logger.debug(
-                    "table schema cache miss for %s/%s: %s",
+                    "table schema cache hit for %s/%s with %d columns",
                     source_identity.source_url,
                     table_path,
-                    reason,
+                    len(snapshot.columns),
                 )
-                return _CacheLookupResult(snapshot=None, reason=reason)
-            snapshot_row = await self._get_table_schema_row(
-                db,
-                source_id=int(source_row["source_id"]),
-                table_path=table_path,
-            )
-            if snapshot_row is None:
-                logger.debug(
-                    "table schema cache miss for %s/%s: no snapshot row",
-                    source_identity.source_url,
-                    table_path,
-                )
-                return _CacheLookupResult(snapshot=None, reason="snapshot_miss")
-            payload_version = int(snapshot_row["payload_version"])
-            if payload_version != catalog_models._TableSchemaSnapshot.PAYLOAD_VERSION:
-                logger.debug(
-                    "table schema cache miss for %s/%s: payload version %d != %d",
-                    source_identity.source_url,
-                    table_path,
-                    payload_version,
-                    catalog_models._TableSchemaSnapshot.PAYLOAD_VERSION,
-                )
-                return _CacheLookupResult(
-                    snapshot=None,
-                    reason="payload_version_mismatch",
-                )
-            payload = json.loads(str(snapshot_row["payload_json"]))
-            snapshot = catalog_models._TableSchemaSnapshot.from_json_dict(payload)
-            logger.debug(
-                "table schema cache hit for %s/%s with %d columns",
-                source_identity.source_url,
-                table_path,
-                len(snapshot.columns),
-            )
-            return _CacheLookupResult(snapshot=snapshot, reason="hit")
+                return _CacheLookupResult(snapshot=snapshot, reason="hit")
 
     async def put_table_schema_snapshot(
         self,
@@ -113,47 +128,51 @@ class _SQLiteSnapshotCache:
                 snapshot.table_path,
             )
             return
-        async with aiosqlite.connect(self._path) as db:
-            await self._initialize_connection(db)
-            source_id = await self._get_or_create_source_id(db, source_identity)
-            payload_json = json.dumps(
-                snapshot.to_json_dict(),
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            now = _utc_now()
-            await db.execute(
-                """
-                INSERT INTO table_schema_snapshots (
-                    source_id,
-                    table_path,
-                    payload_version,
-                    payload_json,
-                    created_at,
-                    updated_at
+        with _SQLITE_LOCK:
+            async with aiosqlite.connect(
+                self._path,
+                timeout=_SQLITE_TIMEOUT_SECONDS,
+            ) as db:
+                await self._initialize_connection(db)
+                source_id = await self._get_or_create_source_id(db, source_identity)
+                payload_json = json.dumps(
+                    snapshot.to_json_dict(),
+                    sort_keys=True,
+                    separators=(",", ":"),
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(source_id, table_path) DO UPDATE SET
-                    payload_version = excluded.payload_version,
-                    payload_json = excluded.payload_json,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    source_id,
+                now = _utc_now()
+                await db.execute(
+                    """
+                    INSERT INTO table_schema_snapshots (
+                        source_id,
+                        table_path,
+                        payload_version,
+                        payload_json,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source_id, table_path) DO UPDATE SET
+                        payload_version = excluded.payload_version,
+                        payload_json = excluded.payload_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        source_id,
+                        snapshot.table_path,
+                        snapshot.payload_version,
+                        payload_json,
+                        now,
+                        now,
+                    ),
+                )
+                await db.commit()
+                logger.debug(
+                    "wrote table schema cache snapshot for %s/%s with %d columns",
+                    source_identity.source_url,
                     snapshot.table_path,
-                    snapshot.payload_version,
-                    payload_json,
-                    now,
-                    now,
-                ),
-            )
-            await db.commit()
-            logger.debug(
-                "wrote table schema cache snapshot for %s/%s with %d columns",
-                source_identity.source_url,
-                snapshot.table_path,
-                len(snapshot.columns),
-            )
+                    len(snapshot.columns),
+                )
 
     async def _initialize_connection(self, db: aiosqlite.Connection) -> None:
         await db.execute("PRAGMA journal_mode=WAL")
