@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import pathlib
 
+import h5py
+import numpy as np
 import polars as pl
 import pytest
 
@@ -127,6 +130,66 @@ def test_public_get_table_schema_uses_fast_hdf5_for_obstore_file_url(
     assert schema["start_time"] == pl.Float64
 
 
+def test_hdf5_backend_reader_matches_metadata_and_timeseries_schema_parity(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="lazynwb.table_metadata")
+    reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "catalog.sqlite")
+
+    general_snapshot = asyncio.run(reader.read_table_schema_snapshot("general"))
+    rate_snapshot = asyncio.run(
+        reader.read_table_schema_snapshot("processing/behavior/running_speed_with_rate")
+    )
+    timestamps_snapshot = asyncio.run(
+        reader.read_table_schema_snapshot(
+            "processing/behavior/running_speed_with_timestamps"
+        )
+    )
+
+    assert general_snapshot.table_length == 1
+    assert _snapshot_schema(general_snapshot) == _existing_schema(
+        local_hdf5_path, "/general"
+    )
+    assert "session_start_time" in _snapshot_schema(general_snapshot)
+    rate_schema = _snapshot_schema(rate_snapshot)
+    assert rate_schema == _existing_schema(
+        local_hdf5_path,
+        "processing/behavior/running_speed_with_rate",
+    )
+    assert "starting_time" not in rate_schema
+    assert rate_schema["timestamps"] == pl.Float64
+    timestamps_schema = _snapshot_schema(timestamps_snapshot)
+    assert timestamps_schema == _existing_schema(
+        local_hdf5_path,
+        "processing/behavior/running_speed_with_timestamps",
+    )
+    assert {"data", "timestamps"}.issubset(timestamps_schema)
+    assert "using metadata-only schema facts for tiny metadata column" in caplog.text
+    assert "resolved selected TimeSeries rate attr" in caplog.text
+
+
+def test_hdf5_backend_timeseries_schema_skips_unaligned_columns(
+    tmp_path: pathlib.Path,
+) -> None:
+    nwb_path = tmp_path / "unaligned_timeseries.nwb"
+    with h5py.File(nwb_path, "w") as h5_file:
+        group = h5_file.create_group("acquisition/run")
+        group.attrs["neurodata_type"] = "TimeSeries"
+        group.create_dataset("data", data=np.arange(4, dtype=np.float64))
+        group.create_dataset("timestamps", data=np.arange(4, dtype=np.float64))
+        group.create_dataset("short_sidecar", data=np.arange(3, dtype=np.float64))
+
+    reader = _buffer_hdf5_reader(nwb_path, tmp_path / "catalog.sqlite")
+
+    snapshot = asyncio.run(reader.read_table_schema_snapshot("acquisition/run"))
+    schema = _snapshot_schema(snapshot)
+
+    assert {"data", "timestamps"}.issubset(schema)
+    assert "short_sidecar" not in schema
+
+
 def test_hdf5_backend_reader_fails_fast_with_structured_parser_error(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -195,3 +258,12 @@ def _buffer_hdf5_reader(
         range_reader=range_reader,
         cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
     )
+
+
+def _snapshot_schema(snapshot: catalog_models._TableSchemaSnapshot) -> pl.Schema:
+    return catalog_polars._snapshot_to_polars_schema(snapshot)
+
+
+def _existing_schema(path: pathlib.Path, table_path: str) -> pl.Schema:
+    raw_columns = lazynwb.get_table_column_metadata(path, table_path)
+    return lazynwb.tables.get_table_schema_from_metadata(raw_columns)

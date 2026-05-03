@@ -207,6 +207,7 @@ def _metadata_from_accessor(
     dtype = getattr(accessor, "dtype", None)
     shape = _shape_as_tuple(getattr(accessor, "shape", None))
     ndim = getattr(accessor, "ndim", None)
+    attrs = dict(getattr(accessor, "attrs", {}))
     storage_facts = _get_storage_facts(accessor)
     is_nominally_indexed = _is_nominally_indexed_column(name, column_names)
     is_index_column = is_nominally_indexed and name.endswith("_index")
@@ -217,6 +218,24 @@ def _metadata_from_accessor(
         shape=shape,
         timeseries_len=timeseries_len,
     )
+    if is_metadata_table and ndim is not None and ndim <= 1:
+        logger.debug(
+            "using metadata-only schema facts for tiny metadata column %r at %s/%s "
+            "(shape=%s dtype=%s)",
+            name,
+            source_path,
+            table_path,
+            shape,
+            dtype,
+        )
+    if name == "starting_time" and is_timeseries_with_rate and "rate" in attrs:
+        logger.debug(
+            "resolved selected TimeSeries rate attr for %s/%s from %r: %r",
+            source_path,
+            table_path,
+            name,
+            attrs["rate"],
+        )
     return RawTableColumnMetadata(
         name=name,
         table_path=table_path,
@@ -225,7 +244,7 @@ def _metadata_from_accessor(
         dtype=dtype,
         shape=shape,
         ndim=ndim,
-        attrs=dict(getattr(accessor, "attrs", {})),
+        attrs=attrs,
         maxshape=storage_facts.maxshape,
         chunks=storage_facts.chunks,
         storage_layout=storage_facts.storage_layout,
