@@ -103,6 +103,12 @@ def test_accessor_catalog_schema_preserves_units_array_facts(
     assert isinstance(schema["waveform_mean"], pl.Array)
 
 
+def test_catalog_polars_schema_converts_reference_dtype_to_string() -> None:
+    dtype = catalog_models._NeutralDType(kind="reference", numpy_dtype="|O")
+
+    assert catalog_polars._neutral_dtype_to_polars_base(dtype) == pl.String
+
+
 def test_accessor_backend_reader_requires_exact_normalized_paths(
     local_hdf5_path: pathlib.Path,
 ) -> None:

@@ -71,7 +71,7 @@ def _get_polars_dtype(
 def _neutral_dtype_to_polars_base(
     dtype: catalog_models._NeutralDType,
 ) -> polars._typing.PolarsDataType:
-    if dtype.kind in {"object", "string"}:
+    if dtype.kind in {"object", "reference", "string"}:
         return pl.String
     if dtype.kind == "bool":
         return pl.Boolean

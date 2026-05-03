@@ -61,6 +61,40 @@ def test_source_identity_from_obstore_metadata() -> None:
     assert identity.validator_kind == "version_id"
 
 
+def test_s3_region_discovery_adds_region_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="aind-scratch-data",
+        storage_options={"skip_signature": True},
+    )
+
+    assert options == {"skip_signature": True, "region": "us-west-2"}
+
+
+def test_s3_region_discovery_preserves_explicit_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        hdf5_range_reader,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="aind-scratch-data",
+        storage_options={"skip_signature": True, "region": "eu-west-1"},
+    )
+
+    assert options == {"skip_signature": True, "region": "eu-west-1"}
+
+
 def test_probe_hdf5_signature_at_zero() -> None:
     reader = hdf5_range_reader._BufferRangeReader(
         hdf5_range_reader._HDF5_SIGNATURE + b"\x00" * 32

@@ -8,7 +8,9 @@ import math
 import pathlib
 import time
 import typing
+import urllib.error
 import urllib.parse
+import urllib.request
 from collections.abc import Iterable, Mapping
 
 import obstore
@@ -19,6 +21,7 @@ import lazynwb._catalog.models as catalog_models
 logger = logging.getLogger(__name__)
 
 _HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
+_S3_REGION_CACHE: dict[str, str] = {}
 
 
 class _RangeReadError(OSError):
@@ -369,11 +372,21 @@ def _store_and_path_from_url(
     config: _RangeReaderConfig,
 ) -> tuple[obstore.store.ObjectStore, str]:
     parsed = urllib.parse.urlsplit(url)
+    storage_options = dict(config.storage_options or {})
     if parsed.scheme == "file":
         path = pathlib.Path(urllib.parse.unquote(parsed.path))
         store_url = path.parent.as_uri()
         object_path = path.name
-    elif parsed.scheme in {"http", "https", "s3", "gs", "gcs", "az", "abfs"}:
+    elif parsed.scheme == "s3":
+        store_url = urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc, "", "", "")
+        )
+        object_path = parsed.path.lstrip("/")
+        storage_options = _add_discovered_s3_region(
+            bucket=parsed.netloc,
+            storage_options=storage_options,
+        )
+    elif parsed.scheme in {"http", "https", "gs", "gcs", "az", "abfs"}:
         store_url = urllib.parse.urlunsplit(
             (parsed.scheme, parsed.netloc, "", "", "")
         )
@@ -382,7 +395,6 @@ def _store_and_path_from_url(
         raise ValueError(f"unsupported obstore URL scheme for range reader: {url!r}")
     if not object_path:
         raise ValueError(f"range reader URL must identify one object: {url!r}")
-    storage_options = dict(config.storage_options or {})
     store = obstore.store.from_url(
         store_url,
         client_options=config.client_options,
@@ -390,6 +402,44 @@ def _store_and_path_from_url(
         **storage_options,
     )
     return store, object_path
+
+
+def _add_discovered_s3_region(
+    bucket: str,
+    storage_options: dict[str, object],
+) -> dict[str, object]:
+    if (
+        "region" in storage_options
+        or "aws_region" in storage_options
+        or not bucket
+    ):
+        return storage_options
+    region = _discover_s3_bucket_region(bucket)
+    if region is not None:
+        storage_options["region"] = region
+    return storage_options
+
+
+def _discover_s3_bucket_region(bucket: str) -> str | None:
+    cached = _S3_REGION_CACHE.get(bucket)
+    if cached is not None:
+        return cached
+    request = urllib.request.Request(
+        f"https://{bucket}.s3.amazonaws.com",
+        method="HEAD",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2.0) as response:
+            region = response.headers.get("x-amz-bucket-region")
+    except urllib.error.HTTPError as exc:
+        region = exc.headers.get("x-amz-bucket-region")
+    except OSError as exc:
+        logger.debug("could not discover S3 bucket region for %s: %r", bucket, exc)
+        return None
+    if region:
+        _S3_REGION_CACHE[bucket] = region
+        logger.debug("discovered S3 bucket region for %s: %s", bucket, region)
+    return region
 
 
 def _optional_str(value: object) -> str | None:
