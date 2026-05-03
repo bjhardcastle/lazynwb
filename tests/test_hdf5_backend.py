@@ -329,6 +329,70 @@ def test_scan_nwb_uses_fast_hdf5_catalog_for_materialization(
     assert df.schema["start_time"] == pl.Float64
 
 
+def test_scan_nwb_select_reuses_scan_carried_hdf5_snapshot(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+    source_url = local_hdf5_path.as_uri()
+
+    lf = lazynwb.scan_nwb(
+        source_url,
+        "/intervals/trials",
+        disable_progress=True,
+    ).select("start_time")
+
+    def _fail_duplicate_snapshot_lookup(*args: object, **kwargs: object) -> None:
+        raise AssertionError("materialization should use the scan-carried snapshot")
+
+    monkeypatch.setattr(
+        lazynwb.tables,
+        "_get_fast_catalog_snapshot_if_available",
+        _fail_duplicate_snapshot_lookup,
+    )
+
+    df = lf.collect()
+
+    assert df.height > 0
+    assert df.schema["start_time"] == pl.Float64
+    assert "using scan-carried fast catalog snapshot for materialization" in caplog.text
+
+
+def test_scan_nwb_head_reuses_scan_carried_hdf5_snapshot_for_length(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+    source_url = local_hdf5_path.as_uri()
+
+    lf = lazynwb.scan_nwb(
+        source_url,
+        "/intervals/trials",
+        disable_progress=True,
+    ).head(1)
+
+    def _fail_duplicate_snapshot_lookup(*args: object, **kwargs: object) -> None:
+        raise AssertionError("head planning should use the scan-carried snapshot")
+
+    monkeypatch.setattr(
+        lazynwb.tables,
+        "_get_fast_catalog_snapshot_if_available",
+        _fail_duplicate_snapshot_lookup,
+    )
+
+    df = lf.collect()
+
+    assert df.height == 1
+    assert "resolved table length" in caplog.text
+    assert "scan-carried catalog snapshot" in caplog.text
+
+
 def test_hdf5_backend_reader_matches_metadata_and_timeseries_schema_parity(
     local_hdf5_path: pathlib.Path,
     tmp_path: pathlib.Path,

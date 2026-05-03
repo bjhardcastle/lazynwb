@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import concurrent.futures
+import dataclasses
 import difflib
 import logging
 import time
@@ -60,6 +61,12 @@ _INDEXED_COLUMN_FULL_READ_MIN_COVERAGE = 0.8
 _INDEXED_COLUMN_MAX_COALESCE_GAP_ELEMENTS = 1_048_576
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _TableSchemaInferenceResult:
+    schema: pl.Schema
+    catalog_snapshots: dict[str, catalog_models._TableSchemaSnapshot]
+
+
 @typing.overload
 def get_df(
     nwb_data_sources: (
@@ -78,6 +85,11 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: Literal[False] = False,
+    _catalog_snapshots: Mapping[
+        str,
+        catalog_models._TableSchemaSnapshot,
+    ]
+    | None = None,
 ) -> pd.DataFrame: ...
 
 
@@ -97,6 +109,11 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: Literal[True] = True,
+    _catalog_snapshots: Mapping[
+        str,
+        catalog_models._TableSchemaSnapshot,
+    ]
+    | None = None,
 ) -> pl.DataFrame: ...
 
 
@@ -117,6 +134,11 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: bool = False,
+    _catalog_snapshots: Mapping[
+        str,
+        catalog_models._TableSchemaSnapshot,
+    ]
+    | None = None,
 ) -> pd.DataFrame | pl.DataFrame:
     """ ""Get a DataFrame from one or more NWB files.
 
@@ -197,6 +219,11 @@ def get_df(
                     table_row_indices=nwb_path_to_row_indices.get(
                         lazynwb.file_io.from_pathlike(path).as_posix()
                     ),
+                    catalog_snapshot=(
+                        _catalog_snapshots.get(_catalog_snapshot_key(path))
+                        if _catalog_snapshots is not None
+                        else None
+                    ),
                     low_memory=low_memory,
                     as_polars=as_polars,
                 )
@@ -225,6 +252,11 @@ def get_df(
                 exclude_array_columns=exclude_array_columns,
                 table_row_indices=nwb_path_to_row_indices.get(
                     lazynwb.file_io.from_pathlike(path).as_posix()
+                ),
+                catalog_snapshot=(
+                    _catalog_snapshots.get(_catalog_snapshot_key(path))
+                    if _catalog_snapshots is not None
+                    else None
                 ),
                 low_memory=low_memory,
                 as_polars=as_polars,
@@ -417,6 +449,10 @@ def _get_fast_catalog_snapshot_if_available(
         return None
 
 
+def _catalog_snapshot_key(file_path: lazynwb.types_.PathLike) -> str:
+    return lazynwb.file_io.from_pathlike(file_path).as_posix()
+
+
 def _raw_metadata_from_catalog_column(
     column: catalog_models._TableColumnSchema,
     accessor: lazynwb.table_metadata.TableColumnAccessor,
@@ -461,10 +497,26 @@ def _get_fast_table_data_if_available(
     exclude_column_names: Iterable[str] | None,
     exclude_array_columns: bool,
     table_row_indices: Sequence[int] | None,
+    catalog_snapshot: catalog_models._TableSchemaSnapshot | None,
     low_memory: bool,
     as_polars: bool,
 ) -> dict[str, Any] | None:
-    snapshot = _get_fast_catalog_snapshot_if_available(path, exact_table_path)
+    if catalog_snapshot is not None and catalog_snapshot.table_path == exact_table_path:
+        snapshot = catalog_snapshot
+        logger.debug(
+            "using scan-carried fast catalog snapshot for materialization: %r/%s",
+            path,
+            exact_table_path,
+        )
+    else:
+        if catalog_snapshot is not None:
+            logger.debug(
+                "ignoring scan-carried catalog snapshot for %r/%s: snapshot table is %s",
+                path,
+                exact_table_path,
+                catalog_snapshot.table_path,
+            )
+        snapshot = _get_fast_catalog_snapshot_if_available(path, exact_table_path)
     if snapshot is None:
         return None
 
@@ -701,6 +753,7 @@ def _get_table_data(
     exclude_column_names: str | Iterable[str] | None = None,
     exclude_array_columns: bool = True,
     table_row_indices: Sequence[int] | None = None,
+    catalog_snapshot: catalog_models._TableSchemaSnapshot | None = None,
     low_memory: bool = False,
     as_polars: bool = False,
 ) -> dict[str, Any]:
@@ -718,6 +771,7 @@ def _get_table_data(
             exclude_column_names=exclude_column_names,
             exclude_array_columns=exclude_array_columns,
             table_row_indices=table_row_indices,
+            catalog_snapshot=catalog_snapshot,
             low_memory=low_memory,
             as_polars=as_polars,
         )
@@ -1255,9 +1309,25 @@ def get_table_schema_from_metadata(
 def _get_table_length(
     file_path: lazynwb.types_.PathLike,
     table_path: str,
+    *,
+    catalog_snapshot: catalog_models._TableSchemaSnapshot | None = None,
 ) -> int:
     normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
-    snapshot = _get_fast_catalog_snapshot_if_available(file_path, normalized_table_path)
+    if (
+        catalog_snapshot is not None
+        and catalog_snapshot.table_path == normalized_table_path
+    ):
+        snapshot = catalog_snapshot
+        logger.debug(
+            "resolved table length for %r/%s from scan-carried catalog snapshot",
+            file_path,
+            normalized_table_path,
+        )
+    else:
+        snapshot = _get_fast_catalog_snapshot_if_available(
+            file_path,
+            normalized_table_path,
+        )
     if snapshot is not None and snapshot.table_length is not None:
         logger.debug(
             "resolved table length for %r/%s from fast catalog snapshot: %d",
@@ -1325,13 +1395,25 @@ def _get_table_schema_helper(
         return get_table_schema_from_metadata(columns)
 
 
-def _run_async_schema_batch(
+def _run_async_schema_snapshot_batch(
     coroutine: typing.Coroutine[
         Any,
         Any,
-        list[tuple[lazynwb.types_.PathLike, dict[str, Any] | None, bool]],
+        list[
+            tuple[
+                lazynwb.types_.PathLike,
+                catalog_models._TableSchemaSnapshot | None,
+                bool,
+            ]
+        ],
     ],
-) -> list[tuple[lazynwb.types_.PathLike, dict[str, Any] | None, bool]]:
+) -> list[
+    tuple[
+        lazynwb.types_.PathLike,
+        catalog_models._TableSchemaSnapshot | None,
+        bool,
+    ]
+]:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -1340,11 +1422,17 @@ def _run_async_schema_batch(
     return future.result()
 
 
-async def _get_fast_hdf5_table_schemas(
+async def _get_fast_hdf5_table_schema_snapshots(
     file_paths: Sequence[lazynwb.types_.PathLike],
     table_path: str,
     raise_on_missing: bool,
-) -> list[tuple[lazynwb.types_.PathLike, dict[str, Any] | None, bool]]:
+) -> list[
+    tuple[
+        lazynwb.types_.PathLike,
+        catalog_models._TableSchemaSnapshot | None,
+        bool,
+    ]
+]:
     readers = [
         hdf5_reader._default_hdf5_backend_reader(file_path) for file_path in file_paths
     ]
@@ -1357,23 +1445,24 @@ async def _get_fast_hdf5_table_schemas(
     async def _read_schema(
         reader: hdf5_reader._HDF5BackendReader,
         file_path: lazynwb.types_.PathLike,
-    ) -> tuple[lazynwb.types_.PathLike, dict[str, Any] | None, bool]:
+    ) -> tuple[
+        lazynwb.types_.PathLike,
+        catalog_models._TableSchemaSnapshot | None,
+        bool,
+    ]:
         try:
             snapshot = await reader.read_table_schema_snapshot(table_path)
         except KeyError:
-            return (
-                file_path,
-                _handle_missing_schema_table(
-                    file_path=file_path,
-                    table_path=table_path,
-                    raise_on_missing=raise_on_missing,
-                ),
-                True,
+            _handle_missing_schema_table(
+                file_path=file_path,
+                table_path=table_path,
+                raise_on_missing=raise_on_missing,
             )
+            return file_path, None, True
         except hdf5_reader._NotHDF5Error:
             logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
             return file_path, None, False
-        return file_path, catalog_polars._snapshot_to_polars_schema(snapshot), True
+        return file_path, snapshot, True
 
     try:
         return list(
@@ -1434,20 +1523,21 @@ def _get_fast_zarr_table_schema_if_available(
     return catalog_polars._snapshot_to_polars_schema(snapshot)
 
 
-def get_table_schema(
+def _get_table_schema_with_catalog_snapshots(
     file_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     table_path: str,
     first_n_files_to_infer_schema: int | None = None,
     exclude_array_columns: bool = False,
     exclude_internal_columns: bool = False,
     raise_on_missing: bool = False,
-) -> pl.Schema:
+) -> _TableSchemaInferenceResult:
     if not isinstance(file_paths, Iterable) or isinstance(file_paths, (str, bytes)):
         file_paths = (file_paths,)
     file_paths = tuple(file_paths)
     if first_n_files_to_infer_schema is not None:
         file_paths = file_paths[: min(first_n_files_to_infer_schema, len(file_paths))]
     per_file_schemas: list[dict[str, polars.DataType]] = []
+    catalog_snapshots: dict[str, catalog_models._TableSchemaSnapshot] = {}
     normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
     fast_hdf5_paths = tuple(
         file_path
@@ -1466,8 +1556,8 @@ def get_table_schema(
             len(file_paths),
             normalized_table_path,
         )
-        for file_path, file_schema, used_fast_hdf5 in _run_async_schema_batch(
-            _get_fast_hdf5_table_schemas(
+        for file_path, snapshot, used_fast_hdf5 in _run_async_schema_snapshot_batch(
+            _get_fast_hdf5_table_schema_snapshots(
                 fast_hdf5_paths,
                 normalized_table_path,
                 raise_on_missing,
@@ -1476,8 +1566,10 @@ def get_table_schema(
             if not used_fast_hdf5:
                 fallback_paths.append(file_path)
                 continue
-            if file_schema is not None:
+            if snapshot is not None:
+                file_schema = catalog_polars._snapshot_to_polars_schema(snapshot)
                 per_file_schemas.append(file_schema)
+                catalog_snapshots[_catalog_snapshot_key(file_path)] = snapshot
     future_to_file_path = {}
     for file_path in fallback_paths:
         future = lazynwb.utils.get_threadpool_executor().submit(
@@ -1541,7 +1633,28 @@ def get_table_schema(
         for column_name in tuple(schema.keys()):
             if isinstance(schema[column_name], (pl.List, pl.Array)):
                 schema.pop(column_name, None)
-    return pl.Schema(schema)
+    return _TableSchemaInferenceResult(
+        schema=pl.Schema(schema),
+        catalog_snapshots=catalog_snapshots,
+    )
+
+
+def get_table_schema(
+    file_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
+    table_path: str,
+    first_n_files_to_infer_schema: int | None = None,
+    exclude_array_columns: bool = False,
+    exclude_internal_columns: bool = False,
+    raise_on_missing: bool = False,
+) -> pl.Schema:
+    return _get_table_schema_with_catalog_snapshots(
+        file_paths=file_paths,
+        table_path=table_path,
+        first_n_files_to_infer_schema=first_n_files_to_infer_schema,
+        exclude_array_columns=exclude_array_columns,
+        exclude_internal_columns=exclude_internal_columns,
+        raise_on_missing=raise_on_missing,
+    ).schema
 
 
 def insert_is_observed(
