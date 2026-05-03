@@ -22,6 +22,7 @@ import zarr
 
 import lazynwb._catalog.polars as catalog_polars
 import lazynwb._hdf5.reader as hdf5_reader
+import lazynwb._zarr.reader as zarr_reader
 import lazynwb.exceptions
 import lazynwb.file_io
 import lazynwb.table_metadata
@@ -909,6 +910,20 @@ def _get_table_schema_helper(
         if fast_schema is not None:
             return fast_schema
     try:
+        fast_schema = _get_fast_zarr_table_schema_if_available(
+            file_path=file_path,
+            table_path=normalized_table_path,
+        )
+    except KeyError:
+        return _handle_missing_schema_table(
+            file_path=file_path,
+            table_path=table_path,
+            raise_on_missing=raise_on_missing,
+        )
+    else:
+        if fast_schema is not None:
+            return fast_schema
+    try:
         columns = lazynwb.table_metadata.get_table_column_metadata(
             file_path, normalized_table_path
         )
@@ -947,6 +962,17 @@ def _get_fast_hdf5_table_schema_if_available(
     except hdf5_reader._NotHDF5Error:
         logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
         return None
+    return catalog_polars._snapshot_to_polars_schema(snapshot)
+
+
+def _get_fast_zarr_table_schema_if_available(
+    file_path: lazynwb.types_.PathLike,
+    table_path: str,
+) -> pl.Schema | None:
+    if not zarr_reader._is_fast_zarr_candidate(file_path):
+        return None
+    reader = zarr_reader._default_zarr_backend_reader(file_path)
+    snapshot = asyncio.run(reader.read_table_schema_snapshot(table_path))
     return catalog_polars._snapshot_to_polars_schema(snapshot)
 
 

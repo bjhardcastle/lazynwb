@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import pathlib
+import shutil
 
 import h5py
 import numpy as np
@@ -11,6 +12,7 @@ import pytest
 import zarr
 
 import lazynwb
+import lazynwb._cache.sqlite as cache_sqlite
 import lazynwb._catalog.accessor as catalog_accessor
 import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
@@ -145,13 +147,117 @@ def test_accessor_backend_reader_requires_exact_normalized_paths(
         asyncio.run(reader.read_table_schema_snapshot("/units"))
 
 
-def test_zarr_backend_reader_is_private_skeleton(local_zarr_path: pathlib.Path) -> None:
-    reader = zarr_reader._ZarrBackendReader(local_zarr_path)
+@pytest.mark.parametrize(
+    "table_path",
+    [
+        "/units",
+        "/intervals/trials",
+        "/general",
+        "processing/behavior/running_speed_with_rate",
+    ],
+)
+def test_zarr_backend_reader_builds_table_schema_snapshots(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    table_path: str,
+) -> None:
+    exact_table_path = lazynwb.normalize_internal_file_path(table_path)
+    reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),
+    )
 
-    assert "TODO" in (zarr_reader._ZarrBackendReader.__doc__ or "")
+    snapshot = asyncio.run(reader.read_table_schema_snapshot(exact_table_path))
+    schema = catalog_polars._snapshot_to_polars_schema(snapshot)
+    raw_columns = lazynwb.table_metadata.get_table_column_metadata(
+        local_zarr_path,
+        exact_table_path,
+    )
+    existing_schema = lazynwb.tables.get_table_schema_from_metadata(raw_columns)
+
     assert isinstance(reader, catalog_backend._BackendReader)
-    with pytest.raises(NotImplementedError, match="private skeleton"):
-        asyncio.run(reader.read_table_schema_snapshot("units"))
+    assert reader.used_consolidated_metadata
+    assert reader.metadata_read_count == 1
+    assert snapshot.backend == "zarr"
+    assert snapshot.table_path == exact_table_path
+    assert snapshot.columns
+    assert schema == existing_schema
+
+
+def test_zarr_backend_reader_reuses_sqlite_snapshot(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    cache_path = tmp_path / "catalog.sqlite"
+    cold_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+
+    cold_snapshot = asyncio.run(cold_reader.read_table_schema_snapshot("units"))
+    warm_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+    warm_snapshot = asyncio.run(warm_reader.read_table_schema_snapshot("units"))
+
+    assert cold_reader.metadata_read_count == 1
+    assert warm_reader.metadata_read_count == 0
+    assert warm_snapshot == cold_snapshot
+
+
+def test_zarr_backend_reader_uses_targeted_metadata_without_consolidated(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    copied_zarr = tmp_path / "without-consolidated.nwb.zarr"
+    shutil.copytree(local_zarr_path, copied_zarr)
+    (copied_zarr / ".zmetadata").unlink()
+    reader = zarr_reader._ZarrBackendReader(
+        copied_zarr,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),
+    )
+
+    snapshot = asyncio.run(reader.read_table_schema_snapshot("units"))
+    schema = catalog_polars._snapshot_to_polars_schema(snapshot)
+    raw_columns = lazynwb.table_metadata.get_table_column_metadata(
+        copied_zarr,
+        "/units",
+    )
+    existing_schema = lazynwb.tables.get_table_schema_from_metadata(raw_columns)
+
+    assert not reader.used_consolidated_metadata
+    assert reader.metadata_read_count > 1
+    assert schema == existing_schema
+
+
+def test_public_get_table_schema_uses_zarr_backend_for_local_store(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+
+    schema = lazynwb.tables.get_table_schema(
+        local_zarr_path,
+        "/units",
+        exclude_internal_columns=True,
+    )
+    warm_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),
+    )
+    warm_snapshot = asyncio.run(warm_reader.read_table_schema_snapshot("units"))
+    raw_columns = lazynwb.table_metadata.get_table_column_metadata(
+        local_zarr_path,
+        "/units",
+    )
+    existing_schema = lazynwb.tables.get_table_schema_from_metadata(raw_columns)
+
+    assert isinstance(warm_reader, catalog_backend._BackendReader)
+    assert schema == existing_schema
+    assert warm_snapshot.table_path == "units"
+    assert warm_reader.metadata_read_count == 0
 
 
 def _contains_live_accessor(value: object) -> bool:
