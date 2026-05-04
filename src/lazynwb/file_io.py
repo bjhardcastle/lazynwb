@@ -7,6 +7,7 @@ import logging
 import os
 import pathlib
 import threading
+import urllib.parse
 import warnings
 from collections.abc import Iterable
 from typing import Any
@@ -58,10 +59,12 @@ def clear_cache() -> None:
     Users can call this to reset cached h5py and zarr accessors.
     """
     import lazynwb._hdf5.range_reader as hdf5_range_reader
+    import lazynwb._zarr.reader as zarr_reader
 
     with _cache_lock:
         FileAccessor._clear_cache()
         hdf5_range_reader._clear_cache()
+        zarr_reader._clear_shared_metadata_catalog_cache()
 
 
 def _get_accessor(path: lazynwb.types_.PathLike) -> FileAccessor:
@@ -410,15 +413,14 @@ def get_internal_paths(
     include_metadata: bool = False,
     include_specifications: bool = False,
     parents: bool = False,
-) -> dict[str, h5py.Dataset | zarr.Array]:
+) -> dict[str, dict[str, Any]]:
     """
-    Traverse the internal structure of an NWB file and return a mapping of paths to data accessors.
+    Traverse the internal structure of an NWB file and return path metadata.
 
-    This API traverses accessor-backed HDF5/Zarr objects and returns live accessors.
-    For remote HDF5 sources, that traversal may be slow because it can require many
-    metadata/object lookups. Private table-discovery paths can use a catalog-backed
-    path summary, but this public function intentionally keeps its current return
-    type and behavior for compatibility.
+    This API prefers catalog-backed HDF5/Zarr path summaries where available so
+    repeated calls can reuse metadata caches. If a catalog summary is unavailable,
+    it falls back to accessor traversal and converts live objects into the same
+    metadata shape.
 
     Parameters
     ----------
@@ -438,16 +440,33 @@ def get_internal_paths(
 
     Returns
     -------
-    dict[str, h5py.Dataset | zarr.Array]
-        Dictionary mapping internal file paths to their corresponding datasets or arrays.
-        Keys are internal paths (e.g., '/units/spike_times'), values are the actual
-        dataset/array objects that can be inspected for shape, dtype, etc.
+    dict[str, dict[str, Any]]
+        Dictionary mapping internal file paths to metadata dictionaries. Metadata
+        keys include ``is_group``, ``is_dataset``, ``shape``, and ``attrs``.
     """
-    logger.debug("get_internal_paths using accessor traversal for %r", nwb_path)
+    summary = _get_catalog_path_summary_if_available(
+        nwb_path=nwb_path,
+        include_table_columns=include_table_columns,
+        include_arrays=include_arrays,
+        include_metadata=include_metadata,
+        include_specifications=include_specifications,
+        parents=parents,
+    )
+    if summary is not None:
+        logger.debug(
+            "get_internal_paths returning catalog-backed metadata for %r "
+            "(paths=%d)",
+            nwb_path,
+            len(summary),
+        )
+        return {
+            path: _path_metadata_from_summary_entry(entry)
+            for path, entry in summary.items()
+        }
+
+    logger.debug("get_internal_paths falling back to accessor traversal for %r", nwb_path)
     file_accessor = _get_accessor(nwb_path)
     _warn_if_remote_hdf5_internal_path_traversal(file_accessor)
-    # Public callers expect live accessors, so the catalog summary is used only by
-    # private name-discovery helpers that do not need accessor objects.
     paths_to_accessors = _traverse_internal_paths(
         file_accessor._accessor,
         include_table_columns=include_table_columns,
@@ -461,7 +480,33 @@ def get_internal_paths(
         for path in paths:
             if any(p.startswith(path + "/") for p in paths):
                 del paths_to_accessors[path]
-    return paths_to_accessors
+    return {
+        path: _path_metadata_from_accessor(accessor)
+        for path, accessor in paths_to_accessors.items()
+    }
+
+
+def _path_metadata_from_summary_entry(
+    entry: catalog_models._PathSummaryEntry,
+) -> dict[str, Any]:
+    return {
+        "is_group": entry.is_group,
+        "is_dataset": entry.is_dataset,
+        "shape": entry.shape,
+        "attrs": dict(entry.attrs),
+    }
+
+
+def _path_metadata_from_accessor(
+    accessor: h5py.Group | h5py.Dataset | zarr.Group | zarr.Array,
+) -> dict[str, Any]:
+    is_group_entry = is_group(accessor)
+    return {
+        "is_group": is_group_entry,
+        "is_dataset": not is_group_entry,
+        "shape": getattr(accessor, "shape", None),
+        "attrs": dict(getattr(accessor, "attrs", {})),
+    }
 
 
 def _get_catalog_path_summary_if_available(
@@ -517,9 +562,12 @@ def _get_hdf5_catalog_path_summary_entries_if_available(
     import lazynwb._hdf5.reader as hdf5_reader
     import lazynwb.tables
 
-    if not hdf5_reader._is_fast_hdf5_candidate(nwb_path):
+    catalog_source = _hdf5_catalog_source_if_available(nwb_path)
+    if catalog_source is None or not hdf5_reader._is_fast_hdf5_candidate(
+        catalog_source
+    ):
         return None
-    reader = hdf5_reader._default_hdf5_backend_reader(nwb_path)
+    reader = hdf5_reader._default_hdf5_backend_reader(catalog_source)
     try:
         return lazynwb.tables._run_async_value(reader.read_path_summary())
     except hdf5_reader._NotHDF5Error:
@@ -535,6 +583,46 @@ def _get_hdf5_catalog_path_summary_entries_if_available(
     finally:
         with contextlib.suppress(Exception):
             lazynwb.tables._run_async_value(reader.close())
+
+
+def _hdf5_catalog_source_if_available(
+    nwb_path: lazynwb.types_.PathLike,
+) -> lazynwb.types_.PathLike | None:
+    raw_path = _pathlike_to_string(nwb_path)
+    parsed = urllib.parse.urlsplit(raw_path)
+    if parsed.scheme in {"file", "http", "https", "s3", "gs", "gcs", "az", "abfs"}:
+        return raw_path
+    if parsed.scheme:
+        logger.debug(
+            "HDF5 catalog path summary skipped unsupported source scheme %r for %r",
+            parsed.scheme,
+            nwb_path,
+        )
+        return None
+    try:
+        local_path = pathlib.Path(os.fsdecode(nwb_path)).expanduser()
+    except TypeError:
+        logger.debug(
+            "HDF5 catalog path summary skipped unsupported path-like source %r",
+            nwb_path,
+        )
+        return None
+    if not local_path.is_file():
+        return None
+    return local_path.resolve().as_uri()
+
+
+def _pathlike_to_string(path: lazynwb.types_.PathLike) -> str:
+    as_posix = getattr(path, "as_posix", None)
+    if callable(as_posix):
+        try:
+            return str(as_posix())
+        except Exception:
+            logger.debug("failed to get as_posix() from path %r", path)
+    try:
+        return os.fsdecode(path)
+    except TypeError:
+        return str(path)
 
 
 def _get_zarr_catalog_path_summary_entries_if_available(
@@ -573,7 +661,9 @@ def _filter_catalog_path_summary_entries(
     results: dict[str, catalog_models._PathSummaryEntry] = {}
     table_paths: set[str] = set()
     for path, entry in entry_by_path.items():
-        if "/specifications" in path and not include_specifications:
+        if "/specifications" in path:
+            if include_specifications:
+                results[path] = entry
             continue
         shape = entry.shape
         is_scalar = shape == () or shape == (1,)
@@ -636,9 +726,9 @@ def _warn_if_remote_hdf5_internal_path_traversal(
         and protocol not in (None, "", "file")
     ):
         warnings.warn(
-            "get_internal_paths currently traverses remote HDF5 through "
-            "accessor-backed objects and may be slow; private table discovery "
-            "uses a catalog-backed path summary where available.",
+            "get_internal_paths is falling back to accessor-backed remote HDF5 "
+            "traversal and may be slow because the catalog path summary is "
+            "unavailable.",
             RuntimeWarning,
             stacklevel=2,
         )

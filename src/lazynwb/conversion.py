@@ -718,10 +718,14 @@ def _get_internal_paths_for_discovery(
 def _is_group_path_entry(accessor: Any) -> bool:
     if isinstance(accessor, catalog_models._PathSummaryEntry):
         return accessor.is_group
+    if isinstance(accessor, dict):
+        return bool(accessor.get("is_group", False))
     return lazynwb.file_io.is_group(accessor)
 
 
 def _path_entry_attrs(accessor: Any) -> dict[str, Any]:
+    if isinstance(accessor, dict):
+        return dict(accessor.get("attrs", {}))
     return dict(getattr(accessor, "attrs", {}))
 
 
@@ -733,7 +737,10 @@ def _path_entry_has_rate_starting_time(
     starting_time = internal_paths.get(f"{path}/starting_time")
     if starting_time is not None:
         return "rate" in _path_entry_attrs(starting_time)
-    if isinstance(accessor, catalog_models._PathSummaryEntry):
+    if isinstance(accessor, catalog_models._PathSummaryEntry) or isinstance(
+        accessor,
+        dict,
+    ):
         return False
     return "rate" in getattr(accessor.get("starting_time", {}), "attrs", {})
 

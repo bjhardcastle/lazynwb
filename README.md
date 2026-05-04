@@ -361,9 +361,9 @@ Returns columns including `identifier`, `session_id`, `session_start_time`,
 See what's inside an NWB file:
 ```python
 paths = lazynwb.get_internal_paths('my_file.nwb')
-# {'/acquisition/lick_sensor_events/data': <HDF5 dataset ...>,
-#  '/intervals/trials': <HDF5 group ...>,
-#  '/units': <HDF5 group ...>,
+# {'/acquisition/lick_sensor_events/data': {'is_dataset': True, 'shape': (120,), ...},
+#  '/intervals/trials': {'is_group': True, 'attrs': {'colnames': ...}, ...},
+#  '/units': {'is_group': True, 'attrs': {'colnames': ...}, ...},
 #  ...}
 ```
 

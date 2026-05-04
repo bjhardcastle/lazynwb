@@ -1300,16 +1300,16 @@ def _get_table_data(
 
     file = lazynwb.file_io._get_accessor(path)
     if not exact_path and normalized_search_term not in file:
-        path_to_accessor = lazynwb.file_io.get_internal_paths(path)
+        path_metadata = lazynwb.file_io.get_internal_paths(path)
         matches = difflib.get_close_matches(
-            search_term, path_to_accessor.keys(), n=1, cutoff=0.3
+            search_term, path_metadata.keys(), n=1, cutoff=0.3
         )
         if not matches:
             raise KeyError(f"Table {search_term!r} not found in {file._path}")
         match_ = matches[0]
         if (
             search_term not in match_
-            or len([k for k in path_to_accessor if match_ in k]) > 1
+            or len([k for k in path_metadata if match_ in k]) > 1
         ):
             # only warn if there are multiple matches or if user-provided search term is not a
             # substring of the match

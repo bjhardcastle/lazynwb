@@ -13,7 +13,7 @@ expected_paths = (
     "/units",
     "/intervals/trials",
     "/intervals/epochs",
-) # excluding metadata, specifications and table columns
+)  # excluding metadata, specifications and table columns
 
 
 def test_get_nwb_file_structure_hdf5(local_hdf5_path):
@@ -26,9 +26,11 @@ def test_get_nwb_file_structure_hdf5(local_hdf5_path):
         extras := set(structure.keys()) - set(expected_paths)
     ) == set(), f"Additional unexpected paths found: {extras}"
 
-    # Check that we can inspect the datasets
-    units_group = structure["/units"]
-    assert hasattr(units_group, "keys"), "Units should be a group with keys"
+    # Check that metadata is available without returning live accessors.
+    units_metadata = structure["/units"]
+    assert units_metadata["is_group"] is True
+    assert units_metadata["is_dataset"] is False
+    assert isinstance(units_metadata["attrs"], dict)
 
 
 def test_get_nwb_file_structure_zarr(local_zarr_path):
@@ -41,9 +43,11 @@ def test_get_nwb_file_structure_zarr(local_zarr_path):
         extras := set(structure.keys()) - set(expected_paths)
     ) == set(), f"Additional unexpected paths found: {extras}"
 
-    # Check that we can inspect the datasets
-    units_group = structure["/units"]
-    assert hasattr(units_group, "keys"), "Units should be a group with keys"
+    # Check that metadata is available without returning live accessors.
+    units_metadata = structure["/units"]
+    assert units_metadata["is_group"] is True
+    assert units_metadata["is_dataset"] is False
+    assert isinstance(units_metadata["attrs"], dict)
 
 
 def test_get_nwb_file_structure_filtering(local_hdf5_path):
@@ -99,6 +103,11 @@ def test_get_internal_paths_warns_for_remote_hdf5_accessor_traversal(
         _hdmf_backend = lazynwb.file_io.FileAccessor.HDMFBackend.HDF5
         _path = _FakePath()
 
+    monkeypatch.setattr(
+        lazynwb.file_io,
+        "_get_catalog_path_summary_if_available",
+        lambda **_: None,
+    )
     monkeypatch.setattr(lazynwb.file_io, "_get_accessor", lambda _: _FakeAccessor())
 
     try:
@@ -108,6 +117,45 @@ def test_get_internal_paths_warns_for_remote_hdf5_accessor_traversal(
         h5_file.close()
 
     assert "/units" in structure
+    assert structure["/units"]["is_group"] is True
+
+
+def test_get_internal_paths_uses_hdf5_catalog_cache(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv(
+        "LAZYNWB_CATALOG_CACHE_PATH",
+        str(tmp_path / "catalog.sqlite"),
+    )
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.reader")
+
+    cold_structure = lazynwb.get_internal_paths(
+        local_hdf5_path,
+        include_metadata=True,
+        parents=True,
+    )
+
+    assert cold_structure["/units"]["is_group"] is True
+    assert isinstance(cold_structure["/units"]["attrs"], dict)
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("get_internal_paths should use catalog-backed metadata")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+    caplog.clear()
+
+    warm_structure = lazynwb.get_internal_paths(
+        local_hdf5_path,
+        include_metadata=True,
+        parents=True,
+    )
+
+    assert warm_structure.keys() == cold_structure.keys()
+    assert "parsed HDF5 metadata cache lookup" in caplog.text
+    assert ": hit" in caplog.text
 
 
 def test_normalize_internal_file_path():
