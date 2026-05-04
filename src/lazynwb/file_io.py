@@ -19,6 +19,7 @@ import upath
 import zarr
 
 import lazynwb._catalog.models as catalog_models
+import lazynwb._storage_options
 import lazynwb.types_
 import lazynwb.utils
 
@@ -155,31 +156,26 @@ def is_group(accessor) -> bool:
 
 def _resolve_anon_setting() -> bool:
     """Resolve anonymous-access intent from the global config."""
-    if config.anon is not None:
-        return config.anon
-    return bool(config.fsspec_storage_options.get("anon", False))
+    return lazynwb._storage_options._resolve_anon_setting(
+        anon=config.anon,
+        storage_options=config.fsspec_storage_options,
+    )
 
 
 def _get_fsspec_storage_options() -> dict[str, Any]:
     """Return normalized storage options for UPath/fsspec-backed access."""
-    options = dict(config.fsspec_storage_options)
-    options["anon"] = _resolve_anon_setting()
-    return options
+    return lazynwb._storage_options._get_fsspec_storage_options(
+        config.fsspec_storage_options,
+        anon=config.anon,
+    )
 
 
 def _get_obstore_storage_options() -> dict[str, Any]:
     """Return normalized storage options for obstore-backed access."""
-    options = dict(config.fsspec_storage_options)
-    anon = _resolve_anon_setting()
-    options.pop("anon", None)
-    if anon:
-        options["skip_signature"] = True
-    if "region" not in options and "aws_region" not in options:
-        region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-        if region:
-            options["region"] = region
-            logger.debug("using AWS region %s for obstore storage options", region)
-    return options
+    return lazynwb._storage_options._get_obstore_storage_options(
+        config.fsspec_storage_options,
+        anon=config.anon,
+    )
 
 
 class FileAccessor:

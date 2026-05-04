@@ -411,6 +411,77 @@ def test_public_get_table_schema_uses_fast_hdf5_for_obstore_file_url(
     assert schema["start_time"] == pl.Float64
 
 
+def test_public_accessor_and_fast_hdf5_share_configured_storage_options(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_anon = lazynwb.file_io.config.anon
+    original_storage_options = dict(lazynwb.file_io.config.fsspec_storage_options)
+    raw_storage_options = {
+        "anon": False,
+        "region": "us-west-2",
+        "endpoint": "http://localhost:9000",
+    }
+    expected_fsspec_options = {
+        **raw_storage_options,
+        "anon": True,
+    }
+    expected_obstore_options = {
+        "region": "us-west-2",
+        "endpoint": "http://localhost:9000",
+        "skip_signature": True,
+    }
+    created_readers: list[hdf5_reader._HDF5BackendReader] = []
+    original_default_reader = hdf5_reader._default_hdf5_backend_reader
+
+    def _recording_default_reader(source: str) -> hdf5_reader._HDF5BackendReader:
+        reader = original_default_reader(source)
+        created_readers.append(reader)
+        return reader
+
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    monkeypatch.setattr(
+        hdf5_reader,
+        "_default_hdf5_backend_reader",
+        _recording_default_reader,
+    )
+
+    try:
+        lazynwb.clear_cache()
+        lazynwb.file_io.config.anon = True
+        lazynwb.file_io.config.fsspec_storage_options = raw_storage_options
+
+        accessor = lazynwb.file_io.FileAccessor(local_hdf5_path)
+        assert accessor["intervals/trials/start_time"].shape[0] > 0
+        assert lazynwb.file_io._get_fsspec_storage_options() == expected_fsspec_options
+
+        df = lazynwb.get_df(
+            local_hdf5_path.as_uri(),
+            "/intervals/trials",
+            exact_path=True,
+            include_column_names=("start_time",),
+            as_polars=True,
+        )
+
+        range_reader_options = [
+            dict(options)
+            for reader in created_readers
+            if (options := getattr(reader._range_reader, "_storage_options", None))
+            is not None
+        ]
+        assert df.height > 0
+        assert range_reader_options
+        assert all(
+            options == expected_obstore_options for options in range_reader_options
+        )
+        assert any(reader._range_reader.request_count > 0 for reader in created_readers)
+    finally:
+        lazynwb.file_io.config.anon = original_anon
+        lazynwb.file_io.config.fsspec_storage_options = original_storage_options
+        lazynwb.clear_cache()
+
+
 def test_public_get_df_uses_fast_hdf5_catalog_for_materialization(
     local_hdf5_path: pathlib.Path,
     tmp_path: pathlib.Path,
