@@ -203,7 +203,7 @@ def test_catalog_path_summary_filters_metadata_timeseries_and_specifications(
 
     summary = lazynwb.file_io._get_catalog_path_summary_if_available(
         source_url,
-        include_arrays=True,
+        include_child_datasets=True,
         include_table_columns=False,
         include_metadata=True,
         include_specifications=False,

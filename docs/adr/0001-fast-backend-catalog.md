@@ -87,9 +87,11 @@ fall back to accessor behavior, because doing so would hide parser coverage
 gaps and reintroduce the slow remote traversal this architecture is designed to
 avoid.
 
-Public `get_internal_paths` now returns accessor-free path metadata dictionaries
-and prefers catalog-backed path summaries where available. The accessor-backed
-traversal remains as a fallback for sources that cannot use the catalog path.
+Public internal-path discovery prefers catalog-backed path summaries where
+available. `get_internal_paths` returns only selected path strings, while
+`get_internal_path_info` returns accessor-free metadata dictionaries. The
+accessor-backed traversal remains as a fallback for sources that cannot use the
+catalog path.
 
 ## Public behavior to preserve
 

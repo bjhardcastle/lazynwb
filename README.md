@@ -158,6 +158,7 @@ df = lazynwb.get_df('my_file.nwb', '/intervals/trials')
 Use `get_internal_paths` to find available paths if you're not sure what's in a file:
 ```python
 lazynwb.get_internal_paths('my_file.nwb')
+# ['/intervals/trials', '/processing/behavior/running_speed', '/units', ...]
 ```
 
 ---
@@ -361,7 +362,14 @@ Returns columns including `identifier`, `session_id`, `session_start_time`,
 See what's inside an NWB file:
 ```python
 paths = lazynwb.get_internal_paths('my_file.nwb')
-# {'/acquisition/lick_sensor_events/data': {'is_dataset': True, 'shape': (120,), ...},
+# ['/acquisition/lick_sensor_events',
+#  '/intervals/trials',
+#  '/processing/behavior/running_speed',
+#  '/units',
+#  ...]
+
+path_info = lazynwb.get_internal_path_info('my_file.nwb')
+# {'/acquisition/lick_sensor_events': {'is_timeseries': True, 'is_group': True, ...},
 #  '/intervals/trials': {'is_group': True, 'attrs': {'colnames': ...}, ...},
 #  '/units': {'is_group': True, 'attrs': {'colnames': ...}, ...},
 #  ...}

@@ -7,13 +7,19 @@ import pytest
 import lazynwb
 
 expected_paths = (
-    "/processing/behavior/running_speed_with_timestamps/data",
-    "/processing/behavior/running_speed_with_timestamps/timestamps",
-    "/processing/behavior/running_speed_with_rate/data",
+    "/processing/behavior/running_speed_with_timestamps",
+    "/processing/behavior/running_speed_with_rate",
     "/units",
     "/intervals/trials",
     "/intervals/epochs",
-)  # excluding metadata, specifications and table columns
+)  # excluding metadata, specifications, table columns, and child datasets
+
+expected_child_dataset_paths = (
+    "/processing/behavior/running_speed_with_timestamps/data",
+    "/processing/behavior/running_speed_with_timestamps/timestamps",
+    "/processing/behavior/running_speed_with_rate/data",
+    "/processing/behavior/running_speed_with_rate/starting_time",
+)
 
 
 def test_get_nwb_file_structure_hdf5(local_hdf5_path):
@@ -23,14 +29,28 @@ def test_get_nwb_file_structure_hdf5(local_hdf5_path):
     for path in expected_paths:
         assert path in structure, f"Expected path {path} not found in structure"
     assert (
-        extras := set(structure.keys()) - set(expected_paths)
+        extras := set(structure) - set(expected_paths)
     ) == set(), f"Additional unexpected paths found: {extras}"
+    assert all(isinstance(path, str) for path in structure)
+    assert not any(
+        path.endswith(("/data", "/timestamps", "/starting_time")) for path in structure
+    )
 
     # Check that metadata is available without returning live accessors.
-    units_metadata = structure["/units"]
+    path_info = lazynwb.get_internal_path_info(local_hdf5_path)
+    units_metadata = path_info["/units"]
     assert units_metadata["is_group"] is True
     assert units_metadata["is_dataset"] is False
     assert isinstance(units_metadata["attrs"], dict)
+    assert units_metadata["is_timeseries"] is False
+    assert (
+        path_info["/processing/behavior/running_speed_with_timestamps"]["is_timeseries"]
+        is True
+    )
+    assert (
+        path_info["/processing/behavior/running_speed_with_rate"]["is_timeseries"]
+        is True
+    )
 
 
 def test_get_nwb_file_structure_zarr(local_zarr_path):
@@ -40,14 +60,57 @@ def test_get_nwb_file_structure_zarr(local_zarr_path):
     for path in expected_paths:
         assert path in structure, f"Expected path {path} not found in structure"
     assert (
-        extras := set(structure.keys()) - set(expected_paths)
+        extras := set(structure) - set(expected_paths)
     ) == set(), f"Additional unexpected paths found: {extras}"
+    assert all(isinstance(path, str) for path in structure)
+    assert not any(
+        path.endswith(("/data", "/timestamps", "/starting_time")) for path in structure
+    )
 
     # Check that metadata is available without returning live accessors.
-    units_metadata = structure["/units"]
+    path_info = lazynwb.get_internal_path_info(local_zarr_path)
+    units_metadata = path_info["/units"]
     assert units_metadata["is_group"] is True
     assert units_metadata["is_dataset"] is False
     assert isinstance(units_metadata["attrs"], dict)
+    assert units_metadata["is_timeseries"] is False
+    assert (
+        path_info["/processing/behavior/running_speed_with_timestamps"]["is_timeseries"]
+        is True
+    )
+    assert (
+        path_info["/processing/behavior/running_speed_with_rate"]["is_timeseries"]
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    ("local_hdf5_path", "local_zarr_path"),
+)
+def test_get_internal_paths_include_child_datasets(
+    fixture_name: str,
+    request: pytest.FixtureRequest,
+) -> None:
+    nwb_path = request.getfixturevalue(fixture_name)
+    paths = lazynwb.get_internal_paths(nwb_path, include_child_datasets=True)
+
+    for path in (*expected_paths, *expected_child_dataset_paths):
+        assert path in paths
+    for table_column_path in (
+        "/intervals/trials/condition",
+        "/units/spike_times",
+    ):
+        assert table_column_path not in paths
+
+    path_info = lazynwb.get_internal_path_info(
+        nwb_path,
+        include_child_datasets=True,
+    )
+    for path in expected_child_dataset_paths:
+        assert path in path_info
+        assert path_info[path]["is_dataset"] is True
+        assert path_info[path]["is_timeseries"] is False
 
 
 def test_get_nwb_file_structure_filtering(local_hdf5_path):
@@ -55,7 +118,7 @@ def test_get_nwb_file_structure_filtering(local_hdf5_path):
     # Test with all filtering disabled
     structure_all = lazynwb.get_internal_paths(
         local_hdf5_path,
-        include_arrays=True,
+        include_child_datasets=True,
         include_specifications=True,
         include_table_columns=True,
         include_metadata=True,
@@ -80,6 +143,35 @@ def test_get_nwb_file_structure_filtering(local_hdf5_path):
         assert path in structure_all or any(
             p.startswith(path) for p in structure_all
         ), f"Expected paths starting with {path} not found in filtered structure"
+
+    assert "/processing/behavior/running_speed_with_rate/data" in structure_all
+    assert "/processing/behavior/running_speed_with_rate/starting_time" in structure_all
+    assert (
+        "/processing/behavior/running_speed_with_timestamps/timestamps" in structure_all
+    )
+    assert "/processing/behavior/running_speed_with_rate/data" not in structure_filtered
+    assert (
+        "/processing/behavior/running_speed_with_rate/starting_time"
+        not in structure_filtered
+    )
+    assert (
+        "/processing/behavior/running_speed_with_timestamps/timestamps"
+        not in structure_filtered
+    )
+
+
+def test_get_internal_paths_rejects_include_arrays(local_hdf5_path):
+    with pytest.raises(TypeError, match="include_arrays"):
+        lazynwb.get_internal_paths(  # type: ignore[call-arg]
+            local_hdf5_path,
+            include_arrays=True,
+        )
+
+    with pytest.raises(TypeError, match="include_arrays"):
+        lazynwb.get_internal_path_info(  # type: ignore[call-arg]
+            local_hdf5_path,
+            include_arrays=True,
+        )
 
 
 def test_get_internal_paths_warns_for_remote_hdf5_accessor_traversal(
@@ -117,7 +209,6 @@ def test_get_internal_paths_warns_for_remote_hdf5_accessor_traversal(
         h5_file.close()
 
     assert "/units" in structure
-    assert structure["/units"]["is_group"] is True
 
 
 def test_get_internal_paths_uses_hdf5_catalog_cache(
@@ -132,7 +223,7 @@ def test_get_internal_paths_uses_hdf5_catalog_cache(
     )
     caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.reader")
 
-    cold_structure = lazynwb.get_internal_paths(
+    cold_structure = lazynwb.get_internal_path_info(
         local_hdf5_path,
         include_metadata=True,
         parents=True,
@@ -142,12 +233,14 @@ def test_get_internal_paths_uses_hdf5_catalog_cache(
     assert isinstance(cold_structure["/units"]["attrs"], dict)
 
     def _fail_accessor(*args: object, **kwargs: object) -> None:
-        raise AssertionError("get_internal_paths should use catalog-backed metadata")
+        raise AssertionError(
+            "get_internal_path_info should use catalog-backed metadata"
+        )
 
     monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
     caplog.clear()
 
-    warm_structure = lazynwb.get_internal_paths(
+    warm_structure = lazynwb.get_internal_path_info(
         local_hdf5_path,
         include_metadata=True,
         parents=True,
@@ -162,14 +255,13 @@ def test_normalize_internal_file_path():
     """Test normalize_internal_file_path function."""
     # Test path without leading slash
     assert (
-        lazynwb.normalize_internal_file_path("units/spike_times")
-        == "units/spike_times"
+        lazynwb.normalize_internal_file_path("units/spike_times") == "units/spike_times"
     )
 
     # Test path with leading slash
     assert (
         lazynwb.normalize_internal_file_path("/units/spike_times")
-    == "units/spike_times"
+        == "units/spike_times"
     )
 
     # Test empty path

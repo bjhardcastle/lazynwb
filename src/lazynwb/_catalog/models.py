@@ -409,6 +409,7 @@ class _PathSummaryEntry:
     is_dataset: bool
     shape: tuple[int, ...] | None = None
     attrs_json: tuple[tuple[str, _JsonValue], ...] = _EMPTY_ATTRS
+    is_timeseries: bool = False
 
     @property
     def attrs(self) -> types.MappingProxyType:

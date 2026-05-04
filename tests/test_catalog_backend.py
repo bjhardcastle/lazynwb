@@ -280,7 +280,7 @@ def test_zarr_catalog_path_summary_filters_metadata_timeseries_and_specification
 
     summary = lazynwb.file_io._get_catalog_path_summary_if_available(
         local_zarr_path,
-        include_arrays=True,
+        include_child_datasets=True,
         include_table_columns=False,
         include_metadata=True,
         include_specifications=False,
@@ -330,7 +330,7 @@ def test_zarr_catalog_path_summary_supports_remote_store_without_zarr_suffix(
 
     summary = lazynwb.file_io._get_catalog_path_summary_if_available(
         remote_source,
-        include_arrays=True,
+        include_child_datasets=True,
         include_table_columns=False,
         include_metadata=True,
         include_specifications=False,

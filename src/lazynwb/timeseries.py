@@ -213,13 +213,11 @@ def get_timeseries(
     elif not match_all and search_term and is_in_file:
         return TimeSeries(_file_path=nwb_path, _table_path=_format(search_term))
     else:
+        path_info = lazynwb.file_io.get_internal_path_info(nwb_path)
         path_to_timeseries = {
-            _format(k): TimeSeries(_file_path=nwb_path, _table_path=_format(k))
-            for k in lazynwb.file_io.get_internal_paths(nwb_path)
-            if k.split("/")[-1] in ("data", "timestamps")
-            and (not search_term or search_term in k)
-            # regular timeseries will be a dir with /data and optional /timestamps
-            # eventseries will be a dir with /timestamps only
+            path: TimeSeries(_file_path=nwb_path, _table_path=path)
+            for path, metadata in path_info.items()
+            if metadata["is_timeseries"] and (not search_term or search_term in path)
         }
         if match_all:
             return path_to_timeseries

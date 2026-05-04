@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import enum
 import importlib.metadata
 import logging
@@ -440,7 +441,70 @@ class FileAccessor:
 
 def get_internal_paths(
     nwb_path: lazynwb.types_.PathLike,
-    include_arrays: bool = True,
+    include_child_datasets: bool = False,
+    include_table_columns: bool = False,
+    include_metadata: bool = False,
+    include_specifications: bool = False,
+    parents: bool = False,
+) -> list[str]:
+    """
+    Traverse the internal structure of an NWB file and return internal paths.
+
+    This API prefers catalog-backed HDF5/Zarr path summaries where available so
+    repeated calls can reuse metadata caches. Use ``get_internal_path_info`` when
+    metadata such as attrs, shape, group/dataset flags, or TimeSeries
+    classification is needed.
+
+    Parameters
+    ----------
+    nwb_path : PathLike
+        Path to the NWB file (local file path, S3 URL, or other supported path type).
+    include_child_datasets : bool, default False
+        Include child datasets such as TimeSeries ``data``, ``timestamps``, and
+        ``starting_time`` paths. DynamicTable columns are controlled separately by
+        ``include_table_columns``.
+    include_table_columns : bool, default False
+        Include individual table columns (which are actually arrays) in the output.
+    include_metadata : bool, default False
+        Include top-level metadata paths (like /session_start_time or /general/subject) in the output.
+    include_specifications : bool, default False
+        Include NWB schema-related paths in the output - rarely needed.
+    parents : bool, default False
+        If True, include paths that have children paths in the output, even if it is not a table
+        column or array itself, e.g. the path to a table (parent) as well as its columns (children).
+
+    Returns
+    -------
+    list[str]
+        Internal NWB paths selected by the filtering options.
+    """
+    path_entries = _discover_internal_path_entries(
+        nwb_path=nwb_path,
+        include_child_datasets=include_child_datasets,
+        include_table_columns=include_table_columns,
+        include_metadata=include_metadata,
+        include_specifications=include_specifications,
+        parents=parents,
+    )
+    paths = list(path_entries)
+    logger.debug(
+        "get_internal_paths returning %d paths for %r "
+        "(include_child_datasets=%s include_table_columns=%s include_metadata=%s "
+        "include_specifications=%s parents=%s)",
+        len(paths),
+        nwb_path,
+        include_child_datasets,
+        include_table_columns,
+        include_metadata,
+        include_specifications,
+        parents,
+    )
+    return paths
+
+
+def get_internal_path_info(
+    nwb_path: lazynwb.types_.PathLike,
+    include_child_datasets: bool = False,
     include_table_columns: bool = False,
     include_metadata: bool = False,
     include_specifications: bool = False,
@@ -449,19 +513,19 @@ def get_internal_paths(
     """
     Traverse the internal structure of an NWB file and return path metadata.
 
-    This API prefers catalog-backed HDF5/Zarr path summaries where available so
-    repeated calls can reuse metadata caches. If a catalog summary is unavailable,
-    it falls back to accessor traversal and converts live objects into the same
-    metadata shape.
+    This API preserves the previous metadata-focused discovery behavior. Use
+    ``get_internal_paths`` when only path strings are needed.
 
     Parameters
     ----------
     nwb_path : PathLike
         Path to the NWB file (local file path, S3 URL, or other supported path type).
+    include_child_datasets : bool, default False
+        Include child datasets such as TimeSeries ``data``, ``timestamps``, and
+        ``starting_time`` paths. DynamicTable columns are controlled separately by
+        ``include_table_columns``.
     include_table_columns : bool, default False
         Include individual table columns (which are actually arrays) in the output.
-    include_arrays : bool, default False
-        Include arrays like 'data' or 'timestamps' in a TimeSeries object.
     include_metadata : bool, default False
         Include top-level metadata paths (like /session_start_time or /general/subject) in the output.
     include_specifications : bool, default False
@@ -474,48 +538,100 @@ def get_internal_paths(
     -------
     dict[str, dict[str, Any]]
         Dictionary mapping internal file paths to metadata dictionaries. Metadata
-        keys include ``is_group``, ``is_dataset``, ``shape``, and ``attrs``.
+        keys include ``is_group``, ``is_dataset``, ``shape``, ``attrs``, and
+        ``is_timeseries``.
     """
+    path_entries = _discover_internal_path_entries(
+        nwb_path=nwb_path,
+        include_child_datasets=include_child_datasets,
+        include_table_columns=include_table_columns,
+        include_metadata=include_metadata,
+        include_specifications=include_specifications,
+        parents=parents,
+    )
+    info = {
+        path: _path_metadata_from_entry(path, entry, path_entries)
+        for path, entry in path_entries.items()
+    }
+    logger.debug(
+        "get_internal_path_info returning metadata for %d paths in %r "
+        "(include_child_datasets=%s include_table_columns=%s include_metadata=%s "
+        "include_specifications=%s parents=%s)",
+        len(info),
+        nwb_path,
+        include_child_datasets,
+        include_table_columns,
+        include_metadata,
+        include_specifications,
+        parents,
+    )
+    return info
+
+
+def _discover_internal_path_entries(
+    *,
+    nwb_path: lazynwb.types_.PathLike,
+    include_child_datasets: bool,
+    include_table_columns: bool,
+    include_metadata: bool,
+    include_specifications: bool,
+    parents: bool,
+) -> dict[
+    str,
+    catalog_models._PathSummaryEntry
+    | h5py.Group
+    | h5py.Dataset
+    | zarr.Group
+    | zarr.Array,
+]:
     summary = _get_catalog_path_summary_if_available(
         nwb_path=nwb_path,
         include_table_columns=include_table_columns,
-        include_arrays=include_arrays,
+        include_child_datasets=include_child_datasets,
         include_metadata=include_metadata,
         include_specifications=include_specifications,
         parents=parents,
     )
     if summary is not None:
         logger.debug(
-            "get_internal_paths returning catalog-backed metadata for %r "
+            "internal path discovery returning catalog-backed entries for %r "
             "(paths=%d)",
             nwb_path,
             len(summary),
         )
-        return {
-            path: _path_metadata_from_summary_entry(entry)
-            for path, entry in summary.items()
-        }
+        return summary
 
-    logger.debug("get_internal_paths falling back to accessor traversal for %r", nwb_path)
+    logger.debug(
+        "internal path discovery falling back to accessor traversal for %r", nwb_path
+    )
     file_accessor = _get_accessor(nwb_path)
     _warn_if_remote_hdf5_internal_path_traversal(file_accessor)
     paths_to_accessors = _traverse_internal_paths(
         file_accessor._accessor,
         include_table_columns=include_table_columns,
-        include_arrays=include_arrays,
+        include_child_datasets=include_child_datasets,
         include_metadata=include_metadata,
         include_specifications=include_specifications,
     )
     if not parents:
-        paths = list(paths_to_accessors.keys())
-        # remove paths that have children
-        for path in paths:
-            if any(p.startswith(path + "/") for p in paths):
-                del paths_to_accessors[path]
-    return {
-        path: _path_metadata_from_accessor(accessor)
-        for path, accessor in paths_to_accessors.items()
-    }
+        _remove_parent_path_entries(paths_to_accessors)
+    return paths_to_accessors
+
+
+def _path_metadata_from_entry(
+    path: str,
+    entry: (
+        catalog_models._PathSummaryEntry
+        | h5py.Group
+        | h5py.Dataset
+        | zarr.Group
+        | zarr.Array
+    ),
+    path_entries: dict[str, Any],
+) -> dict[str, Any]:
+    if isinstance(entry, catalog_models._PathSummaryEntry):
+        return _path_metadata_from_summary_entry(entry)
+    return _path_metadata_from_accessor(path, entry, path_entries)
 
 
 def _path_metadata_from_summary_entry(
@@ -526,11 +642,14 @@ def _path_metadata_from_summary_entry(
         "is_dataset": entry.is_dataset,
         "shape": entry.shape,
         "attrs": dict(entry.attrs),
+        "is_timeseries": entry.is_timeseries,
     }
 
 
 def _path_metadata_from_accessor(
+    path: str,
     accessor: h5py.Group | h5py.Dataset | zarr.Group | zarr.Array,
+    path_entries: dict[str, Any],
 ) -> dict[str, Any]:
     is_group_entry = is_group(accessor)
     return {
@@ -538,12 +657,13 @@ def _path_metadata_from_accessor(
         "is_dataset": not is_group_entry,
         "shape": getattr(accessor, "shape", None),
         "attrs": dict(getattr(accessor, "attrs", {})),
+        "is_timeseries": _is_timeseries_accessor_path(path, accessor, path_entries),
     }
 
 
 def _get_catalog_path_summary_if_available(
     nwb_path: lazynwb.types_.PathLike,
-    include_arrays: bool = True,
+    include_child_datasets: bool = False,
     include_table_columns: bool = False,
     include_metadata: bool = False,
     include_specifications: bool = False,
@@ -570,7 +690,7 @@ def _get_catalog_path_summary_if_available(
             continue
         summary = _filter_catalog_path_summary_entries(
             entries,
-            include_arrays=include_arrays,
+            include_child_datasets=include_child_datasets,
             include_table_columns=include_table_columns,
             include_metadata=include_metadata,
             include_specifications=include_specifications,
@@ -683,7 +803,7 @@ def _get_zarr_catalog_path_summary_entries_if_available(
 def _filter_catalog_path_summary_entries(
     entries: Iterable[catalog_models._PathSummaryEntry],
     *,
-    include_arrays: bool,
+    include_child_datasets: bool,
     include_table_columns: bool,
     include_metadata: bool,
     include_specifications: bool,
@@ -695,45 +815,181 @@ def _filter_catalog_path_summary_entries(
     for path, entry in entry_by_path.items():
         if "/specifications" in path:
             if include_specifications:
-                results[path] = entry
+                results[path] = _classified_path_summary_entry(
+                    path, entry, entry_by_path
+                )
             continue
         shape = entry.shape
         is_scalar = shape == () or shape == (1,)
         is_array = shape is not None and not is_scalar
         attrs = dict(entry.attrs)
         is_rate_starting_time = path.endswith("/starting_time") and "rate" in attrs
-        if entry.is_dataset and is_scalar and not is_rate_starting_time:
+        if (
+            entry.is_dataset
+            and is_scalar
+            and not (is_rate_starting_time and include_child_datasets)
+        ):
             continue
         neurodata_type = attrs.get("neurodata_type", None)
         is_neurodata = neurodata_type is not None
-        is_table = "colnames" in attrs or _looks_like_table_path(path)
+        is_table = _is_table_summary_path(path, entry)
         is_metadata = is_scalar or path.startswith("/general")
+        classified_entry = _classified_path_summary_entry(path, entry, entry_by_path)
         if is_table:
             table_paths.add(path)
-        if is_metadata and not include_metadata:
+        if is_rate_starting_time and include_child_datasets:
+            results[path] = classified_entry
+        elif classified_entry.is_timeseries:
+            results[path] = classified_entry
+        elif is_metadata and not include_metadata:
             continue
-        if is_metadata and include_metadata:
-            results[path] = entry
-        elif is_rate_starting_time and include_arrays:
-            results[path] = entry
+        elif is_metadata and include_metadata:
+            results[path] = classified_entry
         elif is_neurodata and neurodata_type not in (
             "/",
             "NWBFile",
             "ProcessingModule",
         ):
-            results[path] = entry
-        elif is_array and include_arrays:
-            results[path] = entry
+            results[path] = classified_entry
+        elif is_array and include_child_datasets:
+            results[path] = classified_entry
     if not include_table_columns:
         for table_path in table_paths:
             for path in tuple(results):
                 if path.startswith(table_path.rstrip("/") + "/"):
                     results.pop(path, None)
     if not parents:
-        for path in tuple(results):
-            if any(other.startswith(path.rstrip("/") + "/") for other in results):
-                results.pop(path, None)
+        _remove_parent_path_entries(results)
     return results
+
+
+def _classified_path_summary_entry(
+    path: str,
+    entry: catalog_models._PathSummaryEntry,
+    entry_by_path: dict[str, catalog_models._PathSummaryEntry],
+) -> catalog_models._PathSummaryEntry:
+    is_timeseries = _is_timeseries_summary_path(path, entry, entry_by_path)
+    if entry.is_timeseries == is_timeseries:
+        return entry
+    return dataclasses.replace(entry, is_timeseries=is_timeseries)
+
+
+def _is_table_summary_path(
+    path: str,
+    entry: catalog_models._PathSummaryEntry,
+) -> bool:
+    if not entry.is_group:
+        return False
+    attrs = dict(entry.attrs)
+    return "colnames" in attrs or _looks_like_table_path(path)
+
+
+def _remove_parent_path_entries(path_entries: dict[str, Any]) -> None:
+    for path, entry in tuple(path_entries.items()):
+        if _is_user_level_parent_path(path, entry, path_entries):
+            continue
+        if any(other.startswith(path.rstrip("/") + "/") for other in path_entries):
+            path_entries.pop(path, None)
+
+
+def _is_user_level_parent_path(
+    path: str,
+    entry: Any,
+    path_entries: dict[str, Any],
+) -> bool:
+    if isinstance(entry, catalog_models._PathSummaryEntry):
+        return entry.is_timeseries or _is_table_summary_path(path, entry)
+    if _is_timeseries_accessor_path(path, entry, path_entries):
+        return True
+    attrs = dict(getattr(entry, "attrs", {}))
+    return is_group(entry) and ("colnames" in attrs or _looks_like_table_path(path))
+
+
+def _is_timeseries_summary_path(
+    path: str,
+    entry: catalog_models._PathSummaryEntry,
+    entry_by_path: dict[str, catalog_models._PathSummaryEntry],
+) -> bool:
+    if not entry.is_group:
+        return False
+    if _is_table_summary_path(path, entry):
+        return False
+    data_entry = entry_by_path.get(f"{path}/data")
+    timestamps_entry = entry_by_path.get(f"{path}/timestamps")
+    starting_time_entry = entry_by_path.get(f"{path}/starting_time")
+    has_data = bool(data_entry and data_entry.is_dataset)
+    has_timestamps = bool(timestamps_entry and timestamps_entry.is_dataset)
+    has_rate_starting_time = bool(
+        starting_time_entry
+        and starting_time_entry.is_dataset
+        and "rate" in starting_time_entry.attrs
+    )
+    attrs = dict(entry.attrs)
+    neurodata_type = str(attrs.get("neurodata_type", "")).lower()
+    type_says_series = "timeseries" in neurodata_type or neurodata_type.endswith(
+        "series"
+    )
+    if has_data and (has_timestamps or has_rate_starting_time):
+        return True
+    return type_says_series and (
+        has_data or has_timestamps or has_rate_starting_time
+    )
+
+
+def _is_timeseries_accessor_path(
+    path: str,
+    accessor: Any,
+    path_entries: dict[str, Any],
+) -> bool:
+    if not is_group(accessor):
+        return False
+    attrs = dict(getattr(accessor, "attrs", {}))
+    if "colnames" in attrs or _looks_like_table_path(path):
+        return False
+    has_data = _path_entry_has_child_dataset(path, accessor, path_entries, "data")
+    has_timestamps = _path_entry_has_child_dataset(
+        path, accessor, path_entries, "timestamps"
+    )
+    has_rate_starting_time = _path_entry_has_rate_starting_time(
+        path, accessor, path_entries
+    )
+    neurodata_type = str(attrs.get("neurodata_type", "")).lower()
+    type_says_series = "timeseries" in neurodata_type or neurodata_type.endswith(
+        "series"
+    )
+    if has_data and (has_timestamps or has_rate_starting_time):
+        return True
+    return type_says_series and (
+        has_data or has_timestamps or has_rate_starting_time
+    )
+
+
+def _path_entry_has_child_dataset(
+    path: str,
+    accessor: Any,
+    path_entries: dict[str, Any],
+    child_name: str,
+) -> bool:
+    child_path = f"{path.rstrip('/')}/{child_name}"
+    if child_path in path_entries:
+        return not is_group(path_entries[child_path])
+    child = accessor.get(child_name, None)
+    return child is not None and not is_group(child)
+
+
+def _path_entry_has_rate_starting_time(
+    path: str,
+    accessor: Any,
+    path_entries: dict[str, Any],
+) -> bool:
+    starting_time_path = f"{path.rstrip('/')}/starting_time"
+    starting_time = path_entries.get(starting_time_path)
+    if starting_time is not None:
+        return "rate" in dict(getattr(starting_time, "attrs", {}))
+    starting_time = accessor.get("starting_time", None)
+    return starting_time is not None and "rate" in dict(
+        getattr(starting_time, "attrs", {})
+    )
 
 
 def _looks_like_table_path(path: str) -> bool:
@@ -767,14 +1023,14 @@ def _warn_if_remote_hdf5_internal_path_traversal(
 
 
 def _traverse_internal_paths(
-    group: h5py.Group | zarr.Group | zarr.Array,
-    include_arrays: bool = False,
+    group: h5py.Group | h5py.Dataset | zarr.Group | zarr.Array,
+    include_child_datasets: bool = False,
     include_table_columns: bool = False,
     include_metadata: bool = False,
     include_specifications: bool = False,
-) -> dict[str, h5py.Dataset | zarr.Array]:
+) -> dict[str, h5py.Group | h5py.Dataset | zarr.Group | zarr.Array]:
     """https://nwb-overview.readthedocs.io/en/latest/intro_to_nwb/2_file_structure.html"""
-    results: dict[str, h5py.Dataset | zarr.Array] = {}
+    results: dict[str, h5py.Group | h5py.Dataset | zarr.Group | zarr.Array] = {}
     if "/specifications" in group.name:
         if include_specifications:
             results[group.name] = group
@@ -783,12 +1039,14 @@ def _traverse_internal_paths(
     shape = getattr(group, "shape", None)
     is_scalar = shape == () or shape == (1,)
     is_array = shape is not None and not is_scalar
-    if is_scalar:
-        return {}
     attrs = dict(getattr(group, "attrs", {}))
+    is_rate_starting_time = group.name.endswith("/starting_time") and "rate" in attrs
+    if is_scalar and not (include_child_datasets and is_rate_starting_time):
+        return {}
     neurodata_type = attrs.get("neurodata_type", None)
     is_neurodata = neurodata_type is not None
     is_table = "colnames" in attrs
+    is_timeseries_group = _is_timeseries_accessor_path(group.name, group, {})
     is_metadata = is_scalar or group.name.startswith(
         "/general"
     )  # other metadata like /general/lab
@@ -796,19 +1054,23 @@ def _traverse_internal_paths(
         return {}
     elif is_metadata and include_metadata:
         results[group.name] = group
+    elif is_rate_starting_time and include_child_datasets:
+        results[group.name] = group
+    elif is_timeseries_group:
+        results[group.name] = group
     elif is_neurodata and neurodata_type not in (
         "/",
         "NWBFile",
         "ProcessingModule",
     ):
         results[group.name] = group
-    elif is_array and include_arrays:  # has no neurodata_type
+    elif is_array and include_child_datasets:  # has no neurodata_type
         results[group.name] = group
     else:
         pass
     if is_table and not include_table_columns:
         return results
-    if not is_group(group) and len(group) > 0:
+    if not is_group(group):
         return results
     for subpath in group.keys():
         try:
@@ -817,7 +1079,7 @@ def _traverse_internal_paths(
                 **_traverse_internal_paths(
                     group[subpath],
                     include_table_columns=include_table_columns,
-                    include_arrays=include_arrays,
+                    include_child_datasets=include_child_datasets,
                     include_metadata=include_metadata,
                     include_specifications=include_specifications,
                 ),

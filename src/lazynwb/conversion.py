@@ -58,7 +58,7 @@ def convert_nwb_tables(
     """
     Convert NWB files to specified output format, creating one file per common table.
 
-    Uses `get_internal_paths` in a threadpool to discover tables across all NWB files,
+    Uses path metadata discovery in a threadpool to discover tables across all NWB files,
     then `scan_nwb` to efficiently read and export each common table.
 
     Parameters
@@ -646,6 +646,9 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
     timeseries_paths = []
 
     for path, accessor in internal_paths.items():
+        if _path_entry_is_timeseries(accessor):
+            timeseries_paths.append(path)
+            continue
         # Check if the accessor has TimeSeries-like attributes
         if path.endswith("/data") or path.endswith("/timestamps"):
             continue
@@ -695,7 +698,7 @@ def _get_internal_paths_for_discovery(
 ) -> dict[str, Any]:
     summary = lazynwb.file_io._get_catalog_path_summary_if_available(
         nwb_path=nwb_path,
-        include_arrays=include_timeseries,
+        include_child_datasets=include_timeseries,
         include_table_columns=False,
         include_metadata=True,
         include_specifications=False,
@@ -705,9 +708,9 @@ def _get_internal_paths_for_discovery(
         logger.debug("path discovery used catalog summary for %r", nwb_path)
         return summary
     logger.debug("path discovery falling back to accessor traversal for %r", nwb_path)
-    return lazynwb.file_io.get_internal_paths(
+    return lazynwb.file_io.get_internal_path_info(
         nwb_path=nwb_path,
-        include_arrays=include_timeseries,
+        include_child_datasets=include_timeseries,
         include_table_columns=False,
         include_metadata=True,
         include_specifications=False,
@@ -727,6 +730,14 @@ def _path_entry_attrs(accessor: Any) -> dict[str, Any]:
     if isinstance(accessor, dict):
         return dict(accessor.get("attrs", {}))
     return dict(getattr(accessor, "attrs", {}))
+
+
+def _path_entry_is_timeseries(accessor: Any) -> bool:
+    if isinstance(accessor, catalog_models._PathSummaryEntry):
+        return accessor.is_timeseries
+    if isinstance(accessor, dict):
+        return bool(accessor.get("is_timeseries", False))
+    return False
 
 
 def _path_entry_has_rate_starting_time(
