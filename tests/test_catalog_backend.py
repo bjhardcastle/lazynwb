@@ -298,6 +298,52 @@ def test_zarr_catalog_path_summary_filters_metadata_timeseries_and_specification
     assert "used zarr catalog summary" in caplog.text
 
 
+def test_zarr_source_path_for_remote_uses_configured_storage_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        zarr_reader,
+        "_get_zarr_storage_options",
+        lambda: {"anon": True},
+    )
+
+    source_path = zarr_reader._source_path("s3://bucket/example.nwb")
+
+    assert source_path.as_posix() == "s3://bucket/example.nwb"
+    assert source_path.storage_options["anon"] is True
+
+
+def test_zarr_catalog_path_summary_supports_remote_store_without_zarr_suffix(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    remote_source = "s3://bucket/example.nwb"
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    monkeypatch.setattr(hdf5_reader, "_is_fast_hdf5_candidate", lambda _: False)
+    monkeypatch.setattr(zarr_reader, "_source_path", lambda _: local_zarr_path)
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("remote Zarr discovery should use the catalog summary")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    summary = lazynwb.file_io._get_catalog_path_summary_if_available(
+        remote_source,
+        include_arrays=True,
+        include_table_columns=False,
+        include_metadata=True,
+        include_specifications=False,
+        parents=True,
+    )
+
+    assert summary is not None
+    assert zarr_reader._is_fast_zarr_candidate(remote_source)
+    assert "/intervals/trials" in summary
+    assert "/units" in summary
+    assert "/processing/behavior/running_speed_with_rate/data" in summary
+
+
 def test_zarr_common_path_discovery_matches_accessor_and_uses_catalog_summary(
     local_zarr_path: pathlib.Path,
     tmp_path: pathlib.Path,
@@ -417,6 +463,61 @@ def test_public_get_table_schema_uses_zarr_backend_for_local_store(
     assert schema == existing_schema
     assert warm_snapshot.table_path == "units"
     assert warm_reader.metadata_read_count == 0
+
+
+def test_public_get_table_schema_falls_back_to_zarr_after_hdf5_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "s3://bucket/example.nwb"
+    expected_schema = pl.Schema({"unit_name": pl.String})
+    calls: list[str] = []
+
+    class _MissingHDF5Reader:
+        async def read_table_schema_snapshot(
+            self,
+            exact_table_path: str,
+        ) -> catalog_models._TableSchemaSnapshot:
+            calls.append(f"hdf5:{exact_table_path}")
+            raise FileNotFoundError("not a single-object HDF5 file")
+
+        async def close(self) -> None:
+            calls.append("hdf5:close")
+
+    def _zarr_schema_if_available(
+        file_path: lazynwb.types_.PathLike,
+        table_path: str,
+    ) -> pl.Schema:
+        calls.append(f"zarr:{file_path}:{table_path}")
+        return expected_schema
+
+    monkeypatch.setattr(
+        hdf5_reader,
+        "_is_fast_hdf5_candidate",
+        lambda candidate_source: True,
+    )
+    monkeypatch.setattr(
+        hdf5_reader,
+        "_default_hdf5_backend_reader",
+        lambda candidate_source: _MissingHDF5Reader(),
+    )
+    monkeypatch.setattr(
+        lazynwb.tables,
+        "_get_fast_zarr_table_schema_if_available",
+        _zarr_schema_if_available,
+    )
+
+    schema = lazynwb.tables.get_table_schema(
+        source,
+        "/units",
+        exclude_internal_columns=True,
+    )
+
+    assert schema == expected_schema
+    assert calls == [
+        "hdf5:units",
+        "hdf5:close",
+        "zarr:s3://bucket/example.nwb:units",
+    ]
 
 
 def test_fast_catalog_snapshot_skips_local_zarr_probe_for_remote_hdf5_upath(

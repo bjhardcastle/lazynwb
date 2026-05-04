@@ -8,15 +8,43 @@ import time
 from collections.abc import Callable
 
 import pytest
+import polars as pl
 
 import lazynwb
 import lazynwb._hdf5.reader as hdf5_reader
+import lazynwb.file_io
 
 _REMOTE_SCHEMA_SOURCE = (
     "s3://aind-scratch-data/dynamic-routing/cache/nwb/v0.0.272/"
     "620263_2022-07-26.nwb"
 )
 _REMOTE_TABLES = ("/intervals/trials", "/units")
+_REMOTE_ZARR_SOURCE = (
+    "s3://aind-open-data/"
+    "ecephys_655572_2023-05-09_15-03-29_nwb_2025-06-23_16-11-26/"
+    "ecephys_655572_2023-05-09_15-03-29_experiment1_recording1.nwb"
+)
+_REMOTE_ZARR_TABLE_EXPECTATIONS = (
+    (
+        "/intervals/trials",
+        {
+            "start_time": pl.Float64,
+            "stop_time": pl.Float64,
+            "stim_id": pl.String,
+        },
+        10,
+    ),
+    (
+        "/units",
+        {
+            "spike_times": pl.List(pl.Float64),
+            "electrodes": pl.List(pl.Int64),
+            "unit_name": pl.String,
+            "firing_rate": pl.Float64,
+        },
+        70,
+    ),
+)
 
 pytestmark = [
     pytest.mark.remote_schema_budget,
@@ -82,6 +110,36 @@ def test_remote_hdf5_schema_request_budget_and_warm_cache(
     )
     if cold.validator_kind in {"version_id", "etag", "last_modified_content_length"}:
         assert warm.request_count == 0, warm.failure_detail()
+
+
+@pytest.mark.parametrize(
+    ("table_path", "expected_columns", "minimum_column_count"),
+    _REMOTE_ZARR_TABLE_EXPECTATIONS,
+)
+def test_remote_zarr_nwb_table_schema_integration(
+    table_path: str,
+    expected_columns: dict[str, pl.DataType],
+    minimum_column_count: int,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    lazynwb.config.anon = True
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("remote Zarr schema should use catalog-backed reads")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    schema = lazynwb.tables.get_table_schema(
+        _REMOTE_ZARR_SOURCE,
+        table_path,
+        exclude_internal_columns=True,
+    )
+
+    assert len(schema) >= minimum_column_count
+    for column_name, expected_dtype in expected_columns.items():
+        assert schema[column_name] == expected_dtype
 
 
 def _read_remote_schema_metric(

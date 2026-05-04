@@ -13,6 +13,7 @@ import urllib.parse
 from collections.abc import Iterable, Mapping
 
 import numpy as np
+import upath
 
 import lazynwb._cache.sqlite as cache_sqlite
 import lazynwb._catalog._schema as catalog_schema
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 _ZARR_ONLY_ATTR_NAMES = frozenset({"_ARRAY_DIMENSIONS", "zarr_dtype"})
 _ZARR_CONSOLIDATED_METADATA_CACHE_LOCK = threading.RLock()
+_REMOTE_ZARR_SCHEMES = frozenset({"s3", "gs", "gcs", "az", "abfs", "http", "https"})
+_ZarrPath = pathlib.Path | upath.UPath
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -48,7 +51,7 @@ class _ZarrBackendReader:
         cache: cache_sqlite._SQLiteSnapshotCache | None = None,
     ) -> None:
         self._source = source
-        self._source_path = _local_source_path(source)
+        self._source_path = _source_path(source)
         self._cache = cache
         self._source_identity: catalog_models._SourceIdentity | None = None
         self.metadata_read_count = 0
@@ -126,9 +129,12 @@ class _ZarrBackendReader:
         metadata_path = self._source_path / ".zmetadata"
         if metadata_path.exists():
             stat = metadata_path.stat()
+            stat_info = getattr(stat, "info", {}) or {}
             return catalog_models._SourceIdentity(
                 source_url=self._source_path.as_posix(),
                 content_length=stat.st_size,
+                version_id=_stat_info_str(stat_info, "VersionId", "version"),
+                etag=_stat_info_str(stat_info, "ETag", "e_tag"),
                 last_modified=_mtime_iso(stat.st_mtime),
             )
         metadata_files = tuple(
@@ -229,7 +235,7 @@ class _ZarrEntry:
 class _ZarrMetadataCatalog:
     def __init__(
         self,
-        root: pathlib.Path,
+        root: _ZarrPath,
         reader: _ZarrBackendReader | None = None,
     ) -> None:
         self._root = root
@@ -394,7 +400,7 @@ def _get_shared_metadata_catalog(
     reader: _ZarrBackendReader | None = None,
 ) -> _ZarrMetadataCatalog:
     """Build a metadata catalog using the shared consolidated metadata cache."""
-    return _ZarrMetadataCatalog(_local_source_path(source), reader)
+    return _ZarrMetadataCatalog(_source_path(source), reader)
 
 
 def _clear_shared_metadata_catalog_cache(
@@ -405,7 +411,7 @@ def _clear_shared_metadata_catalog_cache(
             _ZARR_CONSOLIDATED_METADATA_CACHE.clear()
             logger.debug("cleared all shared Zarr metadata catalog cache entries")
             return
-        cache_key = _zarr_metadata_cache_key(_local_source_path(source))
+        cache_key = _zarr_metadata_cache_key(_source_path(source))
         _ZARR_CONSOLIDATED_METADATA_CACHE.pop(cache_key, None)
         logger.debug(
             "cleared shared Zarr metadata catalog cache entry for %s", cache_key
@@ -413,7 +419,7 @@ def _clear_shared_metadata_catalog_cache(
 
 
 def _get_shared_consolidated_metadata(
-    root: pathlib.Path,
+    root: _ZarrPath,
     reader: _ZarrBackendReader | None = None,
 ) -> Mapping[str, object] | None:
     cache_key = _zarr_metadata_cache_key(root)
@@ -448,7 +454,7 @@ def _get_shared_consolidated_metadata(
 
 
 def _load_consolidated_metadata(
-    root: pathlib.Path,
+    root: _ZarrPath,
     reader: _ZarrBackendReader | None,
     stat_key: tuple[int, int] | None,
 ) -> Mapping[str, object] | None:
@@ -487,7 +493,7 @@ def _load_consolidated_metadata(
     return metadata
 
 
-def _zmetadata_stat_key(root: pathlib.Path) -> tuple[int, int] | None:
+def _zmetadata_stat_key(root: _ZarrPath) -> tuple[int, int] | None:
     try:
         stat = (root / ".zmetadata").stat()
     except FileNotFoundError:
@@ -495,7 +501,7 @@ def _zmetadata_stat_key(root: pathlib.Path) -> tuple[int, int] | None:
     return (stat.st_mtime_ns, stat.st_size)
 
 
-def _zarr_metadata_cache_key(root: pathlib.Path) -> str:
+def _zarr_metadata_cache_key(root: _ZarrPath) -> str:
     try:
         return root.resolve().as_posix()
     except OSError:
@@ -768,18 +774,40 @@ def _mtime_iso(mtime: float) -> str:
     ).isoformat()
 
 
+def _stat_info_str(info: object, *keys: str) -> str | None:
+    if not isinstance(info, Mapping):
+        return None
+    for key in keys:
+        value = info.get(key)
+        if value is not None:
+            return str(value)
+    return None
+
+
 def _summary_path(path: str) -> str:
     if path.startswith("/"):
         return path
     return f"/{path}" if path else "/"
 
 
-def _local_source_path(source: lazynwb.types_.PathLike) -> pathlib.Path:
+def _source_path(source: lazynwb.types_.PathLike) -> _ZarrPath:
+    if isinstance(source, upath.UPath):
+        return source
+    if isinstance(source, pathlib.Path):
+        return source
     raw_source = _source_uri(source)
     parsed = urllib.parse.urlsplit(raw_source)
     if parsed.scheme == "file":
         return pathlib.Path(urllib.parse.unquote(parsed.path))
+    if parsed.scheme in _REMOTE_ZARR_SCHEMES:
+        return upath.UPath(raw_source, **_get_zarr_storage_options())
     return pathlib.Path(os.fsdecode(source))
+
+
+def _get_zarr_storage_options() -> dict[str, object]:
+    import lazynwb.file_io
+
+    return lazynwb.file_io._get_fsspec_storage_options()
 
 
 def _source_uri(source: lazynwb.types_.PathLike) -> str:
@@ -800,30 +828,31 @@ def _source_name_has_zarr_suffix(source: lazynwb.types_.PathLike) -> bool:
 
 
 def _is_fast_zarr_candidate(source: lazynwb.types_.PathLike) -> bool:
-    protocol = getattr(source, "protocol", None)
-    parsed = urllib.parse.urlsplit(_source_uri(source))
-    if protocol not in (None, "", "file") and parsed.scheme != "file":
-        logger.debug(
-            "skipping fast Zarr catalog candidate check for non-local source %r "
-            "(protocol=%r)",
-            source,
-            protocol,
-        )
-        return False
     try:
-        path = _local_source_path(source)
-    except TypeError:
+        path = _source_path(source)
+    except (TypeError, ValueError):
         logger.debug(
             "skipping fast Zarr catalog candidate check for unsupported path-like "
             "source %r",
             source,
         )
         return False
-    return path.is_dir() and (
-        path.suffix == ".zarr"
-        or (path / ".zmetadata").exists()
-        or (path / ".zgroup").exists()
-    )
+    try:
+        has_metadata = _has_zarr_metadata(path)
+        return (path.is_dir() or has_metadata) and (
+            path.suffix == ".zarr" or has_metadata
+        )
+    except Exception:
+        logger.debug(
+            "fast Zarr catalog candidate check failed for source %r",
+            source,
+            exc_info=True,
+        )
+        return False
+
+
+def _has_zarr_metadata(path: _ZarrPath) -> bool:
+    return (path / ".zmetadata").exists() or (path / ".zgroup").exists()
 
 
 def _default_zarr_backend_reader(

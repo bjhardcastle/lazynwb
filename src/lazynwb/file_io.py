@@ -12,6 +12,7 @@ import warnings
 from collections.abc import Iterable
 from typing import Any
 
+import fsspec
 import h5py
 import obstore.fsspec
 import pydantic_settings
@@ -104,23 +105,54 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
         key,
         "Zarr" if is_definitely_zarr else "HDF5",
     )
+    hdf5_error: Exception | None = None
     if not is_definitely_zarr:
-        with contextlib.suppress(Exception):
+        try:
             return _open_hdf5(
                 u, use_remfile=config.use_remfile, use_obstore=config.use_obstore
             )
-    if config.use_obstore and u.protocol and u.protocol != "file":
-        with contextlib.suppress(Exception):
-            store = obstore.store.from_url(
-                key.split("//")[-1].split("/")[0], **_get_obstore_storage_options()
-            )
-            return zarr.open(store, mode="r")
-    with contextlib.suppress(Exception):
-        return zarr.open(u.as_posix(), mode="r")
-    raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
+        except Exception as exc:
+            hdf5_error = exc
+            logger.debug("failed to open %s as HDF5: %r", key, exc, exc_info=True)
+    try:
+        return _open_zarr(u)
+    except Exception as exc:
+        logger.debug("failed to open %s as Zarr: %r", key, exc, exc_info=True)
+        raise ValueError(f"Failed to open {u} as HDF5 or Zarr") from (
+            exc if hdf5_error is None else hdf5_error
+        )
 
 
 _OBSTORE_PROTOCOLS = frozenset({"s3", "gs", "gcs", "az", "abfs"})
+
+
+def _open_zarr(path: upath.UPath) -> zarr.Group:
+    key = path.as_posix()
+    if config.use_obstore and path.protocol and path.protocol != "file":
+        store = obstore.store.from_url(
+            key.split("//")[-1].split("/")[0], **_get_obstore_storage_options()
+        )
+        logger.debug("opening remote Zarr store %s with obstore", key)
+        return zarr.open(store, mode="r")
+    if path.protocol and path.protocol != "file":
+        storage_options = _get_fsspec_storage_options()
+        logger.debug(
+            "opening remote Zarr store %s with fsspec mapper (options=%s)",
+            key,
+            sorted(str(option) for option in storage_options),
+        )
+        mapper = fsspec.get_mapper(key, **storage_options)
+        try:
+            return zarr.open_consolidated(mapper, mode="r")
+        except Exception as exc:
+            logger.debug(
+                "remote Zarr store %s has no usable consolidated metadata: %r",
+                key,
+                exc,
+            )
+        return zarr.open_group(mapper, mode="r")
+    logger.debug("opening local Zarr store %s", key)
+    return zarr.open(key, mode="r")
 
 
 def _open_hdf5(
@@ -134,7 +166,7 @@ def _open_hdf5(
         try:
             file = remfile.File(url=_s3_to_http(path.as_posix()))
         except Exception as exc:  # remfile raises base Exception for many reasons
-            logger.warning(
+            logger.debug(
                 f"remfile failed to open {path}, falling back to fsspec: {exc!r}"
             )
     if use_obstore and path.protocol in _OBSTORE_PROTOCOLS:

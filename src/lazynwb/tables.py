@@ -1978,6 +1978,13 @@ async def _get_fast_hdf5_table_schema_snapshots(
         except hdf5_reader._NotHDF5Error:
             logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
             return file_path, None, False
+        except FileNotFoundError as exc:
+            logger.debug(
+                "fast HDF5 backend could not find single-object source %r: %r",
+                file_path,
+                exc,
+            )
+            return file_path, None, False
         return file_path, snapshot, True
 
     try:
@@ -2022,6 +2029,13 @@ def _get_fast_hdf5_table_schema_if_available(
         )
     except hdf5_reader._NotHDF5Error:
         logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
+        return None
+    except FileNotFoundError as exc:
+        logger.debug(
+            "fast HDF5 backend could not find single-object source %r: %r",
+            file_path,
+            exc,
+        )
         return None
     return catalog_polars._snapshot_to_polars_schema(snapshot)
 

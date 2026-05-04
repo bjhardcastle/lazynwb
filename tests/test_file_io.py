@@ -174,6 +174,60 @@ def test_open_file_prefers_zarr_for_explicit_zarr_marker(
     assert calls == ["zarr:file:///tmp/example.nwb.zarr:r"]
 
 
+def test_open_file_uses_fsspec_mapper_for_remote_zarr_without_zarr_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, object, object]] = []
+    mapper = object()
+    sentinel = object()
+    lazynwb.file_io.config.anon = True
+    lazynwb.file_io.config.fsspec_storage_options = {
+        "anon": False,
+        "client": "value",
+    }
+
+    def _reject_hdf5(
+        *args: object,
+        **kwargs: object,
+    ) -> typing.NoReturn:
+        calls.append(("hdf5", args, kwargs))
+        raise OSError("not a single-object HDF5 file")
+
+    def _get_mapper(path: object, **storage_options: object) -> object:
+        calls.append(("mapper", path, storage_options))
+        return mapper
+
+    def _open_consolidated(store: object, mode: str) -> object:
+        calls.append(("open_consolidated", store, mode))
+        return sentinel
+
+    def _unexpected_zarr_open(*args: object, **kwargs: object) -> typing.NoReturn:
+        raise AssertionError("remote Zarr stores should open through an fsspec mapper")
+
+    monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _reject_hdf5)
+    monkeypatch.setattr(lazynwb.file_io.fsspec, "get_mapper", _get_mapper)
+    monkeypatch.setattr(
+        lazynwb.file_io.zarr,
+        "open_consolidated",
+        _open_consolidated,
+    )
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open", _unexpected_zarr_open)
+
+    result = lazynwb.file_io._open_file("s3://bucket/example.nwb")
+
+    assert result is sentinel
+    assert len(calls) == 3
+    assert calls[0][0] == "hdf5"
+    hdf5_args = calls[0][1]
+    assert isinstance(hdf5_args, tuple)
+    assert hdf5_args[0].as_posix() == "s3://bucket/example.nwb"
+    assert calls[0][2] == {"use_remfile": True, "use_obstore": False}
+    assert calls[1:] == [
+        ("mapper", "s3://bucket/example.nwb", {"anon": True, "client": "value"}),
+        ("open_consolidated", mapper, "r"),
+    ]
+
+
 def test_fsspec_storage_options_use_top_level_anon() -> None:
     lazynwb.file_io.config.anon = True
     lazynwb.file_io.config.fsspec_storage_options = {"anon": False, "custom": "value"}
