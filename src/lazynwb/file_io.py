@@ -472,6 +472,48 @@ def _get_catalog_path_summary_if_available(
     include_specifications: bool = False,
     parents: bool = False,
 ) -> dict[str, catalog_models._PathSummaryEntry] | None:
+    import lazynwb._zarr.reader as zarr_reader
+
+    backend_order = (
+        ("zarr", "hdf5")
+        if zarr_reader._source_name_has_zarr_suffix(nwb_path)
+        else ("hdf5", "zarr")
+    )
+    logger.debug(
+        "using catalog path summary backend order for %r: %s",
+        nwb_path,
+        " -> ".join(backend_order),
+    )
+    for backend_name in backend_order:
+        if backend_name == "hdf5":
+            entries = _get_hdf5_catalog_path_summary_entries_if_available(nwb_path)
+        else:
+            entries = _get_zarr_catalog_path_summary_entries_if_available(nwb_path)
+        if entries is None:
+            continue
+        summary = _filter_catalog_path_summary_entries(
+            entries,
+            include_arrays=include_arrays,
+            include_table_columns=include_table_columns,
+            include_metadata=include_metadata,
+            include_specifications=include_specifications,
+            parents=parents,
+        )
+        logger.debug(
+            "get_internal_paths-compatible discovery used %s catalog summary for %r "
+            "(entries=%d filtered=%d)",
+            backend_name,
+            nwb_path,
+            len(entries),
+            len(summary),
+        )
+        return summary
+    return None
+
+
+def _get_hdf5_catalog_path_summary_entries_if_available(
+    nwb_path: lazynwb.types_.PathLike,
+) -> tuple[catalog_models._PathSummaryEntry, ...] | None:
     import lazynwb._hdf5.reader as hdf5_reader
     import lazynwb.tables
 
@@ -479,28 +521,43 @@ def _get_catalog_path_summary_if_available(
         return None
     reader = hdf5_reader._default_hdf5_backend_reader(nwb_path)
     try:
-        entries = lazynwb.tables._run_async_value(reader.read_path_summary())
+        return lazynwb.tables._run_async_value(reader.read_path_summary())
     except hdf5_reader._NotHDF5Error:
         logger.debug("catalog path summary rejected non-HDF5 source %r", nwb_path)
         return None
     except Exception as exc:
-        logger.debug("catalog path summary unavailable for %r: %r", nwb_path, exc)
+        logger.debug(
+            "HDF5 catalog path summary unavailable for %r: %r",
+            nwb_path,
+            exc,
+        )
         return None
     finally:
         with contextlib.suppress(Exception):
             lazynwb.tables._run_async_value(reader.close())
-    logger.debug(
-        "get_internal_paths-compatible discovery used catalog summary for %r",
-        nwb_path,
-    )
-    return _filter_catalog_path_summary_entries(
-        entries,
-        include_arrays=include_arrays,
-        include_table_columns=include_table_columns,
-        include_metadata=include_metadata,
-        include_specifications=include_specifications,
-        parents=parents,
-    )
+
+
+def _get_zarr_catalog_path_summary_entries_if_available(
+    nwb_path: lazynwb.types_.PathLike,
+) -> tuple[catalog_models._PathSummaryEntry, ...] | None:
+    import lazynwb._zarr.reader as zarr_reader
+    import lazynwb.tables
+
+    if not zarr_reader._is_fast_zarr_candidate(nwb_path):
+        return None
+    reader = zarr_reader._default_zarr_backend_reader(nwb_path)
+    try:
+        return lazynwb.tables._run_async_value(reader.read_path_summary())
+    except Exception as exc:
+        logger.debug(
+            "Zarr catalog path summary unavailable for %r: %r",
+            nwb_path,
+            exc,
+        )
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            lazynwb.tables._run_async_value(reader.close())
 
 
 def _filter_catalog_path_summary_entries(

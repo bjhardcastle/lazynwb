@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 import pathlib
 import shutil
 
@@ -19,6 +20,7 @@ import lazynwb._catalog.models as catalog_models
 import lazynwb._catalog.polars as catalog_polars
 import lazynwb._hdf5.reader as hdf5_reader
 import lazynwb._zarr.reader as zarr_reader
+import lazynwb.conversion as conversion
 import lazynwb.file_io
 import lazynwb.table_metadata
 import lazynwb.tables
@@ -237,6 +239,152 @@ def test_zarr_backend_reader_uses_targeted_metadata_without_consolidated(
     assert columns_by_name["spike_times"].dataset.chunks is not None
     assert columns_by_name["spike_times"].dataset.storage_layout == "chunked"
     assert "chunked" in columns_by_name["spike_times"].dataset.read_capabilities
+
+
+def test_zarr_backend_reader_builds_path_summary(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),
+    )
+
+    summary = asyncio.run(reader.read_path_summary())
+    entries_by_path = {entry.path: entry for entry in summary}
+
+    assert reader.used_consolidated_metadata
+    assert reader.metadata_read_count == 1
+    assert "/intervals/trials" in entries_by_path
+    assert "/units" in entries_by_path
+    assert "/units/spike_times" in entries_by_path
+    assert "/general" in entries_by_path
+    assert "/general/subject" in entries_by_path
+    assert "/processing/behavior/running_speed_with_rate/data" in entries_by_path
+    assert entries_by_path["/units"].is_group
+    assert entries_by_path["/units/spike_times"].is_dataset
+    assert entries_by_path["/units/spike_times"].shape is not None
+
+
+def test_zarr_catalog_path_summary_filters_metadata_timeseries_and_specifications(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.file_io")
+
+    summary = lazynwb.file_io._get_catalog_path_summary_if_available(
+        local_zarr_path,
+        include_arrays=True,
+        include_table_columns=False,
+        include_metadata=True,
+        include_specifications=False,
+        parents=True,
+    )
+
+    assert summary is not None
+    assert "/intervals/trials" in summary
+    assert "/units" in summary
+    assert "/general" in summary
+    assert "/general/subject" in summary
+    assert "/processing/behavior/running_speed_with_rate" in summary
+    assert "/processing/behavior/running_speed_with_rate/data" in summary
+    assert not any(path.startswith("/specifications") for path in summary)
+    assert "used zarr catalog summary" in caplog.text
+
+
+def test_zarr_common_path_discovery_matches_accessor_and_uses_catalog_summary(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    with monkeypatch.context() as fallback_patch:
+        fallback_patch.setattr(
+            lazynwb.file_io,
+            "_get_catalog_path_summary_if_available",
+            lambda *args, **kwargs: None,
+        )
+        accessor_paths = conversion._find_common_paths(
+            (local_zarr_path,),
+            min_file_count=1,
+            disable_progress=True,
+            include_timeseries=True,
+            include_metadata=True,
+        )
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Zarr discovery should use the catalog path summary")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    catalog_paths = conversion._find_common_paths(
+        (local_zarr_path,),
+        min_file_count=1,
+        disable_progress=True,
+        include_timeseries=True,
+        include_metadata=True,
+    )
+
+    assert catalog_paths == accessor_paths
+    assert "/intervals/trials" in catalog_paths
+    assert "/units" in catalog_paths
+    assert "/general" in catalog_paths
+    assert "/general/subject" in catalog_paths
+    assert "/processing/behavior/running_speed_with_rate" in catalog_paths
+
+
+def test_zarr_sql_context_discovery_uses_catalog_summary_without_accessor(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.conversion")
+    caplog.set_level(logging.DEBUG, logger="lazynwb.file_io")
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("SQL context discovery should use Zarr catalog summary")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    sql_context = conversion.get_sql_context(
+        (local_zarr_path,),
+        table_names=("trials",),
+        disable_progress=True,
+        exclude_timeseries=True,
+    )
+
+    assert "trials" in sql_context.tables()
+    assert "path discovery used catalog summary" in caplog.text
+
+
+def test_zarr_path_summary_uses_targeted_metadata_without_consolidated(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    copied_zarr = tmp_path / "path-summary-without-consolidated.nwb.zarr"
+    shutil.copytree(local_zarr_path, copied_zarr)
+    (copied_zarr / ".zmetadata").unlink()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._zarr.reader")
+    reader = zarr_reader._ZarrBackendReader(
+        copied_zarr,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),
+    )
+
+    summary = asyncio.run(reader.read_path_summary())
+    paths = {entry.path for entry in summary}
+
+    assert not reader.used_consolidated_metadata
+    assert reader.metadata_read_count > 1
+    assert "/units" in paths
+    assert "/units/spike_times" in paths
+    assert "/processing/behavior/running_speed_with_rate/data" in paths
+    assert "read targeted Zarr metadata file" in caplog.text
 
 
 def test_public_get_table_schema_uses_zarr_backend_for_local_store(

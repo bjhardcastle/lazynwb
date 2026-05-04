@@ -8,6 +8,7 @@ import logging
 import os
 import pathlib
 import time
+import urllib.parse
 from collections.abc import Iterable, Mapping
 
 import numpy as np
@@ -31,7 +32,7 @@ class _ZarrBackendReader:
         cache: cache_sqlite._SQLiteSnapshotCache | None = None,
     ) -> None:
         self._source = source
-        self._source_path = pathlib.Path(os.fsdecode(source))
+        self._source_path = _local_source_path(source)
         self._cache = cache
         self._source_identity: catalog_models._SourceIdentity | None = None
         self.metadata_read_count = 0
@@ -79,6 +80,23 @@ class _ZarrBackendReader:
             self.used_consolidated_metadata,
         )
         return snapshot
+
+    async def read_path_summary(
+        self,
+    ) -> tuple[catalog_models._PathSummaryEntry, ...]:
+        started = time.perf_counter()
+        source_identity = await self.get_source_identity()
+        summary = await asyncio.to_thread(self._read_path_summary_sync)
+        logger.debug(
+            "built Zarr path summary for %s with %d entries in %.2f s "
+            "(metadata_reads=%d consolidated=%s)",
+            source_identity.source_url,
+            len(summary),
+            time.perf_counter() - started,
+            self.metadata_read_count,
+            self.used_consolidated_metadata,
+        )
+        return summary
 
     async def close(self) -> None:
         logger.debug("closing Zarr backend reader for %s", self._source)
@@ -146,6 +164,12 @@ class _ZarrBackendReader:
             table_length=catalog_schema._get_table_length(columns),
         )
 
+    def _read_path_summary_sync(
+        self,
+    ) -> tuple[catalog_models._PathSummaryEntry, ...]:
+        catalog = _ZarrMetadataCatalog(self._source_path, self)
+        return catalog.read_path_summary()
+
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class _ZarrEntry:
@@ -198,6 +222,20 @@ class _ZarrMetadataCatalog:
     def get_zattrs(self, path: str) -> Mapping[str, object]:
         return self._get_json(path, ".zattrs") or {}
 
+    def read_path_summary(self) -> tuple[catalog_models._PathSummaryEntry, ...]:
+        entries: list[catalog_models._PathSummaryEntry] = []
+        self._collect_path_summary_entries(
+            "",
+            entries,
+            include_self=False,
+        )
+        logger.debug(
+            "built Zarr metadata catalog path summary for %s with %d entries",
+            self._root,
+            len(entries),
+        )
+        return tuple(entries)
+
     def child_names(self, parent_path: str) -> tuple[str, ...]:
         if self._metadata is not None:
             names = self._consolidated_child_names(parent_path)
@@ -211,6 +249,34 @@ class _ZarrMetadataCatalog:
                 if child.is_dir() and not child.name.startswith(".")
             )
         return tuple(sorted(names))
+
+    def _collect_path_summary_entries(
+        self,
+        path: str,
+        entries: list[catalog_models._PathSummaryEntry],
+        *,
+        include_self: bool,
+    ) -> None:
+        entry = _entry_for_path(self, path, path.rsplit("/", 1)[-1])
+        if include_self:
+            entries.append(
+                catalog_models._PathSummaryEntry(
+                    path=_summary_path(path),
+                    is_group=entry.is_group,
+                    is_dataset=not entry.is_group,
+                    shape=entry.shape,
+                    attrs_json=catalog_models._attrs_to_tuple(entry.zattrs),
+                )
+            )
+        if not entry.is_group:
+            return
+        for name in self.child_names(path):
+            child_path = f"{path}/{name}" if path else name
+            self._collect_path_summary_entries(
+                child_path,
+                entries,
+                include_self=True,
+            )
 
     def _load_consolidated_metadata(self) -> Mapping[str, object] | None:
         zmetadata_path = self._root / ".zmetadata"
@@ -259,9 +325,17 @@ class _ZarrMetadataCatalog:
             if "/" not in remainder:
                 continue
             child_names.add(remainder.split("/", 1)[0])
-        if not child_names and not self.get_zattrs(parent_path):
+        if not child_names and not self._has_consolidated_metadata(parent_path):
             raise KeyError(parent_path)
         return tuple(sorted(child_names))
+
+    def _has_consolidated_metadata(self, path: str) -> bool:
+        if self._metadata is None:
+            return False
+        return any(
+            (f"{path}/{filename}" if path else filename) in self._metadata
+            for filename in (".zarray", ".zattrs", ".zgroup")
+        )
 
 
 def _get_table_column_entries(
@@ -275,7 +349,9 @@ def _get_table_column_entries(
     if lazynwb.utils.normalize_internal_file_path(table_path) == "general":
         names_to_entries.update(_get_general_metadata_entries(catalog))
         names_to_entries = {
-            name: entry for name, entry in names_to_entries.items() if not entry.is_group
+            name: entry
+            for name, entry in names_to_entries.items()
+            if not entry.is_group
         }
     _drop_known_reference_entries(names_to_entries)
     return tuple(names_to_entries.values())
@@ -477,6 +553,20 @@ def _mtime_iso(mtime: float) -> str:
     ).isoformat()
 
 
+def _summary_path(path: str) -> str:
+    if path.startswith("/"):
+        return path
+    return f"/{path}" if path else "/"
+
+
+def _local_source_path(source: lazynwb.types_.PathLike) -> pathlib.Path:
+    raw_source = _source_uri(source)
+    parsed = urllib.parse.urlsplit(raw_source)
+    if parsed.scheme == "file":
+        return pathlib.Path(urllib.parse.unquote(parsed.path))
+    return pathlib.Path(os.fsdecode(source))
+
+
 def _source_uri(source: lazynwb.types_.PathLike) -> str:
     as_posix = getattr(source, "as_posix", None)
     if callable(as_posix):
@@ -496,7 +586,8 @@ def _source_name_has_zarr_suffix(source: lazynwb.types_.PathLike) -> bool:
 
 def _is_fast_zarr_candidate(source: lazynwb.types_.PathLike) -> bool:
     protocol = getattr(source, "protocol", None)
-    if protocol not in (None, "", "file"):
+    parsed = urllib.parse.urlsplit(_source_uri(source))
+    if protocol not in (None, "", "file") and parsed.scheme != "file":
         logger.debug(
             "skipping fast Zarr catalog candidate check for non-local source %r "
             "(protocol=%r)",
@@ -505,7 +596,7 @@ def _is_fast_zarr_candidate(source: lazynwb.types_.PathLike) -> bool:
         )
         return False
     try:
-        path = pathlib.Path(os.fsdecode(source))
+        path = _local_source_path(source)
     except TypeError:
         logger.debug(
             "skipping fast Zarr catalog candidate check for unsupported path-like "
