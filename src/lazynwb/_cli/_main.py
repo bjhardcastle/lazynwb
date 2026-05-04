@@ -125,6 +125,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     tables_parser.set_defaults(_handler=_handle_tables)
 
+    context_parser = subparsers.add_parser(
+        "context",
+        help="emit source-aware NWB guidance for analysis handoff",
+    )
+    _add_config_argument(context_parser)
+    context_parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default="json",
+        dest="output_format",
+        help="output format; defaults to json",
+    )
+    context_parser.add_argument(
+        "--infer-schema-length",
+        default=None,
+        type=_positive_int,
+        help="number of resolved sources to use for SQL table discovery",
+    )
+    _add_source_override_arguments(context_parser, include_paths=False)
+    context_parser.add_argument(
+        "paths",
+        metavar="PATH",
+        nargs="*",
+        help="explicit NWB file or store path",
+    )
+    context_parser.set_defaults(_handler=_handle_context)
+
     schema_parser = subparsers.add_parser(
         "schema",
         help="inspect one NWB table schema",
@@ -347,6 +374,53 @@ def _handle_tables(
                 paths=paths,
                 sql_defaults=sql_defaults,
             ),
+        )
+    return cli_errors._ExitCode.OK
+
+
+def _handle_context(
+    args: argparse.Namespace, stdout: typing.TextIO
+) -> cli_errors._ExitCode:
+    import lazynwb._cli._context as cli_context
+
+    loaded_config = cli_config._load_project_config(args.config)
+    started_at = time.perf_counter()
+    resolved_source = cli_sources._resolve_source(
+        loaded_config,
+        _source_overrides_from_args(args, paths=tuple(args.paths)),
+        validate_paths=True,
+        discover_local=True,
+    )
+    paths = cli_sources._paths_for_source(resolved_source)
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    logger.debug(
+        "resolved context source paths: source_kind=%s precedence=%s "
+        "resolved_count=%d elapsed_ms=%.3f",
+        resolved_source.kind,
+        resolved_source.precedence,
+        len(paths),
+        elapsed_ms,
+    )
+    context = cli_context._build_agent_context(
+        loaded_config,
+        resolved_source,
+        paths=paths,
+        infer_schema_length=args.infer_schema_length,
+    )
+    logger.debug(
+        "serializing CLI context: output_format=%s table_count=%d "
+        "snippet_count=%d workflow_steps=%d",
+        args.output_format,
+        len(context.tables),
+        len(context.python_snippets),
+        len(context.recommended_workflow),
+    )
+    if args.output_format == "text":
+        cli_formatting._write_context_text(stdout, context)
+    else:
+        cli_formatting._write_json(
+            stdout,
+            cli_formatting._context_json_object(context),
         )
     return cli_errors._ExitCode.OK
 

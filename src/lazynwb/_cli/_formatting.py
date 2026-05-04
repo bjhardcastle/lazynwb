@@ -5,6 +5,7 @@ import json
 import typing
 
 import lazynwb._cli._config as cli_config
+import lazynwb._cli._context as cli_context
 import lazynwb._cli._preview as cli_preview
 import lazynwb._cli._query as cli_query
 import lazynwb._cli._schema as cli_schema
@@ -143,6 +144,24 @@ def _query_json_object(
         ),
         "sql": dict(sql_defaults),
         "truncated": result.truncated,
+    }
+
+
+def _context_json_object(context: cli_context._AgentContext) -> dict[str, typing.Any]:
+    return {
+        "command": "context",
+        "config": context.config,
+        "notes": list(context.notes),
+        "python_snippets": list(context.python_snippets),
+        "recommended_workflow": list(context.recommended_workflow),
+        "resolved_count": len(context.paths),
+        "source": cli_sources._source_json_object(
+            context.resolved_source,
+            paths=context.paths,
+        ),
+        "sql": dict(context.sql_defaults),
+        "table_count": len(context.tables),
+        "tables": [_sql_table_json_object(table) for table in context.tables],
     }
 
 
@@ -292,6 +311,73 @@ def _write_query_jsonl(
     for row in result.rows:
         stream.write(json.dumps(row, sort_keys=True))
         stream.write("\n")
+
+
+def _write_context_text(
+    stream: typing.TextIO,
+    context: cli_context._AgentContext,
+) -> None:
+    source = cli_sources._source_json_object(
+        context.resolved_source,
+        paths=context.paths,
+    )
+    stream.write("lazynwb context\n")
+    stream.write("\n")
+    stream.write("Source\n")
+    stream.write(f"  kind: {source['kind']}\n")
+    stream.write(f"  precedence: {source['precedence']}\n")
+    stream.write(f"  resolved_count: {source['resolved_count']}\n")
+    stream.write(f"  config: {_config_text(context.config)}\n")
+    if source.get("local") is not None:
+        stream.write(f"  local: {json.dumps(source['local'], sort_keys=True)}\n")
+    if source.get("dandi") is not None:
+        stream.write(f"  dandi: {json.dumps(source['dandi'], sort_keys=True)}\n")
+    stream.write("  paths:\n")
+    _write_context_path_lines(stream, context.paths)
+
+    stream.write("\n")
+    stream.write("SQL tables\n")
+    stream.write(f"  table_count: {len(context.tables)}\n")
+    for table in context.tables:
+        stream.write(f"  - {table.name}\n")
+
+    stream.write("\n")
+    stream.write("SQL defaults\n")
+    for key, value in sorted(context.sql_defaults.items()):
+        stream.write(f"  {key}: {json.dumps(value, sort_keys=True)}\n")
+
+    stream.write("\n")
+    stream.write("Next CLI commands\n")
+    for command in context.recommended_workflow:
+        stream.write(f"  $ {command}\n")
+
+    stream.write("\n")
+    stream.write("Python snippets\n")
+    for index, snippet in enumerate(context.python_snippets, start=1):
+        stream.write(f"  [{index}]\n")
+        for line in snippet.splitlines():
+            stream.write(f"    {line}\n")
+
+    stream.write("\n")
+    stream.write("Notes\n")
+    for note in context.notes:
+        stream.write(f"  - {note}\n")
+
+
+def _config_text(config: collections.abc.Mapping[str, typing.Any]) -> str:
+    exists = "found" if config["exists"] else "not found"
+    return f"{config['path']} ({exists}, version {config['version']})"
+
+
+def _write_context_path_lines(
+    stream: typing.TextIO,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+) -> None:
+    if not paths:
+        stream.write("  - none\n")
+        return
+    for path in paths:
+        stream.write(f"  - {path['resolved']}\n")
 
 
 def _write_rows_table(

@@ -347,6 +347,192 @@ def test_tables_command_debug_logs_source_resolution_and_sql_discovery(
     assert "DEBUG:" not in stdout
 
 
+def test_context_command_reports_explicit_sources_tables_and_workflow_json(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_path = tmp_path / "first.nwb"
+    second_path = tmp_path / "second.nwb"
+    first_path.touch()
+    second_path.touch()
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeSQLContext(("units", "intervals/trials")),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["context", str(first_path), str(second_path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert stdout.endswith("\n")
+    payload = json.loads(stdout)
+    expected_paths = [
+        {
+            "input": str(first_path),
+            "resolved": first_path.resolve().as_posix(),
+        },
+        {
+            "input": str(second_path),
+            "resolved": second_path.resolve().as_posix(),
+        },
+    ]
+    assert payload["command"] == "context"
+    assert payload["resolved_count"] == 2
+    assert payload["source"] == {
+        "dandi": None,
+        "kind": "paths",
+        "local": None,
+        "paths": expected_paths,
+        "precedence": "command_line_paths",
+        "resolved_count": 2,
+    }
+    assert payload["tables"] == [
+        {"name": "intervals/trials", "path": "intervals/trials"},
+        {"name": "units", "path": "units"},
+    ]
+    assert payload["table_count"] == 2
+    assert payload["sql"] == {
+        "disable_progress": True,
+        "eager": False,
+        "exclude_timeseries": False,
+        "full_path": True,
+        "infer_schema_length": None,
+        "rename_general_metadata": True,
+    }
+    assert payload["recommended_workflow"][0].startswith("lazynwb paths ")
+    assert "lazynwb tables " in payload["recommended_workflow"][1]
+    assert "lazynwb schema intervals/trials " in payload["recommended_workflow"][2]
+    assert 'SELECT * FROM "intervals/trials" LIMIT 5' in payload[
+        "recommended_workflow"
+    ][4]
+
+
+def test_context_command_python_snippets_are_source_aware(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeSQLContext(("units",)),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["context", "--infer-schema-length", "1", str(path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert len(payload["python_snippets"]) == 2
+    scan_snippet, sql_snippet = payload["python_snippets"]
+    resolved_path = path.resolve().as_posix()
+    assert f'"{resolved_path}"' in scan_snippet
+    assert f'"{resolved_path}"' in sql_snippet
+    assert 'lazyframe = lazynwb.scan_nwb(\n    sources,\n    "units",' in scan_snippet
+    assert "disable_progress=True" in scan_snippet
+    assert "infer_schema_length=1" in scan_snippet
+    assert "sql_context = lazynwb.get_sql_context(" in sql_snippet
+    assert "full_path=True" in sql_snippet
+    assert "exclude_timeseries=False" in sql_snippet
+    assert "rename_general_metadata=True" in sql_snippet
+    assert "eager=False" in sql_snippet
+    assert "lazynwb tables --infer-schema-length 1 " in payload[
+        "recommended_workflow"
+    ][1]
+    assert "lazynwb schema --infer-schema-length 1 units " in payload[
+        "recommended_workflow"
+    ][2]
+    assert "lazynwb preview --limit 5 units " in payload["recommended_workflow"][3]
+    assert "lazynwb query --infer-schema-length 1 " in payload[
+        "recommended_workflow"
+    ][4]
+
+
+def test_context_command_emits_empty_table_context_with_placeholder_snippet(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeSQLContext(()),
+    )
+
+    exit_code, stdout, stderr = _run_cli(["context", str(path)])
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["tables"] == []
+    assert payload["table_count"] == 0
+    assert '"<table>"' in payload["python_snippets"][0]
+    assert any("No SQL tables were discovered" in note for note in payload["notes"])
+
+
+def test_context_command_supports_text_output(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeSQLContext(("units",)),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["context", "--format", "text", str(path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert stdout.startswith("lazynwb context\n")
+    assert "Source\n" in stdout
+    assert "SQL tables\n" in stdout
+    assert "  - units\n" in stdout
+    assert "Next CLI commands\n" in stdout
+    assert "Python snippets\n" in stdout
+    assert "lazynwb.scan_nwb" in stdout
+    assert "lazynwb.get_sql_context" in stdout
+
+
+def test_context_command_debug_logs_stay_on_stderr(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    monkeypatch.setattr(
+        cli_tables.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeSQLContext(("units",)),
+    )
+
+    exit_code, stdout, stderr = _run_cli(["--debug", "context", str(path)])
+
+    assert exit_code == 0
+    assert json.loads(stdout)["tables"] == [{"name": "units", "path": "units"}]
+    assert "resolving active source" in stderr
+    assert "resolved context source paths" in stderr
+    assert "starting CLI context generation" in stderr
+    assert "starting SQL context table discovery" in stderr
+    assert "building source-aware Python snippets" in stderr
+    assert "built source-aware Python snippets" in stderr
+    assert "completed CLI context generation" in stderr
+    assert "serializing CLI context" in stderr
+    assert "elapsed_ms=" in stderr
+    assert "DEBUG:" not in stdout
+
+
 def test_schema_command_inspects_local_fixture_schema_json(
     local_hdf5_path: pathlib.Path,
 ) -> None:
