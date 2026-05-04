@@ -634,11 +634,12 @@ def test_hdf5_direct_indexed_materialization_matches_h5py_reference(
         )
 
     assert df["spike_times"].to_list() == expected
+    assert df.schema["spike_times"] == pl.List(pl.Float64)
     assert "direct HDF5 indexed materialization" in caplog.text
     assert "direct indexed columns=['spike_times']" in caplog.text
 
 
-def test_hdf5_direct_indexed_materializes_selected_rows_and_empty_rows(
+def test_hdf5_direct_indexed_materializes_selected_rows_empty_rows_and_row_order(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -664,11 +665,13 @@ def test_hdf5_direct_indexed_materializes_selected_rows_and_empty_rows(
         "/units",
         exact_path=True,
         include_column_names=("spike_times",),
-        nwb_path_to_row_indices={source_url: [0, 1, 3]},
+        nwb_path_to_row_indices={source_url: [3, 0, 1, 2]},
         as_polars=True,
     )
 
-    assert df["spike_times"].to_list() == [[], [0.1, 0.2], [0.3]]
+    assert df["spike_times"].to_list() == [[0.3], [], [0.1, 0.2], []]
+    assert df[lazynwb.TABLE_INDEX_COLUMN_NAME].to_list() == [3, 0, 1, 2]
+    assert df.schema["spike_times"] == pl.List(pl.Float64)
 
 
 def test_scan_nwb_predicate_projection_uses_direct_indexed_ranges(
@@ -703,6 +706,11 @@ def test_scan_nwb_predicate_projection_uses_direct_indexed_ranges(
     df = lf.collect()
 
     assert df["spike_times"].to_list() == [[0.2, 0.3]]
+    assert df.schema["spike_times"] == pl.List(pl.Float64)
+    assert (
+        "planned direct HDF5 table reads: scalar_columns=[] "
+        "indexed_columns=['spike_times'] fallback_columns=[]"
+    ) in caplog.text
     assert "direct HDF5 indexed materialization" in caplog.text
     assert "requested_elements=2" in caplog.text
 
