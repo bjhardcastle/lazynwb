@@ -14,12 +14,16 @@ import lazynwb._cli._sources as cli_sources
 
 logger = logging.getLogger(__name__)
 
+_ROOT_COMMANDS = ("paths", "tables", "context", "schema", "preview", "query", "config")
+
 
 class _ArgumentParser(argparse.ArgumentParser):
+    _valid_commands: collections.abc.Sequence[str] = ()
+
     def error(self, message: str) -> typing.NoReturn:
         raise cli_errors._CLIError(
             code=cli_errors._ErrorCode.USAGE_ERROR,
-            details={"usage": self.format_usage().strip()},
+            details=_usage_error_details(self),
             exit_code=cli_errors._ExitCode.USAGE_ERROR,
             message=message,
         )
@@ -48,6 +52,13 @@ def main(
             exc.code.value,
             exc.exit_code,
         )
+        if exc.code is cli_errors._ErrorCode.USAGE_ERROR:
+            logger.debug(
+                "CLI usage error recovery guidance: help_command=%s "
+                "valid_commands=%s",
+                exc.details.get("help_command"),
+                exc.details.get("valid_commands", []),
+            )
         cli_formatting._write_json(stdout, exc._to_json_object())
         return int(exc.exit_code)
     except Exception:
@@ -70,6 +81,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="lazynwb",
         description="Inspect NWB sources with deterministic machine-readable output.",
     )
+    parser._valid_commands = _ROOT_COMMANDS
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -290,6 +302,33 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_source_override_arguments(config_show_parser, include_paths=True)
     config_show_parser.set_defaults(_handler=_handle_config_show)
     return parser
+
+
+def _usage_error_details(parser: argparse.ArgumentParser) -> dict[str, typing.Any]:
+    help_command = _help_command(parser)
+    details: dict[str, typing.Any] = {
+        "help_command": help_command,
+        "recovery_hint": _recovery_hint(parser, help_command=help_command),
+        "usage": parser.format_usage().strip(),
+    }
+    valid_commands = getattr(parser, "_valid_commands", ())
+    if valid_commands:
+        details["valid_commands"] = list(valid_commands)
+    return details
+
+
+def _help_command(parser: argparse.ArgumentParser) -> str:
+    return f"{parser.prog} --help"
+
+
+def _recovery_hint(
+    parser: argparse.ArgumentParser,
+    *,
+    help_command: str,
+) -> str:
+    if getattr(parser, "_valid_commands", ()):
+        return f"Run {help_command} to choose a command."
+    return f"Run {help_command} to inspect valid options."
 
 
 def _handle_paths(

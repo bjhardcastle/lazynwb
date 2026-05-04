@@ -102,6 +102,94 @@ def test_debug_logs_go_to_stderr_while_stdout_stays_json(
     assert "DEBUG:" not in stdout
 
 
+def test_root_usage_error_includes_compact_recovery_fields() -> None:
+    exit_code, stdout, stderr = _run_cli([])
+
+    assert exit_code == 2
+    assert stderr == ""
+    assert stdout.endswith("\n")
+    payload = _load_single_json_object(stdout)
+    assert payload["error"]["code"] == "usage_error"
+    assert (
+        payload["error"]["message"] == "the following arguments are required: command"
+    )
+    assert payload["error"]["details"] == {
+        "help_command": "lazynwb --help",
+        "recovery_hint": "Run lazynwb --help to choose a command.",
+        "usage": (
+            "usage: lazynwb [-h] [--debug]\n"
+            "               {paths,tables,context,schema,preview,query,config} ..."
+        ),
+        "valid_commands": [
+            "paths",
+            "tables",
+            "context",
+            "schema",
+            "preview",
+            "query",
+            "config",
+        ],
+    }
+
+
+def test_unknown_root_command_reports_valid_commands_in_cli_order() -> None:
+    exit_code, stdout, stderr = _run_cli(["bogus"])
+
+    assert exit_code == 2
+    assert stderr == ""
+    payload = _load_single_json_object(stdout)
+    assert payload["error"]["code"] == "usage_error"
+    assert payload["error"]["message"] == (
+        "argument command: invalid choice: 'bogus' "
+        "(choose from 'paths', 'tables', 'context', 'schema', 'preview', "
+        "'query', 'config')"
+    )
+    assert payload["error"]["details"]["help_command"] == "lazynwb --help"
+    assert payload["error"]["details"]["recovery_hint"] == (
+        "Run lazynwb --help to choose a command."
+    )
+    assert payload["error"]["details"]["valid_commands"] == [
+        "paths",
+        "tables",
+        "context",
+        "schema",
+        "preview",
+        "query",
+        "config",
+    ]
+    assert payload["error"]["details"]["usage"].startswith("usage: lazynwb")
+
+
+def test_subcommand_usage_error_points_at_specific_help_command() -> None:
+    exit_code, stdout, stderr = _run_cli(["paths", "--format", "bogus"])
+
+    assert exit_code == 2
+    assert stderr == ""
+    payload = _load_single_json_object(stdout)
+    assert payload["error"]["code"] == "usage_error"
+    assert payload["error"]["message"] == (
+        "argument --format: invalid choice: 'bogus' (choose from 'json', 'table')"
+    )
+    assert payload["error"]["details"]["help_command"] == "lazynwb paths --help"
+    assert payload["error"]["details"]["recovery_hint"] == (
+        "Run lazynwb paths --help to inspect valid options."
+    )
+    assert payload["error"]["details"]["usage"].startswith("usage: lazynwb paths")
+    assert "Inspect NWB sources" not in stdout
+    assert "valid_commands" not in payload["error"]["details"]
+
+
+def test_debug_usage_error_keeps_stdout_parseable_and_logs_to_stderr() -> None:
+    exit_code, stdout, stderr = _run_cli(["--debug", "paths", "--format", "bogus"])
+
+    assert exit_code == 2
+    payload = _load_single_json_object(stdout)
+    assert payload["error"]["details"]["help_command"] == "lazynwb paths --help"
+    assert "DEBUG:lazynwb._cli" in stderr
+    assert "CLI usage error recovery guidance" in stderr
+    assert "DEBUG:" not in stdout
+
+
 def test_tables_command_lists_sql_ready_tables_json(
     local_hdf5_path: pathlib.Path,
 ) -> None:
@@ -361,9 +449,7 @@ def test_context_command_reports_explicit_sources_tables_and_workflow_json(
         lambda *args, **kwargs: _FakeSQLContext(("units", "intervals/trials")),
     )
 
-    exit_code, stdout, stderr = _run_cli(
-        ["context", str(first_path), str(second_path)]
-    )
+    exit_code, stdout, stderr = _run_cli(["context", str(first_path), str(second_path)])
 
     assert exit_code == 0
     assert stderr == ""
@@ -405,9 +491,9 @@ def test_context_command_reports_explicit_sources_tables_and_workflow_json(
     assert payload["recommended_workflow"][0].startswith("lazynwb paths ")
     assert "lazynwb tables " in payload["recommended_workflow"][1]
     assert "lazynwb schema intervals/trials " in payload["recommended_workflow"][2]
-    assert 'SELECT * FROM "intervals/trials" LIMIT 5' in payload[
-        "recommended_workflow"
-    ][4]
+    assert (
+        'SELECT * FROM "intervals/trials" LIMIT 5' in payload["recommended_workflow"][4]
+    )
 
 
 def test_context_command_python_snippets_are_source_aware(
@@ -442,16 +528,17 @@ def test_context_command_python_snippets_are_source_aware(
     assert "exclude_timeseries=False" in sql_snippet
     assert "rename_general_metadata=True" in sql_snippet
     assert "eager=False" in sql_snippet
-    assert "lazynwb tables --infer-schema-length 1 " in payload[
-        "recommended_workflow"
-    ][1]
-    assert "lazynwb schema --infer-schema-length 1 units " in payload[
-        "recommended_workflow"
-    ][2]
+    assert (
+        "lazynwb tables --infer-schema-length 1 " in payload["recommended_workflow"][1]
+    )
+    assert (
+        "lazynwb schema --infer-schema-length 1 units "
+        in payload["recommended_workflow"][2]
+    )
     assert "lazynwb preview --limit 5 units " in payload["recommended_workflow"][3]
-    assert "lazynwb query --infer-schema-length 1 " in payload[
-        "recommended_workflow"
-    ][4]
+    assert (
+        "lazynwb query --infer-schema-length 1 " in payload["recommended_workflow"][4]
+    )
 
 
 def test_context_command_emits_empty_table_context_with_placeholder_snippet(
@@ -489,9 +576,7 @@ def test_context_command_supports_text_output(
         lambda *args, **kwargs: _FakeSQLContext(("units",)),
     )
 
-    exit_code, stdout, stderr = _run_cli(
-        ["context", "--format", "text", str(path)]
-    )
+    exit_code, stdout, stderr = _run_cli(["context", "--format", "text", str(path)])
 
     assert exit_code == 0
     assert stderr == ""
@@ -2343,6 +2428,13 @@ def _run_cli(args: list[str]) -> tuple[int, str, str]:
     stderr = io.StringIO()
     exit_code = cli_main.main(args, stdout=stdout, stderr=stderr)
     return exit_code, stdout.getvalue(), stderr.getvalue()
+
+
+def _load_single_json_object(stdout: str) -> dict[str, typing.Any]:
+    decoder = json.JSONDecoder()
+    payload, end = decoder.raw_decode(stdout)
+    assert stdout[end:] == "\n"
+    return typing.cast(dict[str, typing.Any], payload)
 
 
 class _FakeSQLContext:
