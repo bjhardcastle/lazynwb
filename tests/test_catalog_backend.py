@@ -170,6 +170,7 @@ def test_zarr_backend_reader_builds_table_schema_snapshots(
     tmp_path: pathlib.Path,
     table_path: str,
 ) -> None:
+    zarr_reader._clear_shared_metadata_catalog_cache(local_zarr_path)
     exact_table_path = lazynwb.normalize_internal_file_path(table_path)
     reader = zarr_reader._ZarrBackendReader(
         local_zarr_path,
@@ -200,6 +201,7 @@ def test_zarr_backend_reader_reuses_sqlite_snapshot(
     local_zarr_path: pathlib.Path,
     tmp_path: pathlib.Path,
 ) -> None:
+    zarr_reader._clear_shared_metadata_catalog_cache(local_zarr_path)
     cache_path = tmp_path / "catalog.sqlite"
     cold_reader = zarr_reader._ZarrBackendReader(
         local_zarr_path,
@@ -245,6 +247,7 @@ def test_zarr_backend_reader_builds_path_summary(
     local_zarr_path: pathlib.Path,
     tmp_path: pathlib.Path,
 ) -> None:
+    zarr_reader._clear_shared_metadata_catalog_cache(local_zarr_path)
     reader = zarr_reader._ZarrBackendReader(
         local_zarr_path,
         cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),

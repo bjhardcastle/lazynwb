@@ -8,7 +8,6 @@ These functions expose this metadata in a structured way for summarizing NWB fil
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from collections.abc import Iterable
@@ -17,6 +16,7 @@ from typing import Any
 import h5py
 import zarr
 
+import lazynwb._zarr.reader as zarr_reader
 import lazynwb.file_io
 import lazynwb.types_
 import lazynwb.utils
@@ -24,14 +24,9 @@ import lazynwb.utils
 logger = logging.getLogger(__name__)
 
 
-# Per-FileAccessor attrs caches: {FileAccessor._path: {internal_path: {attr_name: {...}}}}
-_attrs_cache: dict[str, dict[str, dict[str, dict[str, Any]] | None]] = {}
+# Per-FileAccessor attrs caches: {FileAccessor._path: {internal_path: attrs | None}}
+_attrs_cache: dict[str, dict[str, dict[str, Any] | None]] = {}
 _attrs_cache_lock = threading.RLock()
-
-# Consolidated metadata cache: {cache_key: parsed attrs_map | _SENTINEL}
-_consolidated_cache: dict[str, dict[str, dict[str, Any] | None] | object] = {}
-_consolidated_cache_lock = threading.RLock()
-_CONSOLIDATED_NOT_AVAILABLE = object()  # sentinel: .zmetadata not found/failed
 
 
 def _get_cache_key(file_accessor: lazynwb.file_io.FileAccessor) -> str:
@@ -95,10 +90,13 @@ def _filter_attrs(
     attrs: dict[str, Any] | None,
     exclude_private: bool = True,
     exclude_empty_fields: bool = False,
+    exclude_zarr_only: bool = False,
 ) -> dict[str, Any]:
     if attrs is None:
         return {}
     filtered = attrs.copy()
+    if exclude_zarr_only:
+        filtered = zarr_reader._filter_zarr_only_attrs(filtered)
     if exclude_private:
         filtered = {
             k: v
@@ -118,103 +116,225 @@ def _filter_attrs(
     return filtered
 
 
-def _load_consolidated_metadata(
+def _is_zarr_accessor(
     file_accessor: lazynwb.file_io.FileAccessor,
-) -> dict[str, dict[str, Any] | None] | None:
-    """Load and parse .zmetadata from a zarr store.
+) -> bool:
+    return file_accessor._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.ZARR
 
-    Returns a dict mapping internal paths to their raw attrs dicts,
-    or None if consolidated metadata is unavailable.
-    """
-    if file_accessor._hdmf_backend != lazynwb.file_io.FileAccessor.HDMFBackend.ZARR:
+
+def _get_zarr_metadata_catalog(
+    file_accessor: lazynwb.file_io.FileAccessor,
+) -> zarr_reader._ZarrMetadataCatalog | None:
+    if not _is_zarr_accessor(file_accessor):
+        return None
+    if not zarr_reader._is_fast_zarr_candidate(file_accessor._path):
+        logger.debug(
+            "Zarr attrs metadata catalog unavailable for non-local source %s",
+            file_accessor._path,
+        )
         return None
     try:
-        raw = file_accessor._accessor.store[".zmetadata"]
-        zmetadata = json.loads(raw)
-        if zmetadata.get("zarr_consolidated_format") != 1:
-            return None
+        catalog = zarr_reader._get_shared_metadata_catalog(file_accessor._path)
     except Exception:
-        logger.debug("Failed to load .zmetadata for %s", file_accessor._path)
-        return None
-
-    metadata = zmetadata.get("metadata", {})
-    attrs_map: dict[str, dict[str, Any] | None] = {}
-    for key, value in metadata.items():
-        if key == ".zattrs":
-            attrs_map["/"] = value
-        elif key.endswith("/.zattrs"):
-            internal_path = key[: -len("/.zattrs")]
-            attrs_map[internal_path] = value
-    return attrs_map
-
-
-def _get_or_load_consolidated(
-    file_accessor: lazynwb.file_io.FileAccessor,
-) -> dict[str, dict[str, Any] | None] | None:
-    """Get consolidated metadata for a zarr file, loading and caching on first access."""
-    cache_key = _get_cache_key(file_accessor)
-    with _consolidated_cache_lock:
-        if cache_key in _consolidated_cache:
-            cached = _consolidated_cache[cache_key]
-            if cached is _CONSOLIDATED_NOT_AVAILABLE:
-                return None
-            return cached  # type: ignore[return-value]
-
-    result = _load_consolidated_metadata(file_accessor)
-    with _consolidated_cache_lock:
-        _consolidated_cache[cache_key] = (
-            result if result is not None else _CONSOLIDATED_NOT_AVAILABLE
-        )
-    if result is not None:
         logger.debug(
-            "Loaded consolidated metadata for %s (%d paths)", cache_key, len(result)
+            "failed to build Zarr attrs metadata catalog for %s",
+            file_accessor._path,
+            exc_info=True,
         )
-    return result
+        return None
+    logger.debug(
+        "using %s Zarr metadata catalog for attrs on %s",
+        "shared consolidated" if catalog.has_consolidated_metadata else "targeted",
+        file_accessor._path,
+    )
+    return catalog
 
 
-def _get_sub_attrs_from_consolidated(
-    attrs_map: dict[str, dict[str, Any] | None],
+def _cache_attrs_for_path(
+    cache_key: str,
+    internal_path: str,
+    attrs: dict[str, Any] | None,
+) -> None:
+    with _attrs_cache_lock:
+        if cache_key not in _attrs_cache:
+            _attrs_cache[cache_key] = {}
+        _attrs_cache[cache_key][internal_path] = attrs
+
+
+def _cache_zarr_attrs_tree(
+    cache_key: str,
+    attrs_tree: dict[str, dict[str, Any]],
+) -> None:
+    with _attrs_cache_lock:
+        if cache_key not in _attrs_cache:
+            _attrs_cache[cache_key] = {}
+        for zarr_path, attrs in attrs_tree.items():
+            internal_path = _attrs_cache_path_from_zarr_path(zarr_path)
+            _attrs_cache[cache_key].setdefault(internal_path, attrs)
+
+
+def _attrs_cache_path_from_zarr_path(zarr_path: str) -> str:
+    return "/" if zarr_path == "" else zarr_path
+
+
+def _sub_attrs_result_key(zarr_path: str, parent_path: str) -> str:
+    if zarr_path == "":
+        return "/"
+    if parent_path == "/":
+        return f"/{zarr_path}"
+    return zarr_path
+
+
+def _get_attrs_from_zarr_catalog(
+    catalog: zarr_reader._ZarrMetadataCatalog,
+    internal_path: str,
+    cache_key: str,
+    exclude_private: bool,
+    exclude_empty_fields: bool,
+) -> dict[str, Any]:
+    zarr_path = zarr_reader._normalize_zarr_metadata_path(internal_path)
+    if not catalog.path_exists(zarr_path):
+        raise KeyError(internal_path)
+    attrs = dict(catalog.get_zattrs(zarr_path))
+    _cache_attrs_for_path(cache_key, internal_path, attrs)
+    logger.debug(
+        "loaded attrs for %s from %s Zarr metadata catalog",
+        internal_path,
+        "shared consolidated" if catalog.has_consolidated_metadata else "targeted",
+    )
+    return _filter_attrs(
+        attrs,
+        exclude_private=exclude_private,
+        exclude_empty_fields=exclude_empty_fields,
+        exclude_zarr_only=True,
+    )
+
+
+def _get_sub_attrs_from_zarr_catalog(
+    catalog: zarr_reader._ZarrMetadataCatalog,
     parent_path: str,
     cache_key: str,
     exclude_private: bool,
     exclude_empty: bool,
 ) -> dict[str, dict[str, Any]]:
-    """Build sub-attrs result from pre-loaded consolidated metadata."""
-    result: dict[str, dict[str, Any]] = {}
+    raw_attrs_tree = {
+        path: dict(attrs)
+        for path, attrs in catalog.read_attrs_tree(parent_path).items()
+    }
+    if not raw_attrs_tree:
+        return {}
 
-    for internal_path, raw_attrs in attrs_map.items():
-        # Filter to paths under parent_path
-        if parent_path == "/":
-            pass  # include all
-        elif internal_path == parent_path:
-            pass  # include the parent itself
-        elif internal_path.startswith(parent_path + "/"):
-            pass  # include children
-        else:
-            continue
-
-        # Build result key matching _traverse behavior:
-        # root traversal prefixes non-root paths with "/"
-        if parent_path == "/" and internal_path != "/":
-            result_key = "/" + internal_path
-        else:
-            result_key = internal_path
-
-        filtered = _filter_attrs(
-            raw_attrs,
+    _cache_zarr_attrs_tree(cache_key, raw_attrs_tree)
+    result = {
+        _sub_attrs_result_key(zarr_path, parent_path): _filter_attrs(
+            attrs,
             exclude_private=exclude_private,
             exclude_empty_fields=exclude_empty,
+            exclude_zarr_only=True,
         )
-        result[result_key] = filtered
+        for zarr_path, attrs in raw_attrs_tree.items()
+    }
+    return _post_process_attrs(
+        result, exclude_private=exclude_private, exclude_empty=exclude_empty
+    )
 
-    # Bulk-populate per-path attrs cache for subsequent get_attrs() calls
+
+def _get_accessor_object(
+    file_accessor: lazynwb.file_io.FileAccessor,
+    current_path: str,
+) -> h5py.Dataset | h5py.Group | zarr.Array | zarr.Group | None:
+    try:
+        if current_path == "/":
+            return file_accessor._accessor
+        return file_accessor.get(current_path)
+    except (KeyError, AttributeError, TypeError):
+        return None
+
+
+def _get_cached_or_load_attrs(
+    cache_key: str,
+    current_path: str,
+    obj: h5py.Dataset | h5py.Group | zarr.Array | zarr.Group,
+) -> dict[str, Any] | None:
     with _attrs_cache_lock:
         if cache_key not in _attrs_cache:
             _attrs_cache[cache_key] = {}
-        for internal_path, raw_attrs in attrs_map.items():
-            if internal_path not in _attrs_cache[cache_key]:
-                _attrs_cache[cache_key][internal_path] = raw_attrs
 
+        if current_path not in _attrs_cache[cache_key]:
+            attrs = _get_attrs_from_accessor(obj)
+            _attrs_cache[cache_key][current_path] = attrs
+            logger.debug(
+                "loaded attrs for %s/%s from backend traversal",
+                cache_key,
+                current_path,
+            )
+            return attrs
+        return _attrs_cache[cache_key][current_path]
+
+
+def _child_paths(
+    obj: h5py.Dataset | h5py.Group | zarr.Array | zarr.Group,
+    current_path: str,
+) -> tuple[str, ...]:
+    if not lazynwb.file_io.is_group(obj):
+        return ()
+    try:
+        return tuple(f"{current_path.rstrip('/')}/{key}" for key in obj.keys())
+    except (AttributeError, TypeError, ValueError):
+        return ()
+
+
+def _collect_sub_attrs_from_accessor(
+    file_accessor: lazynwb.file_io.FileAccessor,
+    cache_key: str,
+    current_path: str,
+    result: dict[str, dict[str, Any]],
+    *,
+    exclude_private: bool,
+    exclude_empty: bool,
+    exclude_zarr_only: bool,
+) -> None:
+    obj = _get_accessor_object(file_accessor, current_path)
+    if obj is None:
+        return
+    attrs = _get_cached_or_load_attrs(cache_key, current_path, obj)
+    result[current_path] = _filter_attrs(
+        attrs,
+        exclude_private=exclude_private,
+        exclude_empty_fields=exclude_empty,
+        exclude_zarr_only=exclude_zarr_only,
+    )
+    for child_path in _child_paths(obj, current_path):
+        _collect_sub_attrs_from_accessor(
+            file_accessor,
+            cache_key,
+            child_path,
+            result,
+            exclude_private=exclude_private,
+            exclude_empty=exclude_empty,
+            exclude_zarr_only=exclude_zarr_only,
+        )
+
+
+def _get_sub_attrs_from_accessor(
+    file_accessor: lazynwb.file_io.FileAccessor,
+    parent_path: str,
+    cache_key: str,
+    *,
+    exclude_private: bool,
+    exclude_empty: bool,
+    exclude_zarr_only: bool,
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    _collect_sub_attrs_from_accessor(
+        file_accessor,
+        cache_key,
+        parent_path,
+        result,
+        exclude_private=exclude_private,
+        exclude_empty=exclude_empty,
+        exclude_zarr_only=exclude_zarr_only,
+    )
     return _post_process_attrs(
         result, exclude_private=exclude_private, exclude_empty=exclude_empty
     )
@@ -239,7 +359,8 @@ def get_attrs(
     exclude_private : bool, default True
         If True, exclude attributes starting with underscore or period, and the 'id' attr.
     exclude_empty_fields : bool, default False
-        If True, exclude attributes with empty values (None, empty dict, empty list, empty string, "no description").
+        If True, exclude attributes with empty values (None, empty dict, empty list,
+        empty string, "no description").
 
     Returns
     -------
@@ -259,44 +380,48 @@ def get_attrs(
     file_accessor = lazynwb.file_io._get_accessor(nwb_path)
     cache_key = _get_cache_key(file_accessor)
     internal_path = lazynwb.utils.normalize_internal_file_path(internal_path)
+    is_zarr = _is_zarr_accessor(file_accessor)
 
     # Check per-path cache first
     with _attrs_cache_lock:
         if cache_key in _attrs_cache:
             if internal_path in _attrs_cache[cache_key]:
                 cached_attrs = _attrs_cache[cache_key][internal_path]
+                logger.debug(
+                    "loaded attrs for %s/%s from attrs cache",
+                    cache_key,
+                    internal_path,
+                )
                 return _filter_attrs(
                     cached_attrs,
                     exclude_private=exclude_private,
                     exclude_empty_fields=exclude_empty_fields,
+                    exclude_zarr_only=is_zarr,
                 )
 
-    # Cache miss: try consolidated metadata for zarr files
-    if file_accessor._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.ZARR:
-        consolidated = _get_or_load_consolidated(file_accessor)
-        if consolidated is not None and internal_path in consolidated:
-            attrs = consolidated[internal_path]
-            with _attrs_cache_lock:
-                if cache_key not in _attrs_cache:
-                    _attrs_cache[cache_key] = {}
-                _attrs_cache[cache_key][internal_path] = attrs
-            return _filter_attrs(
-                attrs,
+    if is_zarr:
+        catalog = _get_zarr_metadata_catalog(file_accessor)
+        if catalog is not None:
+            return _get_attrs_from_zarr_catalog(
+                catalog,
+                internal_path,
+                cache_key,
                 exclude_private=exclude_private,
                 exclude_empty_fields=exclude_empty_fields,
             )
 
     # Fallback: retrieve directly from file
     attrs = _get_attrs_from_accessor(file_accessor[internal_path])
-    with _attrs_cache_lock:
-        if cache_key not in _attrs_cache:
-            _attrs_cache[cache_key] = {}
-        _attrs_cache[cache_key][internal_path] = attrs
+    _cache_attrs_for_path(cache_key, internal_path, attrs)
+    logger.debug(
+        "loaded attrs for %s/%s from backend accessor", cache_key, internal_path
+    )
 
     return _filter_attrs(
         attrs,
         exclude_private=exclude_private,
         exclude_empty_fields=exclude_empty_fields,
+        exclude_zarr_only=is_zarr,
     )
 
 
@@ -362,7 +487,8 @@ def get_sub_attrs(
     """
     Retrieve all attributes for all objects under a parent path (optimized).
 
-    Recursively traverses the file structure from the parent path and collects attributes for each group and dataset encountered. Results are cached.
+    Recursively traverses the file structure from the parent path and collects
+    attributes for each group and dataset encountered. Results are cached.
 
     Parameters
     ----------
@@ -391,64 +517,26 @@ def get_sub_attrs(
     file_accessor = lazynwb.file_io._get_accessor(nwb_path)
     cache_key = _get_cache_key(file_accessor)
     parent_path = lazynwb.utils.normalize_internal_file_path(parent_path)
+    is_zarr = _is_zarr_accessor(file_accessor)
 
-    # Fast path: use consolidated metadata for zarr files
-    if file_accessor._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.ZARR:
-        consolidated = _get_or_load_consolidated(file_accessor)
-        if consolidated is not None:
-            logger.debug(
-                "Using consolidated metadata for get_sub_attrs on %s", cache_key
-            )
-            return _get_sub_attrs_from_consolidated(
-                consolidated,
+    if is_zarr:
+        catalog = _get_zarr_metadata_catalog(file_accessor)
+        if catalog is not None:
+            return _get_sub_attrs_from_zarr_catalog(
+                catalog,
                 parent_path,
                 cache_key,
                 exclude_private=exclude_private,
                 exclude_empty=exclude_empty,
             )
 
-    result: dict[str, dict[str, Any]] = {}
-
-    def _traverse(current_path: str) -> None:
-        """Recursively traverse and collect attrs from all sub-objects."""
-        # Get attrs for current path
-        try:
-            if current_path != "/":
-                obj = file_accessor.get(current_path)
-            else:
-                obj = file_accessor._accessor
-            if obj is None:
-                return
-        except (KeyError, AttributeError, TypeError):
-            return
-
-        # Cache and collect attrs for this path
-        with _attrs_cache_lock:
-            if cache_key not in _attrs_cache:
-                _attrs_cache[cache_key] = {}
-
-            if current_path not in _attrs_cache[cache_key]:
-                attrs = _get_attrs_from_accessor(obj)
-                _attrs_cache[cache_key][current_path] = attrs
-            else:
-                attrs = _attrs_cache[cache_key][current_path]
-
-        result[current_path] = _filter_attrs(
-            attrs, exclude_private=exclude_private, exclude_empty_fields=exclude_empty
-        )
-
-        # Recurse into children
-        if lazynwb.file_io.is_group(obj):
-            try:
-                for key in obj.keys():
-                    child_path = f"{current_path.rstrip('/')}/{key}"
-                    _traverse(child_path)
-            except (AttributeError, TypeError, ValueError):
-                pass
-
-    _traverse(parent_path)
-    return _post_process_attrs(
-        result, exclude_private=exclude_private, exclude_empty=exclude_empty
+    return _get_sub_attrs_from_accessor(
+        file_accessor,
+        parent_path,
+        cache_key,
+        exclude_private=exclude_private,
+        exclude_empty=exclude_empty,
+        exclude_zarr_only=is_zarr,
     )
 
 
@@ -628,19 +716,18 @@ def clear_attrs_cache(
     """
     global _attrs_cache
     if nwb_path is None:
-        with _consolidated_cache_lock:
-            _consolidated_cache.clear()
+        zarr_reader._clear_shared_metadata_catalog_cache()
         with _attrs_cache_lock:
             _attrs_cache.clear()
-        logger.debug("Cleared all attrs and consolidated metadata caches")
+        logger.debug("Cleared all attrs and shared Zarr metadata catalog caches")
     else:
         file_accessor = lazynwb.file_io._get_accessor(nwb_path)
         cache_key = _get_cache_key(file_accessor)
-        with _consolidated_cache_lock:
-            _consolidated_cache.pop(cache_key, None)
+        if _is_zarr_accessor(file_accessor):
+            zarr_reader._clear_shared_metadata_catalog_cache(file_accessor._path)
         with _attrs_cache_lock:
             _attrs_cache.pop(cache_key, None)
-        logger.debug(f"Cleared attrs cache for {cache_key}")
+        logger.debug("Cleared attrs cache for %s", cache_key)
 
 
 if __name__ == "__main__":

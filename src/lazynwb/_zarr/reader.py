@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import pathlib
+import threading
 import time
 import urllib.parse
 from collections.abc import Iterable, Mapping
@@ -21,6 +22,21 @@ import lazynwb.types_
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
+
+_ZARR_ONLY_ATTR_NAMES = frozenset({"_ARRAY_DIMENSIONS", "zarr_dtype"})
+_ZARR_CONSOLIDATED_METADATA_CACHE_LOCK = threading.RLock()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ZarrConsolidatedMetadataCacheEntry:
+    stat_key: tuple[int, int] | None
+    metadata: Mapping[str, object] | None
+
+
+_ZARR_CONSOLIDATED_METADATA_CACHE: dict[
+    str,
+    _ZarrConsolidatedMetadataCacheEntry,
+] = {}
 
 
 class _ZarrBackendReader:
@@ -211,16 +227,45 @@ class _ZarrEntry:
 
 
 class _ZarrMetadataCatalog:
-    def __init__(self, root: pathlib.Path, reader: _ZarrBackendReader) -> None:
+    def __init__(
+        self,
+        root: pathlib.Path,
+        reader: _ZarrBackendReader | None = None,
+    ) -> None:
         self._root = root
         self._reader = reader
-        self._metadata = self._load_consolidated_metadata()
+        self._metadata = _get_shared_consolidated_metadata(root, reader)
+        self._consolidated_paths = (
+            _consolidated_metadata_paths(self._metadata)
+            if self._metadata is not None
+            else None
+        )
+        self._consolidated_children = (
+            _consolidated_child_index(self._consolidated_paths)
+            if self._consolidated_paths is not None
+            else None
+        )
+
+    @property
+    def has_consolidated_metadata(self) -> bool:
+        return self._metadata is not None
 
     def get_zarray(self, path: str) -> Mapping[str, object] | None:
-        return self._get_json(path, ".zarray")
+        return self._get_json(_normalize_zarr_metadata_path(path), ".zarray")
 
     def get_zattrs(self, path: str) -> Mapping[str, object]:
-        return self._get_json(path, ".zattrs") or {}
+        return self._get_json(_normalize_zarr_metadata_path(path), ".zattrs") or {}
+
+    def path_exists(self, path: str) -> bool:
+        normalized_path = _normalize_zarr_metadata_path(path)
+        if normalized_path == "":
+            return self._root.exists()
+        if self._metadata is not None:
+            return self._has_consolidated_metadata(normalized_path)
+        root = self._root / normalized_path
+        return any(
+            (root / filename).exists() for filename in (".zarray", ".zattrs", ".zgroup")
+        )
 
     def read_path_summary(self) -> tuple[catalog_models._PathSummaryEntry, ...]:
         entries: list[catalog_models._PathSummaryEntry] = []
@@ -236,7 +281,29 @@ class _ZarrMetadataCatalog:
         )
         return tuple(entries)
 
+    def read_attrs_tree(self, parent_path: str) -> dict[str, Mapping[str, object]]:
+        normalized_parent_path = _normalize_zarr_metadata_path(parent_path)
+        if not self.path_exists(normalized_parent_path):
+            logger.debug(
+                "Zarr metadata catalog attrs path %r not found under %s",
+                parent_path,
+                self._root,
+            )
+            return {}
+        entries: dict[str, Mapping[str, object]] = {}
+        self._collect_attrs_tree(normalized_parent_path, entries)
+        logger.debug(
+            "built Zarr metadata catalog attrs tree for %s/%s with %d entries "
+            "(consolidated=%s)",
+            self._root,
+            normalized_parent_path or ".",
+            len(entries),
+            self.has_consolidated_metadata,
+        )
+        return entries
+
     def child_names(self, parent_path: str) -> tuple[str, ...]:
+        parent_path = _normalize_zarr_metadata_path(parent_path)
         if self._metadata is not None:
             names = self._consolidated_child_names(parent_path)
         else:
@@ -265,7 +332,9 @@ class _ZarrMetadataCatalog:
                     is_group=entry.is_group,
                     is_dataset=not entry.is_group,
                     shape=entry.shape,
-                    attrs_json=catalog_models._attrs_to_tuple(entry.zattrs),
+                    attrs_json=catalog_models._attrs_to_tuple(
+                        _filter_zarr_only_attrs(entry.zattrs)
+                    ),
                 )
             )
         if not entry.is_group:
@@ -278,29 +347,20 @@ class _ZarrMetadataCatalog:
                 include_self=True,
             )
 
-    def _load_consolidated_metadata(self) -> Mapping[str, object] | None:
-        zmetadata_path = self._root / ".zmetadata"
-        if not zmetadata_path.exists():
-            logger.debug("Zarr consolidated metadata not found for %s", self._root)
-            return None
-        try:
-            payload = json.loads(zmetadata_path.read_text())
-        except Exception:
-            logger.debug("failed to load Zarr consolidated metadata for %s", self._root)
-            return None
-        metadata = payload.get("metadata")
-        if not isinstance(metadata, Mapping):
-            return None
-        self._reader.metadata_read_count += 1
-        self._reader.used_consolidated_metadata = True
-        logger.debug(
-            "loaded Zarr consolidated metadata for %s with %d entries",
-            self._root,
-            len(metadata),
-        )
-        return metadata
+    def _collect_attrs_tree(
+        self,
+        path: str,
+        entries: dict[str, Mapping[str, object]],
+    ) -> None:
+        entries[path] = self.get_zattrs(path)
+        if self.get_zarray(path) is not None:
+            return
+        for name in self.child_names(path):
+            child_path = f"{path}/{name}" if path else name
+            self._collect_attrs_tree(child_path, entries)
 
     def _get_json(self, path: str, filename: str) -> Mapping[str, object] | None:
+        path = _normalize_zarr_metadata_path(path)
         metadata_key = f"{path}/{filename}" if path else filename
         if self._metadata is not None:
             value = self._metadata.get(metadata_key)
@@ -308,34 +368,187 @@ class _ZarrMetadataCatalog:
         metadata_path = self._root / path / filename
         if not metadata_path.exists():
             return None
-        self._reader.metadata_read_count += 1
+        if self._reader is not None:
+            self._reader.metadata_read_count += 1
         logger.debug("read targeted Zarr metadata file %s", metadata_path)
         value = json.loads(metadata_path.read_text())
         return value if isinstance(value, Mapping) else None
 
     def _consolidated_child_names(self, parent_path: str) -> tuple[str, ...]:
-        if self._metadata is None:
+        if self._consolidated_children is None:
             return ()
-        prefix = f"{parent_path}/" if parent_path else ""
-        child_names: set[str] = set()
-        for key in self._metadata:
-            if not isinstance(key, str) or not key.startswith(prefix):
-                continue
-            remainder = key[len(prefix) :]
-            if "/" not in remainder:
-                continue
-            child_names.add(remainder.split("/", 1)[0])
+        child_names = self._consolidated_children.get(parent_path, ())
         if not child_names and not self._has_consolidated_metadata(parent_path):
             raise KeyError(parent_path)
-        return tuple(sorted(child_names))
+        return child_names
 
     def _has_consolidated_metadata(self, path: str) -> bool:
-        if self._metadata is None:
+        path = _normalize_zarr_metadata_path(path)
+        if self._consolidated_paths is None:
             return False
-        return any(
-            (f"{path}/{filename}" if path else filename) in self._metadata
-            for filename in (".zarray", ".zattrs", ".zgroup")
+        return path in self._consolidated_paths
+
+
+def _get_shared_metadata_catalog(
+    source: lazynwb.types_.PathLike,
+    reader: _ZarrBackendReader | None = None,
+) -> _ZarrMetadataCatalog:
+    """Build a metadata catalog using the shared consolidated metadata cache."""
+    return _ZarrMetadataCatalog(_local_source_path(source), reader)
+
+
+def _clear_shared_metadata_catalog_cache(
+    source: lazynwb.types_.PathLike | None = None,
+) -> None:
+    with _ZARR_CONSOLIDATED_METADATA_CACHE_LOCK:
+        if source is None:
+            _ZARR_CONSOLIDATED_METADATA_CACHE.clear()
+            logger.debug("cleared all shared Zarr metadata catalog cache entries")
+            return
+        cache_key = _zarr_metadata_cache_key(_local_source_path(source))
+        _ZARR_CONSOLIDATED_METADATA_CACHE.pop(cache_key, None)
+        logger.debug(
+            "cleared shared Zarr metadata catalog cache entry for %s", cache_key
         )
+
+
+def _get_shared_consolidated_metadata(
+    root: pathlib.Path,
+    reader: _ZarrBackendReader | None = None,
+) -> Mapping[str, object] | None:
+    cache_key = _zarr_metadata_cache_key(root)
+    stat_key = _zmetadata_stat_key(root)
+    with _ZARR_CONSOLIDATED_METADATA_CACHE_LOCK:
+        cached = _ZARR_CONSOLIDATED_METADATA_CACHE.get(cache_key)
+        if cached is not None and cached.stat_key == stat_key:
+            if cached.metadata is None:
+                logger.debug(
+                    "shared Zarr metadata catalog cache hit without consolidated "
+                    "metadata for %s",
+                    root,
+                )
+                return None
+            if reader is not None:
+                reader.used_consolidated_metadata = True
+            logger.debug(
+                "shared Zarr metadata catalog cache hit for %s with %d entries",
+                root,
+                len(cached.metadata),
+            )
+            return cached.metadata
+
+        metadata = _load_consolidated_metadata(root, reader, stat_key)
+        _ZARR_CONSOLIDATED_METADATA_CACHE[cache_key] = (
+            _ZarrConsolidatedMetadataCacheEntry(
+                stat_key=stat_key,
+                metadata=metadata,
+            )
+        )
+        return metadata
+
+
+def _load_consolidated_metadata(
+    root: pathlib.Path,
+    reader: _ZarrBackendReader | None,
+    stat_key: tuple[int, int] | None,
+) -> Mapping[str, object] | None:
+    zmetadata_path = root / ".zmetadata"
+    if stat_key is None:
+        logger.debug("Zarr consolidated metadata not found for %s", root)
+        return None
+    try:
+        payload = json.loads(zmetadata_path.read_text())
+    except Exception:
+        logger.debug(
+            "failed to load Zarr consolidated metadata for %s",
+            root,
+            exc_info=True,
+        )
+        return None
+    if payload.get("zarr_consolidated_format") != 1:
+        logger.debug(
+            "ignoring unsupported Zarr consolidated metadata format for %s: %r",
+            root,
+            payload.get("zarr_consolidated_format"),
+        )
+        return None
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, Mapping):
+        logger.debug("Zarr consolidated metadata for %s has no metadata mapping", root)
+        return None
+    if reader is not None:
+        reader.metadata_read_count += 1
+        reader.used_consolidated_metadata = True
+    logger.debug(
+        "loaded shared Zarr consolidated metadata for %s with %d entries",
+        root,
+        len(metadata),
+    )
+    return metadata
+
+
+def _zmetadata_stat_key(root: pathlib.Path) -> tuple[int, int] | None:
+    try:
+        stat = (root / ".zmetadata").stat()
+    except FileNotFoundError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def _zarr_metadata_cache_key(root: pathlib.Path) -> str:
+    try:
+        return root.resolve().as_posix()
+    except OSError:
+        logger.debug("failed to resolve Zarr metadata cache key for %s", root)
+        return root.as_posix()
+
+
+def _normalize_zarr_metadata_path(path: str) -> str:
+    normalized = lazynwb.utils.normalize_internal_file_path(path)
+    return "" if normalized == "/" else normalized.removeprefix("/")
+
+
+def _filter_zarr_only_attrs(attrs: Mapping[str, object]) -> dict[str, object]:
+    return {
+        str(key): value
+        for key, value in attrs.items()
+        if str(key) not in _ZARR_ONLY_ATTR_NAMES
+    }
+
+
+def _consolidated_metadata_paths(metadata: Mapping[str, object]) -> frozenset[str]:
+    paths: set[str] = set()
+    for key in metadata:
+        if not isinstance(key, str):
+            continue
+        path = _zarr_metadata_path_from_key(key)
+        if path is not None:
+            paths.add(path)
+    return frozenset(paths)
+
+
+def _consolidated_child_index(
+    paths: frozenset[str],
+) -> dict[str, tuple[str, ...]]:
+    children: dict[str, set[str]] = {}
+    for path in paths:
+        if path == "":
+            continue
+        parts = path.split("/")
+        for index, name in enumerate(parts):
+            parent = "/".join(parts[:index])
+            children.setdefault(parent, set()).add(name)
+    return {parent: tuple(sorted(names)) for parent, names in children.items()}
+
+
+def _zarr_metadata_path_from_key(key: str) -> str | None:
+    for filename in (".zarray", ".zattrs", ".zgroup"):
+        if key == filename:
+            return ""
+        suffix = f"/{filename}"
+        if key.endswith(suffix):
+            return key[: -len(suffix)]
+    return None
 
 
 def _get_table_column_entries(
@@ -444,7 +657,9 @@ def _column_schema_from_zarr_entry(
             None if entry.zarray is None else entry.zarray.get("fill_value")
         ),
         read_capabilities=_read_capabilities(entry),
-        attrs_json=catalog_models._attrs_to_tuple(entry.zattrs),
+        attrs_json=catalog_models._attrs_to_tuple(
+            _filter_zarr_only_attrs(entry.zattrs)
+        ),
         is_group=entry.is_group,
         is_dataset=not entry.is_group,
     )
