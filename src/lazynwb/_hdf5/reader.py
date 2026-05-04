@@ -6,6 +6,7 @@ import time
 import urllib.parse
 
 import lazynwb._cache.sqlite as cache_sqlite
+import lazynwb._catalog._schema as catalog_schema
 import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
 import lazynwb._hdf5.parser as hdf5_parser
@@ -375,53 +376,9 @@ class _HDF5BackendReader:
 def _get_table_length_from_columns(
     columns: tuple[catalog_models._TableColumnSchema, ...],
 ) -> int:
-    columns_by_name = {column.name: column for column in columns}
-    if columns and all(column.is_metadata_table for column in columns):
-        logger.debug(
-            "table length for %s/%s resolved as one metadata row",
-            columns[0].source_path,
-            columns[0].table_path,
-        )
-        return 1
-    for column in columns:
-        if column.is_nominally_indexed:
-            index_column_name = column.index_column_name or column.name
-            index_column = columns_by_name.get(index_column_name)
-            if index_column is not None and index_column.shape is not None:
-                logger.debug(
-                    "table length for %s/%s resolved from indexed column %r: %d",
-                    column.source_path,
-                    column.table_path,
-                    index_column.name,
-                    index_column.shape[0],
-                )
-                return index_column.shape[0]
-        if column.ndim == 1 and column.shape is not None:
-            logger.debug(
-                "table length for %s/%s resolved from regular column %r: %d",
-                column.source_path,
-                column.table_path,
-                column.name,
-                column.shape[0],
-            )
-            return column.shape[0]
-        if column.ndim == 0:
-            logger.debug(
-                "table length for %s/%s resolved as metadata row",
-                column.source_path,
-                column.table_path,
-            )
-            return 1
-    for column in columns:
-        if column.shape:
-            logger.debug(
-                "table length for %s/%s resolved from multidimensional column %r: %d",
-                column.source_path,
-                column.table_path,
-                column.name,
-                column.shape[0],
-            )
-            return column.shape[0]
+    table_length = catalog_schema._get_table_length(columns)
+    if table_length is not None:
+        return table_length
     raise lazynwb.exceptions.InternalPathError("Could not determine table length")
 
 

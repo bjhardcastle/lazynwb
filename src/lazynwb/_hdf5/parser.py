@@ -10,10 +10,10 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
+import lazynwb._catalog._schema as catalog_schema
 import lazynwb._catalog.models as catalog_models
 import lazynwb._hdf5.range_reader as hdf5_range_reader
 import lazynwb.exceptions
-import lazynwb.table_metadata
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
@@ -475,27 +475,18 @@ class _HDF5MetadataScanner:
         started = time.perf_counter()
         await self.bootstrap()
         descriptors = await self.describe_table(exact_table_path)
-        column_names = tuple(descriptors)
-        is_metadata_table = exact_table_path == "general" or _is_metadata(descriptors)
-        is_timeseries = lazynwb.table_metadata._is_timeseries(column_names)
-        is_timeseries_with_rate = lazynwb.table_metadata._is_timeseries_with_rate(
-            column_names
-        )
-        timeseries_len = (
-            descriptors["data"].shape[0]
-            if is_timeseries and "data" in descriptors and descriptors["data"].shape
-            else None
+        column_facts = _column_facts_from_descriptors(descriptors)
+        table_rules = catalog_schema._get_table_schema_rules(
+            exact_table_path,
+            column_facts.values(),
         )
         columns = tuple(
             _column_schema_from_descriptor(
                 descriptor=descriptor,
-                all_column_names=column_names,
-                is_metadata_table=is_metadata_table,
-                is_timeseries=is_timeseries,
-                is_timeseries_with_rate=is_timeseries_with_rate,
+                column_facts=column_facts[descriptor.name],
                 source_identity=source_identity,
                 table_path=exact_table_path,
-                timeseries_len=timeseries_len,
+                table_rules=table_rules,
             )
             for descriptor in descriptors.values()
         )
@@ -1287,32 +1278,16 @@ class _HDF5MetadataScanner:
 def _column_schema_from_descriptor(
     *,
     descriptor: _DatasetDescriptor,
-    all_column_names: tuple[str, ...],
-    is_metadata_table: bool,
-    is_timeseries: bool,
-    is_timeseries_with_rate: bool,
+    column_facts: catalog_schema._ColumnFacts,
     source_identity: catalog_models._SourceIdentity,
     table_path: str,
-    timeseries_len: int | None,
+    table_rules: catalog_schema._TableSchemaRules,
 ) -> catalog_models._TableColumnSchema:
     storage_facts = _storage_facts_from_descriptor(descriptor)
-    is_nominally_indexed = lazynwb.table_metadata._is_nominally_indexed_column(
+    column_rules = table_rules.column_rules(
         descriptor.name,
-        all_column_names,
-    )
-    is_index_column = is_nominally_indexed and descriptor.name.endswith("_index")
-    index_column_name = lazynwb.table_metadata._get_index_column_name(
-        descriptor.name,
-        all_column_names,
-    )
-    data_column_name = lazynwb.table_metadata._get_data_column_name(
-        descriptor.name,
-        all_column_names,
-    )
-    is_timeseries_length_aligned = lazynwb.table_metadata._is_timeseries_length_aligned(
-        is_timeseries=is_timeseries,
-        shape=descriptor.shape,
-        timeseries_len=timeseries_len,
+        shape=column_facts.shape,
+        ndim=column_facts.ndim,
     )
     dataset = catalog_models._DatasetSchema(
         path=descriptor.path,
@@ -1333,7 +1308,7 @@ def _column_schema_from_descriptor(
         hdf5_data_offset=storage_facts["hdf5_data_offset"],
         hdf5_storage_size=storage_facts["hdf5_storage_size"],
     )
-    if is_metadata_table and descriptor.ndim <= 1:
+    if column_rules.is_metadata_table and descriptor.ndim <= 1:
         logger.debug(
             "using metadata-only schema facts for tiny metadata column %r at %s/%s "
             "(shape=%s dtype=%s)",
@@ -1345,7 +1320,7 @@ def _column_schema_from_descriptor(
         )
     if (
         descriptor.name == "starting_time"
-        and is_timeseries_with_rate
+        and column_rules.is_timeseries_with_rate
         and "rate" in descriptor.attributes
     ):
         logger.debug(
@@ -1361,21 +1336,30 @@ def _column_schema_from_descriptor(
         source_path=source_identity.source_url,
         backend="hdf5",
         dataset=dataset,
-        is_metadata_table=is_metadata_table,
-        is_timeseries=is_timeseries,
-        is_timeseries_with_rate=is_timeseries_with_rate,
-        is_timeseries_length_aligned=is_timeseries_length_aligned,
-        is_nominally_indexed=is_nominally_indexed,
-        is_index_column=is_index_column,
-        is_multidimensional=descriptor.ndim > 1,
-        index_column_name=index_column_name,
-        data_column_name=data_column_name,
-        row_element_shape=_get_row_element_shape(
+        is_metadata_table=column_rules.is_metadata_table,
+        is_timeseries=column_rules.is_timeseries,
+        is_timeseries_with_rate=column_rules.is_timeseries_with_rate,
+        is_timeseries_length_aligned=column_rules.is_timeseries_length_aligned,
+        is_nominally_indexed=column_rules.is_nominally_indexed,
+        is_index_column=column_rules.is_index_column,
+        is_multidimensional=column_rules.is_multidimensional,
+        index_column_name=column_rules.index_column_name,
+        data_column_name=column_rules.data_column_name,
+        row_element_shape=column_rules.row_element_shape,
+    )
+
+
+def _column_facts_from_descriptors(
+    descriptors: Mapping[str, _DatasetDescriptor],
+) -> dict[str, catalog_schema._ColumnFacts]:
+    return {
+        name: catalog_schema._ColumnFacts(
+            name=name,
             shape=descriptor.shape,
             ndim=descriptor.ndim,
-            is_index_column=is_index_column,
-        ),
-    )
+        )
+        for name, descriptor in descriptors.items()
+    }
 
 
 def _storage_facts_from_descriptor(descriptor: _DatasetDescriptor) -> dict[str, Any]:
@@ -1812,29 +1796,6 @@ def _drop_known_reference_columns(
         logger.debug("skipping TimeSeriesReferenceVectorData column %r", "timeseries")
         descriptors.pop("timeseries", None)
         descriptors.pop("timeseries_index", None)
-
-
-def _is_metadata(descriptors: Mapping[str, _DatasetDescriptor]) -> bool:
-    no_multi_dim_columns = all(value.ndim <= 1 for value in descriptors.values())
-    some_scalar_columns = any(value.ndim == 0 for value in descriptors.values())
-    return (
-        no_multi_dim_columns
-        and some_scalar_columns
-        and not lazynwb.table_metadata._is_timeseries_with_rate(descriptors.keys())
-    )
-
-
-def _get_row_element_shape(
-    *,
-    shape: tuple[int, ...],
-    ndim: int,
-    is_index_column: bool,
-) -> tuple[int, ...] | None:
-    if is_index_column:
-        return None
-    if ndim <= 1:
-        return ()
-    return shape[1:]
 
 
 def _normalize_exact_path(path: str) -> str:

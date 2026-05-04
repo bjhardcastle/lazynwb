@@ -13,9 +13,9 @@ from collections.abc import Iterable, Mapping
 import numpy as np
 
 import lazynwb._cache.sqlite as cache_sqlite
+import lazynwb._catalog._schema as catalog_schema
 import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
-import lazynwb.table_metadata
 import lazynwb.types_
 import lazynwb.utils
 
@@ -123,25 +123,18 @@ class _ZarrBackendReader:
         column_entries = _get_table_column_entries(catalog, exact_table_path)
         if not column_entries:
             raise KeyError(exact_table_path)
-        column_names = tuple(entry.name for entry in column_entries)
-        is_metadata_table = exact_table_path == "general" or _is_metadata(
-            column_entries
+        column_facts = _column_facts_from_zarr_entries(column_entries)
+        table_rules = catalog_schema._get_table_schema_rules(
+            exact_table_path,
+            column_facts.values(),
         )
-        is_timeseries = lazynwb.table_metadata._is_timeseries(column_names)
-        is_timeseries_with_rate = lazynwb.table_metadata._is_timeseries_with_rate(
-            column_names
-        )
-        timeseries_len = _get_timeseries_data_length(column_entries, is_timeseries)
         columns = tuple(
             _column_schema_from_zarr_entry(
                 entry=entry,
+                column_facts=column_facts[entry.name],
                 source_identity=source_identity,
                 table_path=exact_table_path,
-                column_names=column_names,
-                is_metadata_table=is_metadata_table,
-                is_timeseries=is_timeseries,
-                is_timeseries_with_rate=is_timeseries_with_rate,
-                timeseries_len=timeseries_len,
+                table_rules=table_rules,
             )
             for entry in column_entries
         )
@@ -150,7 +143,7 @@ class _ZarrBackendReader:
             table_path=exact_table_path,
             backend="zarr",
             columns=columns,
-            table_length=_get_table_length(columns),
+            table_length=catalog_schema._get_table_length(columns),
         )
 
 
@@ -347,22 +340,18 @@ def _drop_known_reference_entries(names_to_entries: dict[str, _ZarrEntry]) -> No
 
 def _column_schema_from_zarr_entry(
     entry: _ZarrEntry,
+    column_facts: catalog_schema._ColumnFacts,
     source_identity: catalog_models._SourceIdentity,
     table_path: str,
-    column_names: Iterable[str],
-    is_metadata_table: bool,
-    is_timeseries: bool,
-    is_timeseries_with_rate: bool,
-    timeseries_len: int | None,
+    table_rules: catalog_schema._TableSchemaRules,
 ) -> catalog_models._TableColumnSchema:
-    column_names = tuple(column_names)
-    is_nominally_indexed = lazynwb.table_metadata._is_nominally_indexed_column(
+    column_rules = table_rules.column_rules(
         entry.name,
-        column_names,
+        shape=column_facts.shape,
+        ndim=column_facts.ndim,
     )
-    is_index_column = is_nominally_indexed and entry.name.endswith("_index")
-    shape = entry.shape
-    ndim = entry.ndim
+    shape = column_facts.shape
+    ndim = column_facts.ndim
     dataset = catalog_models._DatasetSchema(
         path=entry.path,
         dtype=_neutral_dtype_from_zarr_entry(entry),
@@ -389,27 +378,31 @@ def _column_schema_from_zarr_entry(
         source_path=source_identity.source_url,
         backend="zarr",
         dataset=dataset,
-        is_metadata_table=is_metadata_table,
-        is_timeseries=is_timeseries,
-        is_timeseries_with_rate=is_timeseries_with_rate,
-        is_timeseries_length_aligned=_is_timeseries_length_aligned(
-            is_timeseries=is_timeseries,
-            shape=shape,
-            timeseries_len=timeseries_len,
-        ),
-        is_nominally_indexed=is_nominally_indexed,
-        is_index_column=is_index_column,
-        is_multidimensional=ndim is not None and ndim > 1,
-        index_column_name=lazynwb.table_metadata._get_index_column_name(
-            entry.name,
-            column_names,
-        ),
-        data_column_name=lazynwb.table_metadata._get_data_column_name(
-            entry.name,
-            column_names,
-        ),
-        row_element_shape=_row_element_shape(shape, ndim, is_index_column),
+        is_metadata_table=column_rules.is_metadata_table,
+        is_timeseries=column_rules.is_timeseries,
+        is_timeseries_with_rate=column_rules.is_timeseries_with_rate,
+        is_timeseries_length_aligned=column_rules.is_timeseries_length_aligned,
+        is_nominally_indexed=column_rules.is_nominally_indexed,
+        is_index_column=column_rules.is_index_column,
+        is_multidimensional=column_rules.is_multidimensional,
+        index_column_name=column_rules.index_column_name,
+        data_column_name=column_rules.data_column_name,
+        row_element_shape=column_rules.row_element_shape,
     )
+
+
+def _column_facts_from_zarr_entries(
+    entries: Iterable[_ZarrEntry],
+) -> dict[str, catalog_schema._ColumnFacts]:
+    return {
+        entry.name: catalog_schema._ColumnFacts(
+            name=entry.name,
+            shape=entry.shape,
+            ndim=entry.ndim,
+            is_scalar_metadata=entry.ndim == 0 or entry.shape == (1,),
+        )
+        for entry in entries
+    }
 
 
 def _neutral_dtype_from_zarr_entry(entry: _ZarrEntry) -> catalog_models._NeutralDType:
@@ -469,74 +462,6 @@ def _read_capabilities(entry: _ZarrEntry) -> tuple[str, ...]:
     if _compressor_config(entry) is not None or _filters(entry):
         capabilities.append("filtered")
     return tuple(capabilities)
-
-
-def _is_metadata(entries: Iterable[_ZarrEntry]) -> bool:
-    entries = tuple(entries)
-    no_multi_dim_columns = all(
-        entry.ndim is None or entry.ndim <= 1 for entry in entries
-    )
-    some_scalar_columns = any(entry.ndim == 0 or entry.shape == (1,) for entry in entries)
-    is_timeseries_with_rate = lazynwb.table_metadata._is_timeseries_with_rate(
-        entry.name for entry in entries
-    )
-    return no_multi_dim_columns and some_scalar_columns and not is_timeseries_with_rate
-
-
-def _get_timeseries_data_length(
-    entries: Iterable[_ZarrEntry],
-    is_timeseries: bool,
-) -> int | None:
-    if not is_timeseries:
-        return None
-    for entry in entries:
-        if entry.name == "data" and entry.shape:
-            return entry.shape[0]
-    return None
-
-
-def _is_timeseries_length_aligned(
-    is_timeseries: bool,
-    shape: tuple[int, ...] | None,
-    timeseries_len: int | None,
-) -> bool:
-    if not is_timeseries or timeseries_len is None or not shape:
-        return True
-    return shape[0] == timeseries_len
-
-
-def _get_table_length(
-    columns: Iterable[catalog_models._TableColumnSchema],
-) -> int | None:
-    columns = tuple(columns)
-    columns_by_name = {column.name: column for column in columns}
-    if columns and all(column.is_metadata_table for column in columns):
-        return 1
-    for column in columns:
-        if column.is_nominally_indexed:
-            index_column = columns_by_name.get(column.index_column_name or "")
-            if index_column is not None and index_column.shape is not None:
-                return index_column.shape[0]
-        if column.ndim == 1 and column.shape is not None:
-            return column.shape[0]
-        if column.ndim == 0:
-            return 1
-    for column in columns:
-        if column.shape:
-            return column.shape[0]
-    return None
-
-
-def _row_element_shape(
-    shape: tuple[int, ...] | None,
-    ndim: int | None,
-    is_index_column: bool,
-) -> tuple[int, ...] | None:
-    if shape is None or ndim is None or is_index_column:
-        return None
-    if ndim <= 1:
-        return ()
-    return shape[1:]
 
 
 def _as_sequence(value: object) -> tuple[object, ...]:

@@ -21,6 +21,7 @@ import polars.datatypes.convert
 import tqdm
 import zarr
 
+import lazynwb._catalog._schema as catalog_schema
 import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
 import lazynwb._catalog.polars as catalog_polars
@@ -1027,7 +1028,7 @@ def _materialize_table_data_from_columns(  # noqa: C901
     )
 
     selected_column_names = {column.name for column in selected_columns}
-    indexed_column_names = lazynwb.table_metadata._get_indexed_column_names(
+    indexed_column_names = catalog_schema._get_indexed_column_names(
         selected_column_names
     )
     non_indexed_columns = tuple(
@@ -1703,7 +1704,7 @@ def _get_polars_dtype(
         all_column_names = [raw_column.name for raw_column in all_columns]
         index_cols = [
             c
-            for c in lazynwb.table_metadata._get_indexed_column_names(all_column_names)
+            for c in catalog_schema._get_indexed_column_names(all_column_names)
             if c.startswith(column.name) and c.endswith("_index")
         ]
         for _ in index_cols:

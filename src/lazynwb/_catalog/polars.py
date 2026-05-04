@@ -8,8 +8,8 @@ import polars as pl
 import polars._typing
 import polars.datatypes.convert
 
+import lazynwb._catalog._schema as catalog_schema
 import lazynwb._catalog.models as catalog_models
-import lazynwb.table_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def _get_polars_dtype(
         all_column_names = [raw_column.name for raw_column in all_columns]
         index_cols = [
             column_name
-            for column_name in lazynwb.table_metadata._get_indexed_column_names(
+            for column_name in catalog_schema._get_indexed_column_names(
                 all_column_names
             )
             if column_name.startswith(column.name) and column_name.endswith("_index")

@@ -48,20 +48,17 @@ def test_hdf5_backend_reader_preserves_units_array_catalog_facts(
     reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "catalog.sqlite")
 
     snapshot = asyncio.run(reader.read_table_schema_snapshot("units"))
-    schema = catalog_polars._snapshot_to_polars_schema(snapshot)
-    raw_columns = lazynwb.get_table_column_metadata(local_hdf5_path, "/units")
-    existing_schema = lazynwb.tables.get_table_schema_from_metadata(raw_columns)
     columns_by_name = {column.name: column for column in snapshot.columns}
 
-    assert schema == existing_schema
-    assert columns_by_name["spike_times"].is_nominally_indexed
-    assert columns_by_name["spike_times"].index_column_name == "spike_times_index"
     assert columns_by_name["spike_times"].dataset.path == "units/spike_times"
-    assert columns_by_name["spike_times"].row_element_shape == ()
+    assert columns_by_name["spike_times"].dataset.shape is not None
+    assert columns_by_name["spike_times"].dataset.hdf5_data_offset is not None
+    assert columns_by_name["spike_times"].dataset.hdf5_storage_size is not None
     assert "shape" in columns_by_name["spike_times"].dataset.read_capabilities
-    assert columns_by_name["obs_intervals"].row_element_shape == (2,)
-    assert columns_by_name["waveform_mean"].is_multidimensional
-    assert columns_by_name["waveform_mean"].row_element_shape == (
+    assert columns_by_name["obs_intervals"].dataset.shape is not None
+    assert columns_by_name["obs_intervals"].dataset.shape[1:] == (2,)
+    assert columns_by_name["waveform_mean"].dataset.shape is not None
+    assert columns_by_name["waveform_mean"].dataset.shape[1:] == (
         25,
         384,
     )
@@ -731,12 +728,12 @@ def test_scan_nwb_head_reuses_scan_carried_hdf5_snapshot_for_length(
     assert "scan-carried catalog snapshot" in caplog.text
 
 
-def test_hdf5_backend_reader_matches_metadata_and_timeseries_schema_parity(
+def test_hdf5_backend_reader_preserves_metadata_and_timeseries_backend_facts(
     local_hdf5_path: pathlib.Path,
     tmp_path: pathlib.Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.DEBUG, logger="lazynwb.table_metadata")
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.parser")
     reader = _buffer_hdf5_reader(local_hdf5_path, tmp_path / "catalog.sqlite")
 
     general_snapshot = asyncio.run(reader.read_table_schema_snapshot("general"))
@@ -748,30 +745,22 @@ def test_hdf5_backend_reader_matches_metadata_and_timeseries_schema_parity(
             "processing/behavior/running_speed_with_timestamps"
         )
     )
+    general_columns = {column.name: column for column in general_snapshot.columns}
+    rate_columns = {column.name: column for column in rate_snapshot.columns}
+    timestamps_columns = {column.name: column for column in timestamps_snapshot.columns}
 
-    assert general_snapshot.table_length == 1
-    assert _snapshot_schema(general_snapshot) == _existing_schema(
-        local_hdf5_path, "/general"
-    )
-    assert "session_start_time" in _snapshot_schema(general_snapshot)
-    rate_schema = _snapshot_schema(rate_snapshot)
-    assert rate_schema == _existing_schema(
-        local_hdf5_path,
-        "processing/behavior/running_speed_with_rate",
-    )
-    assert "starting_time" not in rate_schema
-    assert rate_schema["timestamps"] == pl.Float64
-    timestamps_schema = _snapshot_schema(timestamps_snapshot)
-    assert timestamps_schema == _existing_schema(
-        local_hdf5_path,
-        "processing/behavior/running_speed_with_timestamps",
-    )
-    assert {"data", "timestamps"}.issubset(timestamps_schema)
+    assert general_snapshot.backend == "hdf5"
+    assert general_columns["session_start_time"].dataset.path == "session_start_time"
+    assert general_columns["session_start_time"].dataset.hdf5_storage_size is not None
+    assert rate_columns["starting_time"].attrs["rate"] > 0
+    assert rate_columns["starting_time"].dataset.path.endswith("starting_time")
+    assert timestamps_columns["data"].dataset.hdf5_data_offset is not None
+    assert timestamps_columns["timestamps"].dataset.hdf5_data_offset is not None
     assert "using metadata-only schema facts for tiny metadata column" in caplog.text
     assert "resolved selected TimeSeries rate attr" in caplog.text
 
 
-def test_hdf5_backend_timeseries_schema_skips_unaligned_columns(
+def test_hdf5_backend_reader_preserves_unaligned_timeseries_sidecar_facts(
     tmp_path: pathlib.Path,
 ) -> None:
     nwb_path = tmp_path / "unaligned_timeseries.nwb"
@@ -785,10 +774,13 @@ def test_hdf5_backend_timeseries_schema_skips_unaligned_columns(
     reader = _buffer_hdf5_reader(nwb_path, tmp_path / "catalog.sqlite")
 
     snapshot = asyncio.run(reader.read_table_schema_snapshot("acquisition/run"))
-    schema = _snapshot_schema(snapshot)
+    columns_by_name = {column.name: column for column in snapshot.columns}
 
-    assert {"data", "timestamps"}.issubset(schema)
-    assert "short_sidecar" not in schema
+    assert (
+        columns_by_name["short_sidecar"].dataset.path == "acquisition/run/short_sidecar"
+    )
+    assert columns_by_name["short_sidecar"].dataset.shape == (3,)
+    assert columns_by_name["short_sidecar"].dataset.hdf5_data_offset is not None
 
 
 def test_public_multifile_fast_hdf5_preserves_schema_merge_semantics(

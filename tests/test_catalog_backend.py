@@ -89,8 +89,12 @@ def test_accessor_catalog_schema_matches_existing_raw_metadata_schema(
         exact_table_path,
     )
     existing_schema = lazynwb.tables.get_table_schema_from_metadata(raw_columns)
+    existing_table_length = lazynwb.table_metadata.get_table_length_from_metadata(
+        raw_columns
+    )
 
     assert catalog_schema == existing_schema
+    assert snapshot.table_length == existing_table_length
 
 
 def test_accessor_catalog_schema_preserves_units_array_facts(
@@ -171,12 +175,7 @@ def test_zarr_backend_reader_builds_table_schema_snapshots(
     )
 
     snapshot = asyncio.run(reader.read_table_schema_snapshot(exact_table_path))
-    schema = catalog_polars._snapshot_to_polars_schema(snapshot)
-    raw_columns = lazynwb.table_metadata.get_table_column_metadata(
-        local_zarr_path,
-        exact_table_path,
-    )
-    existing_schema = lazynwb.tables.get_table_schema_from_metadata(raw_columns)
+    columns_by_name = {column.name: column for column in snapshot.columns}
 
     assert isinstance(reader, catalog_backend._BackendReader)
     assert reader.used_consolidated_metadata
@@ -184,7 +183,15 @@ def test_zarr_backend_reader_builds_table_schema_snapshots(
     assert snapshot.backend == "zarr"
     assert snapshot.table_path == exact_table_path
     assert snapshot.columns
-    assert schema == existing_schema
+    assert {column.backend for column in snapshot.columns} == {"zarr"}
+    assert all(
+        "metadata" in column.dataset.read_capabilities for column in snapshot.columns
+    )
+    assert any(
+        column.dataset.storage_layout == "chunked"
+        for column in columns_by_name.values()
+        if column.is_dataset
+    )
 
 
 def test_zarr_backend_reader_reuses_sqlite_snapshot(
@@ -222,16 +229,14 @@ def test_zarr_backend_reader_uses_targeted_metadata_without_consolidated(
     )
 
     snapshot = asyncio.run(reader.read_table_schema_snapshot("units"))
-    schema = catalog_polars._snapshot_to_polars_schema(snapshot)
-    raw_columns = lazynwb.table_metadata.get_table_column_metadata(
-        copied_zarr,
-        "/units",
-    )
-    existing_schema = lazynwb.tables.get_table_schema_from_metadata(raw_columns)
+    columns_by_name = {column.name: column for column in snapshot.columns}
 
     assert not reader.used_consolidated_metadata
     assert reader.metadata_read_count > 1
-    assert schema == existing_schema
+    assert columns_by_name["spike_times"].dataset.path == "units/spike_times"
+    assert columns_by_name["spike_times"].dataset.chunks is not None
+    assert columns_by_name["spike_times"].dataset.storage_layout == "chunked"
+    assert "chunked" in columns_by_name["spike_times"].dataset.read_capabilities
 
 
 def test_public_get_table_schema_uses_zarr_backend_for_local_store(
