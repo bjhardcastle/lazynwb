@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import logging
 import pathlib
 import re
@@ -13,6 +14,8 @@ from typing import Any, Literal, cast
 import polars as pl
 import tqdm
 
+import lazynwb._catalog.models as catalog_models
+import lazynwb._hdf5.reader as hdf5_reader
 import lazynwb.base
 import lazynwb.file_io
 import lazynwb.lazyframe
@@ -169,6 +172,11 @@ def convert_nwb_tables(
     if not common_table_paths:
         logger.warning("No common table paths found across NWB files")
         return {}
+
+    _warm_hdf5_schema_snapshots_for_sql_context(
+        nwb_sources=nwb_sources,
+        table_paths=common_table_paths,
+    )
 
     logger.info(
         f"Found {len(common_table_paths)} common table paths: {sorted(common_table_paths)}"
@@ -391,45 +399,47 @@ def get_sql_context(
         logger.warning("No common table paths found across NWB files")
         return {}
 
+    _warm_hdf5_schema_snapshots_for_sql_context(
+        nwb_sources=nwb_sources,
+        table_paths=common_table_paths,
+    )
+
     logger.info(
         f"Found {len(common_table_paths)} common table paths: {sorted(common_table_paths)}"
     )
-    if not full_path:
-        # Normalize paths to just the last part if full_path is False
-        common_table_paths = {
-            lazynwb.utils.normalize_internal_file_path(path)
-            for path in common_table_paths
-        }
-
-    if rename_general_metadata:
-        renaming_map = {"general": "session"}
-        common_table_paths = {
-            renaming_map.get(path, path) for path in common_table_paths
-        }
-
     if table_names is not None:
         # Filter to only include specified table names
-        norm_table_names = {
-            (
-                lazynwb.utils.normalize_internal_file_path(name)
-                if full_path
-                else name.split("/")[-1]
+        requested_table_names = set(table_names)
+        registered_table_names = {
+            _sql_table_name(
+                path,
+                full_path=full_path,
+                rename_general_metadata=rename_general_metadata,
             )
-            for name in table_names
+            for path in common_table_paths
         }
-        if not set(table_names).issubset(norm_table_names):
+        if not requested_table_names.issubset(registered_table_names):
             raise ValueError(
-                f"{table_names=} do not all match paths in NWB files: {norm_table_names}"
+                f"{table_names=} do not all match paths in NWB files: {registered_table_names}"
                 f" ({full_path=} can be toggled to use just the last part of the path)"
             )
-        common_table_paths = sorted(set(common_table_paths) & set(table_names))
+        common_table_paths = {
+            path
+            for path in common_table_paths
+            if _sql_table_name(
+                path,
+                full_path=full_path,
+                rename_general_metadata=rename_general_metadata,
+            )
+            in requested_table_names
+        }
 
     sql_context = pl.SQLContext(**sqlcontext_kwargs)
     for table_path in sorted(common_table_paths):
-        table_name = (
-            lazynwb.utils.normalize_internal_file_path(table_path)
-            if full_path
-            else table_path.split("/")[-1]
+        table_name = _sql_table_name(
+            table_path,
+            full_path=full_path,
+            rename_general_metadata=rename_general_metadata,
         )
 
         logger.info(f"Adding {table_path} as {table_name}")
@@ -449,6 +459,19 @@ def get_sql_context(
     return sql_context
 
 
+def _sql_table_name(
+    table_path: str,
+    *,
+    full_path: bool,
+    rename_general_metadata: bool,
+) -> str:
+    normalized_path = lazynwb.utils.normalize_internal_file_path(table_path)
+    table_name = normalized_path if full_path else normalized_path.split("/")[-1]
+    if rename_general_metadata and normalized_path == "general":
+        return "session"
+    return table_name
+
+
 def _find_common_paths(
     nwb_sources: tuple[lazynwb.types_.PathLike, ...],
     min_file_count: int,
@@ -463,13 +486,9 @@ def _find_common_paths(
     with concurrent.futures.ThreadPoolExecutor() as executor:
         for nwb_path in nwb_sources:
             future = executor.submit(
-                lazynwb.file_io.get_internal_paths,
-                nwb_path=nwb_path,
-                include_arrays=include_timeseries,  # We only want table-like structures
-                include_table_columns=False,
-                include_metadata=True,
-                include_specifications=False,
-                parents=True,  # Include table groups themselves
+                _get_internal_paths_for_discovery,
+                nwb_path,
+                include_timeseries,
             )
             future_to_path[future] = nwb_path
 
@@ -525,6 +544,75 @@ def _find_common_paths(
     return common_paths
 
 
+def _warm_hdf5_schema_snapshots_for_sql_context(
+    nwb_sources: tuple[lazynwb.types_.PathLike, ...],
+    table_paths: Iterable[str],
+) -> None:
+    exact_table_paths = tuple(
+        dict.fromkeys(
+            lazynwb.utils.normalize_internal_file_path(table_path)
+            for table_path in table_paths
+        )
+    )
+    if not exact_table_paths:
+        return
+    for nwb_source in nwb_sources:
+        if not hdf5_reader._is_fast_hdf5_candidate(nwb_source):
+            continue
+        reader = hdf5_reader._default_hdf5_backend_reader(nwb_source)
+        request_count_before = int(getattr(reader._range_reader, "request_count", 0))
+        fetched_bytes_before = int(getattr(reader._range_reader, "bytes_fetched", 0))
+        try:
+            results = lazynwb.tables._run_async_value(
+                reader._read_table_schema_snapshots(exact_table_paths)
+            )
+        except hdf5_reader._NotHDF5Error:
+            logger.debug("SQL context HDF5 multi-table scan skipped non-HDF5 %r", nwb_source)
+            continue
+        except Exception as exc:
+            logger.debug(
+                "SQL context HDF5 multi-table scan failed for %r: %r",
+                nwb_source,
+                exc,
+            )
+            continue
+        finally:
+            with contextlib.suppress(Exception):
+                lazynwb.tables._run_async_value(reader.close())
+        ok_count = sum(result.ok for result in results.values())
+        failure_count = len(results) - ok_count
+        request_count = int(getattr(reader._range_reader, "request_count", 0))
+        fetched_bytes = int(getattr(reader._range_reader, "bytes_fetched", 0))
+        logger.debug(
+            "SQL context HDF5 multi-table scan for %r: tables=%d ok=%d "
+            "failures=%d requests=%d bytes=%d cache_writes=%d",
+            nwb_source,
+            len(exact_table_paths),
+            ok_count,
+            failure_count,
+            request_count - request_count_before,
+            fetched_bytes - fetched_bytes_before,
+            ok_count,
+        )
+        for table_path, result in results.items():
+            if result.ok:
+                logger.debug(
+                    "SQL context HDF5 multi-table scan cached %r/%s "
+                    "(requests=%d bytes=%d)",
+                    nwb_source,
+                    table_path,
+                    result.request_count,
+                    result.fetched_bytes,
+                )
+            else:
+                logger.debug(
+                    "SQL context HDF5 multi-table scan table failure %r/%s: %r",
+                    nwb_source,
+                    table_path,
+                    result.error,
+                )
+
+
 def _filter_table_paths(internal_paths: dict[str, Any]) -> list[str]:
     """Filter internal paths to identify table-like structures."""
     table_paths = []
@@ -540,12 +628,12 @@ def _filter_table_paths(internal_paths: dict[str, Any]) -> list[str]:
                 "/trials",
                 "/epochs",
             ]
-        ) and lazynwb.file_io.is_group(accessor):
+        ) and _is_group_path_entry(accessor):
             table_paths.append(path)
             continue
 
         # Check if the accessor has table-like attributes
-        attrs = getattr(accessor, "attrs", {})
+        attrs = _path_entry_attrs(accessor)
         if "colnames" in attrs:  # Standard NWB table indicator
             table_paths.append(path)
             continue
@@ -561,22 +649,37 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
         # Check if the accessor has TimeSeries-like attributes
         if path.endswith("/data") or path.endswith("/timestamps"):
             continue
-        if not lazynwb.file_io.is_group(accessor):
+        if not _is_group_path_entry(accessor):
             continue
-        attrs = getattr(accessor, "attrs", {})
+        attrs = _path_entry_attrs(accessor)
 
         try:
             if (
                 # required attributes for TimeSeries objects
                 (
-                    "timestamps" in accessor
-                    or "rate" in getattr(accessor.get("starting_time", {}), "attrs", {})
+                    f"{path}/timestamps" in internal_paths
+                    or (
+                        "timestamps" in accessor
+                        if not isinstance(accessor, catalog_models._PathSummaryEntry)
+                        else False
+                    )
+                    or _path_entry_has_rate_starting_time(path, accessor, internal_paths)
                 )
                 or
                 # try to accommodate possible variants
                 (
                     "series" in attrs.get("neurodata_type", "").lower()
-                    and "data" in accessor
+                    and (
+                        f"{path}/data" in internal_paths
+                        or (
+                            "data" in accessor
+                            if not isinstance(
+                                accessor,
+                                catalog_models._PathSummaryEntry,
+                            )
+                            else False
+                        )
+                    )
                 )
             ):
                 timeseries_paths.append(path)
@@ -584,6 +687,62 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
             continue
 
     return timeseries_paths
+
+
+def _get_internal_paths_for_discovery(
+    nwb_path: lazynwb.types_.PathLike,
+    include_timeseries: bool,
+) -> dict[str, Any]:
+    summary = lazynwb.file_io._get_catalog_path_summary_if_available(
+        nwb_path=nwb_path,
+        include_arrays=include_timeseries,
+        include_table_columns=False,
+        include_metadata=True,
+        include_specifications=False,
+        parents=True,
+    )
+    if summary is not None:
+        logger.debug("path discovery used catalog summary for %r", nwb_path)
+        return summary
+    logger.debug("path discovery falling back to accessor traversal for %r", nwb_path)
+    return lazynwb.file_io.get_internal_paths(
+        nwb_path=nwb_path,
+        include_arrays=include_timeseries,
+        include_table_columns=False,
+        include_metadata=True,
+        include_specifications=False,
+        parents=True,
+    )
+
+
+def _is_group_path_entry(accessor: Any) -> bool:
+    if isinstance(accessor, catalog_models._PathSummaryEntry):
+        return accessor.is_group
+    if isinstance(accessor, dict):
+        return bool(accessor.get("is_group", False))
+    return lazynwb.file_io.is_group(accessor)
+
+
+def _path_entry_attrs(accessor: Any) -> dict[str, Any]:
+    if isinstance(accessor, dict):
+        return dict(accessor.get("attrs", {}))
+    return dict(getattr(accessor, "attrs", {}))
+
+
+def _path_entry_has_rate_starting_time(
+    path: str,
+    accessor: Any,
+    internal_paths: dict[str, Any],
+) -> bool:
+    starting_time = internal_paths.get(f"{path}/starting_time")
+    if starting_time is not None:
+        return "rate" in _path_entry_attrs(starting_time)
+    if isinstance(accessor, catalog_models._PathSummaryEntry) or isinstance(
+        accessor,
+        dict,
+    ):
+        return False
+    return "rate" in getattr(accessor.get("starting_time", {}), "attrs", {})
 
 
 def _table_path_to_output_path(

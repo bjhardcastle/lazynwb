@@ -1,0 +1,606 @@
+from __future__ import annotations
+
+import asyncio
+import datetime
+import logging
+import pathlib
+
+import pytest
+
+import lazynwb
+import lazynwb._hdf5.range_reader as hdf5_range_reader
+import lazynwb._storage_options as storage_options
+
+
+def test_buffer_range_reader_raises_on_short_response() -> None:
+    reader = hdf5_range_reader._BufferRangeReader(b"abc")
+
+    with pytest.raises(hdf5_range_reader._RangeReadError, match="short range"):
+        asyncio.run(reader.read_range(1, length=8))
+
+
+def test_buffer_range_reader_coalesces_aligned_ranges() -> None:
+    reader = hdf5_range_reader._BufferRangeReader(
+        bytes(range(64)),
+        config=hdf5_range_reader._RangeReaderConfig(range_alignment=16),
+    )
+    ranges = (
+        hdf5_range_reader._ByteRange(1, 4),
+        hdf5_range_reader._ByteRange(14, 16),
+        hdf5_range_reader._ByteRange(33, 35),
+    )
+
+    payloads = asyncio.run(reader.read_ranges(ranges))
+
+    assert payloads[hdf5_range_reader._ByteRange(1, 4)] == bytes([1, 2, 3])
+    assert payloads[hdf5_range_reader._ByteRange(14, 16)] == bytes([14, 15])
+    assert payloads[hdf5_range_reader._ByteRange(33, 35)] == bytes([33, 34])
+    assert reader.request_count == 2
+    assert reader.bytes_fetched == 32
+
+
+def test_source_identity_from_obstore_metadata() -> None:
+    metadata = {
+        "size": 123,
+        "version": "version-1",
+        "e_tag": "etag-1",
+        "last_modified": datetime.datetime(
+            2026,
+            5,
+            3,
+            tzinfo=datetime.timezone.utc,
+        ),
+    }
+
+    identity = hdf5_range_reader._source_identity_from_metadata(
+        "s3://bucket/file.nwb",
+        metadata,
+    )
+
+    assert identity.source_url == "s3://bucket/file.nwb"
+    assert identity.content_length == 123
+    assert identity.version_id == "version-1"
+    assert identity.etag == "etag-1"
+    assert identity.validator_kind == "version_id"
+
+
+def test_s3_region_discovery_adds_region_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="aind-scratch-data",
+        storage_options={"skip_signature": True},
+    )
+
+    assert options == {"skip_signature": True, "region": "us-west-2"}
+
+
+def test_s3_region_discovery_overrides_wrong_configured_region(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._storage_options")
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="aind-scratch-data",
+        storage_options={"skip_signature": True, "region": "eu-west-1"},
+    )
+
+    assert options == {"skip_signature": True, "region": "us-west-2"}
+    assert "overriding configured S3 region for aind-scratch-data" in caplog.text
+
+
+def test_s3_region_discovery_translates_aws_region_for_normal_s3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-east-2",
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="aind-private-data",
+        storage_options={"skip_signature": False, "aws_region": "us-west-2"},
+    )
+
+    assert options == {"skip_signature": False, "region": "us-east-2"}
+
+
+def test_s3_region_discovery_preserves_custom_endpoint_region(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._storage_options")
+
+    def _fail_discovery(bucket: str) -> str:
+        raise AssertionError("custom S3 endpoints should not discover AWS regions")
+
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        _fail_discovery,
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="local-bucket",
+        storage_options={
+            "endpoint": "http://localhost:9000",
+            "region": "local",
+            "skip_signature": True,
+        },
+    )
+
+    assert options == {
+        "endpoint": "http://localhost:9000",
+        "region": "local",
+        "skip_signature": True,
+    }
+    assert "custom endpoint is configured" in caplog.text
+
+
+def test_s3_region_discovery_preserves_endpoint_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    monkeypatch.setenv("AWS_ENDPOINT_URL", "http://localhost:9000")
+
+    def _fail_discovery(bucket: str) -> str:
+        raise AssertionError("custom S3 endpoint env should skip AWS region discovery")
+
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        _fail_discovery,
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="local-bucket",
+        storage_options={"region": "local"},
+    )
+
+    assert options == {"region": "local"}
+
+
+def test_s3_region_discovery_caches_region_by_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._storage_options")
+    calls: list[str] = []
+
+    class _FakeS3RegionResponse:
+        def __init__(self, region: str) -> None:
+            self.headers = {"x-amz-bucket-region": region}
+
+        def __enter__(self) -> _FakeS3RegionResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def _fake_urlopen(
+        request: storage_options.urllib.request.Request,
+        timeout: float,
+    ) -> _FakeS3RegionResponse:
+        del timeout
+        url = request.full_url
+        calls.append(url)
+        if url == "https://bucket-a.s3.amazonaws.com":
+            return _FakeS3RegionResponse("us-west-2")
+        if url == "https://bucket-b.s3.amazonaws.com":
+            return _FakeS3RegionResponse("us-east-1")
+        raise AssertionError(url)
+
+    monkeypatch.setattr(storage_options.urllib.request, "urlopen", _fake_urlopen)
+
+    first = hdf5_range_reader._add_discovered_s3_region(
+        bucket="bucket-a",
+        storage_options={},
+    )
+    second = hdf5_range_reader._add_discovered_s3_region(
+        bucket="bucket-b",
+        storage_options={},
+    )
+    cached = hdf5_range_reader._add_discovered_s3_region(
+        bucket="bucket-a",
+        storage_options={},
+    )
+
+    assert first == {"region": "us-west-2"}
+    assert second == {"region": "us-east-1"}
+    assert cached == {"region": "us-west-2"}
+    assert calls == [
+        "https://bucket-a.s3.amazonaws.com",
+        "https://bucket-b.s3.amazonaws.com",
+    ]
+    assert "reusing cached S3 bucket region for bucket-a" in caplog.text
+
+
+def test_s3_region_discovery_logs_not_discoverable(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    hdf5_range_reader._clear_s3_region_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._storage_options")
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: None,
+    )
+
+    options = hdf5_range_reader._add_discovered_s3_region(
+        bucket="unknown-bucket",
+        storage_options={"region": "us-west-2"},
+    )
+
+    assert options == {"region": "us-west-2"}
+    assert "S3 bucket region not discoverable for unknown-bucket" in caplog.text
+
+
+def test_obstore_store_cache_reuses_store_for_same_bucket_options(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stores = [object()]
+    calls: list[tuple[str, dict[str, object]]] = []
+    hdf5_range_reader._clear_obstore_store_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.range_reader")
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append((store_url, kwargs))
+        return stores[0]
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+    config = hdf5_range_reader._RangeReaderConfig(
+        storage_options={"region": "us-west-2", "skip_signature": True},
+    )
+
+    try:
+        first_store, first_path = hdf5_range_reader._store_and_path_from_url(
+            "s3://aind-scratch-data/first.nwb",
+            config,
+        )
+        second_store, second_path = hdf5_range_reader._store_and_path_from_url(
+            "s3://aind-scratch-data/second.nwb",
+            config,
+        )
+
+        assert first_store is second_store
+        assert first_path == "first.nwb"
+        assert second_path == "second.nwb"
+        assert [call[0] for call in calls] == ["s3://aind-scratch-data"]
+        assert "obstore store cache miss for s3://aind-scratch-data" in caplog.text
+        assert "obstore store cache hit for s3://aind-scratch-data" in caplog.text
+    finally:
+        hdf5_range_reader._clear_obstore_store_cache()
+
+
+def test_obstore_store_cache_distinguishes_options_client_and_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = [object(), object(), object(), object()]
+    calls: list[tuple[str, dict[str, object]]] = []
+    hdf5_range_reader._clear_obstore_store_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append((store_url, kwargs))
+        return stores[len(calls) - 1]
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+
+    try:
+        first = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            region="us-west-2",
+            skip_signature=True,
+        )
+        same_options = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            region="us-west-2",
+            skip_signature=True,
+        )
+        different_region = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            region="us-east-1",
+            skip_signature=True,
+        )
+        different_client = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            client_options={"timeout": "short"},
+            region="us-west-2",
+            skip_signature=True,
+        )
+        different_retry = hdf5_range_reader._cached_store_from_url(
+            "s3://aind-scratch-data",
+            retry_config={"max_retries": 1},
+            region="us-west-2",
+            skip_signature=True,
+        )
+
+        assert same_options is first
+        assert different_region is not first
+        assert different_client is not first
+        assert different_retry is not first
+        assert len(calls) == 4
+    finally:
+        hdf5_range_reader._clear_obstore_store_cache()
+
+
+def test_clear_cache_resets_obstore_store_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = [object(), object()]
+    calls: list[str] = []
+    hdf5_range_reader._clear_obstore_store_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append(store_url)
+        return stores[len(calls) - 1]
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+    config = hdf5_range_reader._RangeReaderConfig(
+        storage_options={"region": "us-west-2", "skip_signature": True},
+    )
+
+    try:
+        first_store, _ = hdf5_range_reader._store_and_path_from_url(
+            "s3://aind-scratch-data/first.nwb",
+            config,
+        )
+        lazynwb.clear_cache()
+        second_store, _ = hdf5_range_reader._store_and_path_from_url(
+            "s3://aind-scratch-data/second.nwb",
+            config,
+        )
+
+        assert first_store is stores[0]
+        assert second_store is stores[1]
+        assert calls == ["s3://aind-scratch-data", "s3://aind-scratch-data"]
+    finally:
+        hdf5_range_reader._clear_obstore_store_cache()
+
+
+def test_obstore_source_identity_cache_reuses_head_for_same_source(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = object()
+    head_calls: list[tuple[object, str]] = []
+    hdf5_range_reader._clear_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.range_reader")
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        return store
+
+    async def _fake_head_async(store_arg: object, path: str) -> dict[str, object]:
+        head_calls.append((store_arg, path))
+        return {
+            "size": 123,
+            "version": "version-1",
+            "location": "s3://aind-scratch-data/file.nwb",
+        }
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+    config = hdf5_range_reader._RangeReaderConfig(
+        storage_options={"region": "us-west-2", "skip_signature": True},
+    )
+
+    try:
+        first_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            config,
+        )
+        first_identity = asyncio.run(first_reader.get_source_identity())
+        second_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            config,
+        )
+        second_identity = asyncio.run(second_reader.get_source_identity())
+
+        assert first_identity == second_identity
+        assert first_identity.validator_kind == "version_id"
+        assert head_calls == [(store, "file.nwb")]
+        assert "source identity cache miss for s3://aind-scratch-data/file.nwb" in caplog.text
+        assert "source identity cache hit for s3://aind-scratch-data/file.nwb" in caplog.text
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_clear_cache_resets_obstore_source_identity_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = [object(), object()]
+    head_calls: list[tuple[object, str]] = []
+    hdf5_range_reader._clear_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        return stores[min(len(head_calls), 1)]
+
+    async def _fake_head_async(store_arg: object, path: str) -> dict[str, object]:
+        head_calls.append((store_arg, path))
+        return {"size": 123, "version": f"version-{len(head_calls)}"}
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+    config = hdf5_range_reader._RangeReaderConfig(
+        storage_options={"region": "us-west-2", "skip_signature": True},
+    )
+
+    try:
+        first_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            config,
+        )
+        first_identity = asyncio.run(first_reader.get_source_identity())
+        lazynwb.clear_cache()
+        second_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            config,
+        )
+        second_identity = asyncio.run(second_reader.get_source_identity())
+
+        assert first_identity.version_id == "version-1"
+        assert second_identity.version_id == "version-2"
+        assert [call[1] for call in head_calls] == ["file.nwb", "file.nwb"]
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_obstore_source_identity_cache_distinguishes_auth_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    head_calls: list[tuple[dict[str, object], str]] = []
+    hdf5_range_reader._clear_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> dict[str, object]:
+        return {"store_url": store_url, "options": kwargs}
+
+    async def _fake_head_async(
+        store_arg: dict[str, object],
+        path: str,
+    ) -> dict[str, object]:
+        options = store_arg["options"]
+        assert isinstance(options, dict)
+        head_calls.append((options, path))
+        auth_mode = "unsigned" if options.get("skip_signature") else "signed"
+        return {"size": 123, "version": f"{auth_mode}-version"}
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+
+    try:
+        unsigned_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            hdf5_range_reader._RangeReaderConfig(
+                storage_options={"region": "us-west-2", "skip_signature": True},
+            ),
+        )
+        signed_reader = hdf5_range_reader._ObstoreRangeReader(
+            "s3://aind-scratch-data/file.nwb",
+            hdf5_range_reader._RangeReaderConfig(
+                storage_options={"region": "us-west-2", "skip_signature": False},
+            ),
+        )
+
+        unsigned_identity = asyncio.run(unsigned_reader.get_source_identity())
+        signed_identity = asyncio.run(signed_reader.get_source_identity())
+
+        assert unsigned_identity.version_id == "unsigned-version"
+        assert signed_identity.version_id == "signed-version"
+        assert len(head_calls) == 2
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_source_identity_cache_key_distinguishes_resolved_url() -> None:
+    common_kwargs = {
+        "client_options": None,
+        "retry_config": None,
+        "storage_options": {"region": "us-west-2", "skip_signature": True},
+    }
+
+    unresolved_key = hdf5_range_reader._source_identity_cache_key(
+        "s3://aind-scratch-data/file.nwb",
+        resolved_url=None,
+        **common_kwargs,
+    )
+    resolved_key = hdf5_range_reader._source_identity_cache_key(
+        "s3://aind-scratch-data/file.nwb",
+        resolved_url="https://aind-scratch-data.s3.us-west-2.amazonaws.com/file.nwb",
+        **common_kwargs,
+    )
+
+    assert unresolved_key != resolved_key
+
+
+def test_probe_hdf5_signature_at_zero() -> None:
+    reader = hdf5_range_reader._BufferRangeReader(
+        hdf5_range_reader._HDF5_SIGNATURE + b"\x00" * 32
+    )
+
+    result = asyncio.run(hdf5_range_reader._probe_hdf5_signature(reader))
+
+    assert result.is_hdf5
+    assert result.signature_offset == 0
+    assert result.checked_offsets == (0,)
+
+
+def test_probe_hdf5_signature_at_later_valid_superblock_offset() -> None:
+    reader = hdf5_range_reader._BufferRangeReader(
+        (b"\x00" * 512) + hdf5_range_reader._HDF5_SIGNATURE + b"\x00" * 32
+    )
+
+    result = asyncio.run(hdf5_range_reader._probe_hdf5_signature(reader))
+
+    assert result.is_hdf5
+    assert result.signature_offset == 512
+    assert result.checked_offsets == (0, 512)
+
+
+def test_probe_hdf5_signature_rejects_non_hdf5_content() -> None:
+    reader = hdf5_range_reader._BufferRangeReader(b"not an hdf5 file" + b"\x00" * 600)
+
+    result = asyncio.run(
+        hdf5_range_reader._probe_hdf5_signature(reader, max_probe_offset=512)
+    )
+
+    assert not result.is_hdf5
+    assert result.signature_offset is None
+    assert result.checked_offsets == (0, 512)
+
+
+def test_obstore_range_reader_reads_local_file_url(tmp_path: pathlib.Path) -> None:
+    path = tmp_path / "object.nwb"
+    path.write_bytes(b"0123456789abcdef")
+    reader = hdf5_range_reader._ObstoreRangeReader(path.as_uri())
+
+    identity = asyncio.run(reader.get_source_identity())
+    payload = asyncio.run(reader.read_range(2, length=4))
+
+    assert identity.source_url == path.as_uri()
+    assert identity.content_length == 16
+    assert identity.validator_kind in {"etag", "last_modified_content_length"}
+    assert payload == b"2345"

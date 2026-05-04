@@ -158,8 +158,8 @@ def discover_contents(nwb_path: str) -> dict:
 
     tables = []
     timeseries = []
-    for p, obj in paths.items():
-        attrs = dict(getattr(obj, "attrs", {}))
+    for p, metadata in paths.items():
+        attrs = dict(metadata.get("attrs", {}))
         if "colnames" in attrs:
             tables.append(p)
         elif p.endswith("/data") or p.endswith("/timestamps"):

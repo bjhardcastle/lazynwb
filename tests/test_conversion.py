@@ -146,8 +146,8 @@ def test_sql_context(nwb_fixture_name, request):
         "units",
         "processing/behavior/running_speed_with_timestamps",
         "processing/behavior/running_speed_with_rate",
-        "general",
         "general/subject",
+        "session",
     ]
     tables = sql_context.tables()
     for table in expected_tables:

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 
 import polars as pl
 import polars._typing
 import polars.io.plugins
 
+import lazynwb._catalog.models as catalog_models
+import lazynwb.file_io
 import lazynwb.tables
 import lazynwb.types_
 
@@ -73,8 +75,9 @@ def scan_nwb(
     if not source:
         raise ValueError("No NWB source files provided.")
 
+    scan_catalog_snapshots = {}
     if not schema:
-        schema = lazynwb.tables.get_table_schema(
+        schema_result = lazynwb.tables._get_table_schema_with_catalog_snapshots(
             file_paths=source,
             table_path=table_path,
             first_n_files_to_infer_schema=infer_schema_length,
@@ -82,6 +85,8 @@ def scan_nwb(
             exclude_internal_columns=False,
             raise_on_missing=raise_on_missing,
         )
+        schema = schema_result.schema
+        scan_catalog_snapshots = schema_result.catalog_snapshots
     schema = pl.Schema(schema) | pl.Schema(
         schema_overrides or {}
     )  # create new object to avoid mutating the original schema
@@ -146,7 +151,13 @@ def scan_nwb(
             sum_rows = 0
             for idx, file in enumerate(source):
                 try:
-                    sum_rows += lazynwb.tables._get_table_length(file, table_path)
+                    sum_rows += lazynwb.tables._get_table_length(
+                        file,
+                        table_path,
+                        catalog_snapshot=scan_catalog_snapshots.get(
+                            lazynwb.tables._catalog_snapshot_key(file)
+                        ),
+                    )
                 except KeyError:
                     continue
                 if sum_rows >= n_rows:
@@ -160,11 +171,29 @@ def scan_nwb(
             )
         else:
             filtered_files = source
+        nwb_path_to_row_indices = None
+        nwb_data_sources = filtered_files
+        if predicate is None and n_rows is not None:
+            nwb_path_to_row_indices = _get_limited_path_to_row_indices(
+                source=filtered_files,
+                table_path=table_path,
+                n_rows=n_rows,
+                catalog_snapshots=scan_catalog_snapshots,
+            )
+            nwb_data_sources = tuple(nwb_path_to_row_indices)
+            logger.debug(
+                "Limiting initial %r materialization to %d rows across %d files",
+                table_path,
+                n_rows,
+                len(nwb_path_to_row_indices),
+            )
+
         df = lazynwb.tables.get_df(
-            nwb_data_sources=filtered_files,
+            nwb_data_sources=nwb_data_sources,
             search_term=table_path,
             exact_path=True,
             include_column_names=initial_columns or None,
+            nwb_path_to_row_indices=nwb_path_to_row_indices,
             disable_progress=disable_progress,
             ignore_errors=ignore_errors,
             as_polars=True,
@@ -176,6 +205,7 @@ def scan_nwb(
                 # this setting. Otherwise, use the user setting.
             ),
             low_memory=low_memory,
+            _catalog_snapshots=scan_catalog_snapshots,
         )
 
         if predicate is None:
@@ -230,6 +260,7 @@ def scan_nwb(
                                     as_polars=True,
                                     ignore_errors=ignore_errors,
                                     low_memory=low_memory,
+                                    _catalog_snapshots=scan_catalog_snapshots,
                                 )
                             ),
                             on=[
@@ -249,6 +280,42 @@ def scan_nwb(
     return polars.io.plugins.register_io_source(
         io_source=source_generator, schema=schema
     )
+
+
+def _get_limited_path_to_row_indices(
+    source: Iterable[lazynwb.types_.PathLike],
+    table_path: str,
+    n_rows: int,
+    catalog_snapshots: Mapping[
+        str,
+        catalog_models._TableSchemaSnapshot,
+    ]
+    | None = None,
+) -> dict[str, list[int]]:
+    remaining_rows = n_rows
+    path_to_row_indices: dict[str, list[int]] = {}
+    for file in source:
+        if remaining_rows <= 0:
+            break
+        try:
+            table_length = lazynwb.tables._get_table_length(
+                file,
+                table_path,
+                catalog_snapshot=(
+                    catalog_snapshots.get(lazynwb.tables._catalog_snapshot_key(file))
+                    if catalog_snapshots is not None
+                    else None
+                ),
+            )
+        except KeyError:
+            continue
+        row_count = min(remaining_rows, table_length)
+        if row_count > 0:
+            path_to_row_indices[
+                lazynwb.file_io.from_pathlike(file).as_posix()
+            ] = list(range(row_count))
+        remaining_rows -= row_count
+    return path_to_row_indices
 
 
 def read_nwb(

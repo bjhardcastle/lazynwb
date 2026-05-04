@@ -125,6 +125,19 @@ to reproduce or run against your own files:
 python benchmarks/streaming_benchmark.py [NWB_PATH]
 ```
 
+Schema inference latency for the remote dynamic-routing workload can be measured
+with [benchmarks/schema_benchmark.py](benchmarks/schema_benchmark.py):
+```
+uv run python benchmarks/schema_benchmark.py
+LAZYNWB_SCHEMA_BENCH_JSON=metrics.json uv run python benchmarks/schema_benchmark.py
+LAZYNWB_SCHEMA_BENCH_UNITS_SOURCES_FILE=tests/paths.txt uv run python benchmarks/schema_benchmark.py
+```
+
+The schema benchmark uses an isolated temporary catalog cache, defaults to
+anonymous public object-store access, and reports cold/warm totals plus per-source
+range GET counts, fetched bytes, and timings. Useful environment variables are
+documented in the script docstring.
+
 ## Why not to use lazynwb
 
 - some convenience features of `pynwb` will not be available, for example object references in tables
@@ -348,9 +361,9 @@ Returns columns including `identifier`, `session_id`, `session_start_time`,
 See what's inside an NWB file:
 ```python
 paths = lazynwb.get_internal_paths('my_file.nwb')
-# {'/acquisition/lick_sensor_events/data': <HDF5 dataset ...>,
-#  '/intervals/trials': <HDF5 group ...>,
-#  '/units': <HDF5 group ...>,
+# {'/acquisition/lick_sensor_events/data': {'is_dataset': True, 'shape': (120,), ...},
+#  '/intervals/trials': {'is_group': True, 'attrs': {'colnames': ...}, ...},
+#  '/units': {'is_group': True, 'attrs': {'colnames': ...}, ...},
 #  ...}
 ```
 
@@ -442,9 +455,16 @@ from lazynwb.file_io import config
 config.use_obstore = True                         # use obstore for S3/GCS/Azure (default: False)
 config.use_remfile = False                        # use remfile for HTTP byte-range requests (default: True)
 config.anon = True                                # anonymous access across backends
-config.fsspec_storage_options = {"region": "us-west-2"}  # backend-specific extras if needed
+config.fsspec_storage_options = {"request_payer": True}  # backend-specific extras if needed
 config.disable_cache = False                      # disable FileAccessor caching (default: False)
 ```
+
+For normal AWS S3 buckets, the region belongs to the bucket, not the caller's
+current AWS session. The fast HDF5 range reader discovers and caches bucket
+regions per bucket, so avoid setting a generic `{"region": "..."}` for workflows
+that may mix buckets from different AWS regions. Keep explicit region or endpoint
+settings for S3-compatible storage such as localstack, MinIO, or R2, where they
+describe that custom service rather than an AWS bucket location.
 
 ---
 

@@ -19,8 +19,10 @@ dependencies = [
     "dotenv>=0.9.9",
     "s3fs>=2025.7.0",
     "requests>=2.32.4",
-    "obstore>=0.8.2",
+    "obstore>=0.9.1",
     "pydantic-settings>=2.11.0",
+    "aiosqlite>=0.20.0",
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
 version = "0.2.90"
 classifiers = [
@@ -48,6 +50,7 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
+lazynwb = "lazynwb._cli._main:main"
 task = "poethepoet:main"
 
 [project.optional-dependencies]
@@ -170,6 +173,8 @@ addopts = [
     "--cov-config=pyproject.toml",
     "--doctest-glob=*README.md",
     "-x",
+    "-m",
+    "not integration",
     # "-n=auto", for use with pytest-xdist
 ]
 doctest_optionflags = [
@@ -178,6 +183,10 @@ doctest_optionflags = [
     "ELLIPSIS",
 ]
 testpaths = ["src", "tests"]
+markers = [
+    "integration: tests that make real network calls or require external services",
+    "remote_schema_budget: opt-in remote HDF5 schema request-budget tests",
+]
 
 [tool.mypy]
 check_untyped_defs = false

@@ -213,7 +213,7 @@ def get_timeseries(
     elif not match_all and search_term and is_in_file:
         return TimeSeries(_file_path=nwb_path, _table_path=_format(search_term))
     else:
-        path_to_accessor = {
+        path_to_timeseries = {
             _format(k): TimeSeries(_file_path=nwb_path, _table_path=_format(k))
             for k in lazynwb.file_io.get_internal_paths(nwb_path)
             if k.split("/")[-1] in ("data", "timestamps")
@@ -222,12 +222,14 @@ def get_timeseries(
             # eventseries will be a dir with /timestamps only
         }
         if match_all:
-            return path_to_accessor
-        if len(path_to_accessor) > 1:
+            return path_to_timeseries
+        if len(path_to_timeseries) > 1:
             logger.warning(
-                f"Found multiple timeseries matching {search_term!r}: {list(path_to_accessor.keys())} - returning first"
+                "Found multiple timeseries matching %r: %s - returning first",
+                search_term,
+                list(path_to_timeseries.keys()),
             )
-        return next(iter(path_to_accessor.values()))
+        return next(iter(path_to_timeseries.values()))
 
 
 if __name__ == "__main__":

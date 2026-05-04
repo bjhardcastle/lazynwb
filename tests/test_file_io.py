@@ -1,4 +1,5 @@
 import pathlib
+import typing
 from collections.abc import Iterable
 
 import pytest
@@ -33,7 +34,10 @@ def test_file_accessor(nwb_fixture_name, request):
     assert "units" in accessor, "__contains__() failing, or NWB fixture has changed"
     assert "/units" in accessor, "__contains__() failling to normalize path"
     assert accessor.get("units") is not None, "get() should return an object"
-    assert next(iter(accessor), None) is not None, "Accessor should be iterable and yield at least one item"
+    assert (
+        next(iter(accessor), None) is not None
+    ), "Accessor should be iterable and yield at least one item"
+
 
 def test_file_accessor_caching(local_hdf5_path: pathlib.Path) -> None:
     """Test that FileAccessor instances are cached and reused."""
@@ -120,6 +124,56 @@ def test_open_single_and_multiple(local_hdf5_paths: list[pathlib.Path]) -> None:
     assert "units" in accessors[1]
 
 
+def test_open_file_prefers_zarr_when_zarr_word_is_in_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    sentinel = object()
+
+    def _unexpected_hdf5_open(
+        *args: object,
+        **kwargs: object,
+    ) -> typing.NoReturn:
+        raise AssertionError("HDF5 should not be opened before a Zarr-looking URI")
+
+    def _zarr_open(path: object, mode: str) -> object:
+        calls.append(f"zarr:{path}:{mode}")
+        return sentinel
+
+    monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _unexpected_hdf5_open)
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open", _zarr_open)
+
+    result = lazynwb.file_io._open_file("file:///tmp/zarr-benchmark.nwb")
+
+    assert result is sentinel
+    assert calls == ["zarr:file:///tmp/zarr-benchmark.nwb:r"]
+
+
+def test_open_file_prefers_zarr_for_explicit_zarr_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    sentinel = object()
+
+    def _unexpected_hdf5_open(
+        *args: object,
+        **kwargs: object,
+    ) -> typing.NoReturn:
+        raise AssertionError("HDF5 should not be opened before explicit Zarr")
+
+    def _zarr_open(path: object, mode: str) -> object:
+        calls.append(f"zarr:{path}:{mode}")
+        return sentinel
+
+    monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _unexpected_hdf5_open)
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open", _zarr_open)
+
+    result = lazynwb.file_io._open_file("file:///tmp/example.nwb.zarr")
+
+    assert result is sentinel
+    assert calls == ["zarr:file:///tmp/example.nwb.zarr:r"]
+
+
 def test_fsspec_storage_options_use_top_level_anon() -> None:
     lazynwb.file_io.config.anon = True
     lazynwb.file_io.config.fsspec_storage_options = {"anon": False, "custom": "value"}
@@ -132,7 +186,23 @@ def test_fsspec_storage_options_use_top_level_anon() -> None:
 
 def test_obstore_storage_options_translate_anon_to_skip_signature() -> None:
     lazynwb.file_io.config.anon = True
-    lazynwb.file_io.config.fsspec_storage_options = {"anon": False, "region": "us-west-2"}
+    lazynwb.file_io.config.fsspec_storage_options = {
+        "anon": False,
+        "region": "us-west-2",
+    }
+
+    assert lazynwb.file_io._get_obstore_storage_options() == {
+        "region": "us-west-2",
+        "skip_signature": True,
+    }
+
+
+def test_obstore_storage_options_use_aws_region_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    lazynwb.file_io.config.anon = True
+    lazynwb.file_io.config.fsspec_storage_options = {"anon": False}
 
     assert lazynwb.file_io._get_obstore_storage_options() == {
         "region": "us-west-2",
