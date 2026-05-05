@@ -23,26 +23,107 @@ import lazynwb.utils
 logger = logging.getLogger(__name__)
 
 
+def _metadata_read_scope(path: str) -> str:
+    normalized_path = lazynwb.utils.normalize_internal_file_path(path)
+    if normalized_path.startswith("general/subject"):
+        return "subject"
+    if normalized_path.startswith("general/"):
+        return "session"
+    return "top_level"
+
+
 def _cast(accessor: lazynwb.file_io.FileAccessor, path: str) -> Any:
     """Read attribute from NWB file and interpret it as the appropriate Python object."""
     path = lazynwb.utils.normalize_internal_file_path(path)
+    scope = _metadata_read_scope(path)
+    logger.debug(
+        "metadata read scope=%s source=%s backend=%s path=%s",
+        scope,
+        accessor._path.as_posix(),
+        accessor._hdmf_backend.value,
+        path,
+    )
     v = accessor.get(path, None)
     if v is None:
+        logger.debug(
+            "metadata read scope=%s source=%s path=%s result=missing",
+            scope,
+            accessor._path.as_posix(),
+            path,
+        )
         return None
+    shape = getattr(v, "shape", None)
+    dtype = getattr(v, "dtype", None)
     if not getattr(v, "shape", True):
         v = [v[()]]
     if isinstance(v[0], bytes):
         s: str = v[0].decode()
         with contextlib.suppress(ValueError):
-            return datetime.datetime.fromisoformat(s)
+            result = datetime.datetime.fromisoformat(s)
+            logger.debug(
+                "metadata read scope=%s source=%s path=%s result=datetime "
+                "shape=%s dtype=%s",
+                scope,
+                accessor._path.as_posix(),
+                path,
+                shape,
+                dtype,
+            )
+            return result
         if s.startswith("[") and s.endswith("]") and s.count("[") == s.count("]") == 1:
             with contextlib.suppress(Exception):
-                return eval(s)
+                result = eval(s)
+                logger.debug(
+                    "metadata read scope=%s source=%s path=%s result=literal "
+                    "shape=%s dtype=%s",
+                    scope,
+                    accessor._path.as_posix(),
+                    path,
+                    shape,
+                    dtype,
+                )
+                return result
         if len(v) > 1:
-            return v.asstr()[:].tolist()
+            result = v.asstr()[:].tolist()
+            logger.debug(
+                "metadata read scope=%s source=%s path=%s result=list "
+                "shape=%s dtype=%s",
+                scope,
+                accessor._path.as_posix(),
+                path,
+                shape,
+                dtype,
+            )
+            return result
+        logger.debug(
+            "metadata read scope=%s source=%s path=%s result=scalar "
+            "shape=%s dtype=%s",
+            scope,
+            accessor._path.as_posix(),
+            path,
+            shape,
+            dtype,
+        )
         return s
     if len(v) > 1:
+        logger.debug(
+            "metadata read scope=%s source=%s path=%s result=array "
+            "shape=%s dtype=%s",
+            scope,
+            accessor._path.as_posix(),
+            path,
+            shape,
+            dtype,
+        )
         return v
+    logger.debug(
+        "metadata read scope=%s source=%s path=%s result=scalar " "shape=%s dtype=%s",
+        scope,
+        accessor._path.as_posix(),
+        path,
+        shape,
+        dtype,
+    )
     return v[0]
 
 
@@ -240,7 +321,8 @@ class LazyNWB:
         raise_on_missing: bool = True,
         ignore_errors: bool = False,
         as_polars: Literal[False] = False,
-    ) -> pd.DataFrame: ...
+    ) -> pd.DataFrame:
+        ...
 
     @typing.overload
     def get_df(
@@ -255,7 +337,8 @@ class LazyNWB:
         raise_on_missing: bool = True,
         ignore_errors: bool = False,
         as_polars: Literal[True] = True,
-    ) -> pl.DataFrame: ...
+    ) -> pl.DataFrame:
+        ...
 
     def get_df(
         self,
@@ -294,7 +377,8 @@ class LazyNWB:
 
 class NWBComponent(Protocol):
     @property
-    def _accessor(self) -> lazynwb.file_io.FileAccessor: ...
+    def _accessor(self) -> lazynwb.file_io.FileAccessor:
+        ...
 
 
 def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]:
@@ -313,7 +397,6 @@ def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]
 
 
 class Subject:
-
     _file_path: upath.UPath
 
     def __init__(
@@ -389,7 +472,8 @@ def get_metadata_df(
     nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
     as_polars: Literal[False] = False,
-) -> pd.DataFrame: ...
+) -> pd.DataFrame:
+    ...
 
 
 @typing.overload
@@ -397,7 +481,8 @@ def get_metadata_df(
     nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
     as_polars: Literal[True] = True,
-) -> pl.DataFrame: ...
+) -> pl.DataFrame:
+    ...
 
 
 def get_metadata_df(
@@ -414,12 +499,22 @@ def get_metadata_df(
 
     def _get_metadata_df_helper(nwb_path: lazynwb.types_.PathLike) -> dict[str, Any]:
         nwb = LazyNWB(nwb_path)
+        logger.debug(
+            "metadata read scope=session+subject source=%s operation=get_metadata_df",
+            nwb._file_path.as_posix(),
+        )
         return {
             **nwb._to_dict(),
             **nwb.subject._to_dict(),
             lazynwb.tables.NWB_PATH_COLUMN_NAME: nwb._accessor._path.as_posix(),
         }
 
+    logger.debug(
+        "starting get_metadata_df metadata read scope=session+subject "
+        "source_count=%d as_polars=%s",
+        len(paths),
+        as_polars,
+    )
     future_to_path = {}
     for path in paths:
         future = lazynwb.utils.get_threadpool_executor().submit(
@@ -441,9 +536,16 @@ def get_metadata_df(
         path = future_to_path[future]
         try:
             records.append(future.result())
-        except:
-            logger.error(f"Error processing {path}:")
+        except Exception:
+            logger.error("Error processing %s:", path)
             raise
+    logger.debug(
+        "finished get_metadata_df metadata read scope=session+subject "
+        "source_count=%d record_count=%d as_polars=%s",
+        len(paths),
+        len(records),
+        as_polars,
+    )
     if not as_polars:
         return pd.DataFrame.from_records(records)
     else:
