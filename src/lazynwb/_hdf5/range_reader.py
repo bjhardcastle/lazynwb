@@ -456,9 +456,19 @@ def _obstore_url_context(
     config: _RangeReaderConfig,
 ) -> _ObstoreUrlContext:
     parsed = urllib.parse.urlsplit(url)
-    storage_options = lazynwb._storage_options._get_obstore_range_reader_storage_options(
-        config.storage_options,
-        s3_bucket=parsed.netloc if parsed.scheme == "s3" else None,
+    s3_bucket = _s3_bucket_from_parsed_url(parsed)
+    if s3_bucket is not None and parsed.scheme in {"http", "https"}:
+        logger.debug(
+            "identified S3 bucket %s from %s URL host %s for range reader",
+            s3_bucket,
+            parsed.scheme,
+            parsed.netloc,
+        )
+    storage_options = (
+        lazynwb._storage_options._get_obstore_range_reader_storage_options(
+            config.storage_options,
+            s3_bucket=s3_bucket,
+        )
     )
     if parsed.scheme == "file":
         path = pathlib.Path(urllib.parse.unquote(parsed.path))
@@ -479,6 +489,31 @@ def _obstore_url_context(
         object_path=object_path,
         storage_options=storage_options,
     )
+
+
+def _s3_bucket_from_parsed_url(parsed: urllib.parse.SplitResult) -> str | None:
+    if parsed.scheme == "s3":
+        return parsed.netloc
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    netloc = parsed.netloc
+    host = (parsed.hostname or netloc.split("@")[-1].split(":")[0]).lower()
+    suffixes = (".s3.amazonaws.com", ".s3.dualstack.amazonaws.com")
+    for suffix in suffixes:
+        if host.endswith(suffix):
+            return host[: -len(suffix)]
+    host_parts = host.split(".")
+    if (
+        len(host_parts) >= 5
+        and host_parts[1] == "s3"
+        and host_parts[-2:]
+        == [
+            "amazonaws",
+            "com",
+        ]
+    ):
+        return host_parts[0]
+    return None
 
 
 def _cached_store_from_url(

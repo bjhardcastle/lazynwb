@@ -297,6 +297,44 @@ def test_obstore_store_cache_reuses_store_for_same_bucket_options(
         hdf5_range_reader._clear_obstore_store_cache()
 
 
+def test_https_s3_virtual_host_uses_bucket_region_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    store = object()
+    hdf5_range_reader._clear_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._storage_options")
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append((store_url, kwargs))
+        return store
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-east-1",
+    )
+
+    try:
+        returned_store, object_path = hdf5_range_reader._store_and_path_from_url(
+            "https://dandiarchive.s3.amazonaws.com/blobs/sample.nwb",
+            hdf5_range_reader._RangeReaderConfig(),
+        )
+
+        assert returned_store is store
+        assert object_path == "blobs/sample.nwb"
+        assert len(calls) == 1
+        store_url, store_kwargs = calls[0]
+        assert store_url == "https://dandiarchive.s3.amazonaws.com"
+        assert store_kwargs["region"] == "us-east-1"
+        assert "overriding configured S3 region for dandiarchive" in caplog.text
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
 def test_obstore_store_cache_distinguishes_options_client_and_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -433,8 +471,14 @@ def test_obstore_source_identity_cache_reuses_head_for_same_source(
         assert first_identity == second_identity
         assert first_identity.validator_kind == "version_id"
         assert head_calls == [(store, "file.nwb")]
-        assert "source identity cache miss for s3://aind-scratch-data/file.nwb" in caplog.text
-        assert "source identity cache hit for s3://aind-scratch-data/file.nwb" in caplog.text
+        assert (
+            "source identity cache miss for s3://aind-scratch-data/file.nwb"
+            in caplog.text
+        )
+        assert (
+            "source identity cache hit for s3://aind-scratch-data/file.nwb"
+            in caplog.text
+        )
     finally:
         hdf5_range_reader._clear_cache()
 
