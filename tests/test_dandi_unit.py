@@ -102,7 +102,7 @@ def test_version_none_falls_back_to_draft_metadata_with_debug_logging(
     assert "001637" in caplog.text
 
 
-def test_get_dandiset_s3_urls_with_explicit_draft_resolves_draft_assets(
+def test_dandi_sources_with_explicit_draft_resolves_draft_assets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     s3_url = "https://dandiarchive.s3.amazonaws.com/blobs/aaa"
@@ -129,7 +129,7 @@ def test_get_dandiset_s3_urls_with_explicit_draft_resolves_draft_assets(
     monkeypatch.setattr(dandi, "_get_session", lambda: session)
     monkeypatch.setattr(utils, "get_threadpool_executor", lambda: _ImmediateExecutor())
 
-    urls = dandi.get_dandiset_s3_urls("001637", version="draft")
+    urls = dandi.get_dandi_sources("001637", version="draft")
 
     assert urls == [s3_url]
     assert session.get_calls == [
@@ -144,7 +144,7 @@ def test_get_dandiset_s3_urls_with_explicit_draft_resolves_draft_assets(
     ]
 
 
-def test_get_dandiset_s3_urls_filters_nwb_sorts_by_path_and_paginates(
+def test_dandi_sources_filter_nwb_sort_by_path_and_paginate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     s3_url_a = "https://dandiarchive.s3.amazonaws.com/blobs/aaa"
@@ -192,7 +192,7 @@ def test_get_dandiset_s3_urls_filters_nwb_sorts_by_path_and_paginates(
     monkeypatch.setattr(dandi, "_get_session", lambda: session)
     monkeypatch.setattr(utils, "get_threadpool_executor", lambda: _ImmediateExecutor())
 
-    urls = dandi.get_dandiset_s3_urls("000001", version=None)
+    urls = dandi.get_dandi_sources("000001", version=None)
 
     assert urls == [s3_url_a, s3_url_b]
     assert session.get_calls == [
@@ -211,6 +211,63 @@ def test_get_dandiset_s3_urls_filters_nwb_sorts_by_path_and_paginates(
             None,
         ),
     ]
+
+
+def test_dandi_sources_with_asset_ids_resolve_directly_in_requested_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    s3_url_a = "https://dandiarchive.s3.amazonaws.com/blobs/aaa"
+    s3_url_b = "https://dandiarchive.s3.amazonaws.com/blobs/bbb"
+    session = _FakeSession(
+        [
+            {
+                "draft_version": {"version": "draft"},
+                "most_recent_published_version": {"version": "0.1.0"},
+            },
+            {"contentUrl": [s3_url_b], "identifier": "asset-b"},
+            {"contentUrl": [s3_url_a], "identifier": "asset-a"},
+        ]
+    )
+
+    def _get_dandiset_assets(
+        *args: object, **kwargs: object
+    ) -> list[dict[str, object]]:
+        raise AssertionError("asset_ids should avoid DANDI asset listing")
+
+    monkeypatch.setattr(dandi, "_get_session", lambda: session)
+    monkeypatch.setattr(dandi, "_get_dandiset_assets", _get_dandiset_assets)
+    monkeypatch.setattr(utils, "get_threadpool_executor", lambda: _ImmediateExecutor())
+
+    urls = dandi.get_dandi_sources(
+        "000001",
+        version=None,
+        asset_ids=["asset-b", "asset-a"],
+    )
+
+    assert urls == [s3_url_b, s3_url_a]
+    assert session.get_calls == [
+        (f"{dandi.DANDI_API_BASE}/dandisets/000001/", None),
+        (
+            f"{dandi.DANDI_API_BASE}/dandisets/000001/versions/0.1.0/assets/asset-b/",
+            None,
+        ),
+        (
+            f"{dandi.DANDI_API_BASE}/dandisets/000001/versions/0.1.0/assets/asset-a/",
+            None,
+        ),
+    ]
+
+
+def test_dandi_sources_reject_empty_asset_ids_without_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _get_session() -> object:
+        raise AssertionError("empty asset_ids should not open a DANDI session")
+
+    monkeypatch.setattr(dandi, "_get_session", _get_session)
+
+    with pytest.raises(ValueError, match="No DANDI asset IDs provided"):
+        dandi.get_dandi_sources("000001", version="0.1.0", asset_ids=[])
 
 
 def test_asset_s3_url_extraction_prefers_s3_content_url() -> None:
@@ -245,7 +302,7 @@ def test_asset_s3_url_extraction_rejects_missing_or_non_s3_content_url(
         dandi._get_asset_s3_url_from_metadata(asset_metadata)
 
 
-def test_scan_dandiset_uses_url_helper_then_scan_nwb_without_table_read_logic(
+def test_dandi_sources_filter_limit_and_return_uris(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -257,8 +314,6 @@ def test_scan_dandiset_uses_url_helper_then_scan_nwb_without_table_read_logic(
         {"asset_id": "asset-c", "path": "sub-keep-c/session.nwb"},
     ]
     selected_assets: list[dict[str, object]] = []
-    scan_calls: list[dict[str, object]] = []
-    sentinel = object()
     session = object()
 
     def _get_dandiset_assets(
@@ -286,53 +341,26 @@ def test_scan_dandiset_uses_url_helper_then_scan_nwb_without_table_read_logic(
         return [f"s3://bucket/{asset['asset_id']}.nwb" for asset in assets]
 
     def _get_asset_s3_url(*args: object, **kwargs: object) -> str:
-        raise AssertionError("scan_dandiset must use the DANDI URL batch helper")
-
-    def _scan_nwb(**kwargs: object) -> object:
-        scan_calls.append(kwargs)
-        return sentinel
-
-    def _read_table(*args: object, **kwargs: object) -> object:
-        raise AssertionError("scan_dandiset must delegate table reads to scan_nwb")
+        raise AssertionError("get_dandi_sources must use the DANDI URL batch helper")
 
     monkeypatch.setattr(dandi, "_get_session", lambda: session)
     monkeypatch.setattr(dandi, "_get_dandiset_assets", _get_dandiset_assets)
     monkeypatch.setattr(dandi, "_get_asset_s3_urls", _get_asset_s3_urls)
     monkeypatch.setattr(dandi, "_get_asset_s3_url", _get_asset_s3_url)
-    monkeypatch.setattr(dandi.lazynwb.lazyframe, "scan_nwb", _scan_nwb)
-    monkeypatch.setattr(dandi.lazynwb.tables, "get_df", _read_table)
-    monkeypatch.setattr(
-        dandi.lazynwb.tables,
-        "_get_table_schema_with_catalog_snapshots",
-        _read_table,
-    )
     caplog.set_level(logging.DEBUG, logger="lazynwb.dandi")
 
-    result = dandi.scan_dandiset(
+    sources = dandi.get_dandi_sources(
         "000001",
-        "/units",
         version="0.1.0",
         asset_filter=lambda asset: str(asset["path"]).startswith("sub-keep"),
         max_assets=2,
-        raise_on_missing=True,
-        ignore_errors=True,
-        infer_schema_length=3,
-        disable_progress=True,
     )
 
-    assert result is sentinel
-    assert selected_assets == [assets[2], assets[0]]
-    assert len(scan_calls) == 1
-    scan_call = scan_calls[0]
-    assert tuple(scan_call["source"]) == (
+    assert sources == [
         "s3://bucket/asset-a.nwb",
         "s3://bucket/asset-b.nwb",
-    )
-    assert scan_call["table_path"] == "/units"
-    assert scan_call["raise_on_missing"] is True
-    assert scan_call["ignore_errors"] is True
-    assert scan_call["infer_schema_length"] == 3
-    assert scan_call["disable_progress"] is True
+    ]
+    assert selected_assets == [assets[2], assets[0]]
     assert "000001" in caplog.text
     assert "0.1.0" in caplog.text
     assert "asset_count=5" in caplog.text
@@ -340,10 +368,59 @@ def test_scan_dandiset_uses_url_helper_then_scan_nwb_without_table_read_logic(
         "selected_asset_paths=('sub-keep-a/session.nwb', 'sub-keep-b/session.nwb')"
         in caplog.text
     )
-    assert "delegating DANDI scan to scan_nwb" in caplog.text
+    assert "resolved DANDI sources" in caplog.text
 
 
-def test_scan_dandiset_empty_filtered_result_is_clear(
+def test_dandi_sources_with_asset_ids_and_filter_use_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assets = [
+        {"asset_id": "asset-a", "path": "sub-a/session.nwb"},
+        {"asset_id": "asset-b", "path": "sub-b/session.nwb"},
+        {"asset_id": "asset-c", "path": "sub-c/session.nwb"},
+    ]
+    selected_assets: list[dict[str, object]] = []
+
+    def _get_dandiset_assets(
+        dandiset_id: str,
+        version: str | None = None,
+        order: str = "path",
+        *,
+        session: object | None = None,
+    ) -> list[dict[str, object]]:
+        assert dandiset_id == "000001"
+        assert version == "0.1.0"
+        assert order == "path"
+        assert session is not None
+        return assets
+
+    def _get_asset_s3_urls(
+        *,
+        dandiset_id: str,
+        version: str,
+        assets: list[dict[str, object]],
+    ) -> list[str]:
+        assert dandiset_id == "000001"
+        assert version == "0.1.0"
+        selected_assets.extend(assets)
+        return [f"s3://bucket/{asset['asset_id']}.nwb" for asset in assets]
+
+    monkeypatch.setattr(dandi, "_get_session", lambda: object())
+    monkeypatch.setattr(dandi, "_get_dandiset_assets", _get_dandiset_assets)
+    monkeypatch.setattr(dandi, "_get_asset_s3_urls", _get_asset_s3_urls)
+
+    sources = dandi.get_dandi_sources(
+        "000001",
+        version="0.1.0",
+        asset_ids=["asset-c", "asset-a"],
+        asset_filter=lambda asset: asset["asset_id"] != "asset-a",
+    )
+
+    assert sources == ["s3://bucket/asset-c.nwb"]
+    assert selected_assets == [assets[2]]
+
+
+def test_dandi_sources_empty_filtered_result_is_clear(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -363,21 +440,16 @@ def test_scan_dandiset_empty_filtered_result_is_clear(
         return assets
 
     def _get_asset_s3_urls(*args: object, **kwargs: object) -> list[str]:
-        raise AssertionError("empty DANDI scan selections should not resolve URLs")
-
-    def _scan_nwb(**kwargs: object) -> object:
-        raise AssertionError("empty DANDI scan selections should not call scan_nwb")
+        raise AssertionError("empty DANDI source selections should not resolve URLs")
 
     monkeypatch.setattr(dandi, "_get_session", lambda: object())
     monkeypatch.setattr(dandi, "_get_dandiset_assets", _get_dandiset_assets)
     monkeypatch.setattr(dandi, "_get_asset_s3_urls", _get_asset_s3_urls)
-    monkeypatch.setattr(dandi.lazynwb.lazyframe, "scan_nwb", _scan_nwb)
     caplog.set_level(logging.DEBUG, logger="lazynwb.dandi")
 
     with pytest.raises(ValueError) as exc_info:
-        dandi.scan_dandiset(
+        dandi.get_dandi_sources(
             "000001",
-            "/units",
             version="0.1.0",
             asset_filter=lambda asset: False,
         )
@@ -399,10 +471,8 @@ def test_dandi_001637_sample_registry_uses_fixed_small_assets() -> None:
         "1e37bc82-fd23-4cb5-a253-e794cea932ba",
     )
     assert dandi_sample._sample_asset_paths() == (
-        "sub-830849/"
-        "sub-830849_ses-ecephys-830849-2026-03-07-09-48-16_ecephys.nwb",
-        "sub-830795/"
-        "sub-830795_ses-ecephys-830795-2026-02-25-16-03-31_ecephys.nwb",
+        "sub-830849/" "sub-830849_ses-ecephys-830849-2026-03-07-09-48-16_ecephys.nwb",
+        "sub-830795/" "sub-830795_ses-ecephys-830795-2026-02-25-16-03-31_ecephys.nwb",
     )
     assert all(
         asset.max_bounded_read_bytes <= 1024 * 1024

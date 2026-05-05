@@ -4,30 +4,19 @@ from __future__ import annotations
 
 import collections.abc
 import concurrent.futures
-import dataclasses
 import logging
 import time
 import typing
 import urllib.parse
 
-import polars as pl
 import requests
 
 import lazynwb.file_io
-import lazynwb.lazyframe
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
 
 DANDI_API_BASE = "https://api.dandiarchive.org/api"
-
-
-@dataclasses.dataclass(frozen=True)
-class _DandisetScanUrls:
-    resolved_version: str
-    asset_count: int
-    selected_asset_paths: tuple[str, ...]
-    s3_urls: tuple[str, ...]
 
 
 def _get_session() -> requests.Session:
@@ -316,7 +305,7 @@ def _get_asset_s3_url(
 
 
 def _get_asset_s3_url_from_metadata(
-    asset_metadata: typing.Mapping[str, typing.Any]
+    asset_metadata: typing.Mapping[str, typing.Any],
 ) -> str:
     content_urls = _get_asset_content_urls(asset_metadata)
     s3_url = next((url for url in content_urls if _is_s3_url(url)), None)
@@ -360,15 +349,19 @@ def _asset_metadata_identifier(asset_metadata: typing.Mapping[str, typing.Any]) 
     return "<unknown>"
 
 
-def get_dandiset_s3_urls(
+def get_dandi_sources(
     dandiset_id: str,
     version: str | None = None,
     order: typing.Literal[
         "path", "created", "modified", "-path", "-created", "-modified"
     ] = "path",
+    *,
+    asset_ids: collections.abc.Sequence[str] | None = None,
+    asset_filter: collections.abc.Callable[[dict[str, typing.Any]], bool] | None = None,
+    max_assets: int | None = None,
 ) -> list[str]:
     """
-    Get S3 URLs for all NWB assets in a DANDI dandiset.
+    Get lazynwb-compatible sources for NWB assets in a DANDI dandiset.
 
     Parameters
     ----------
@@ -379,47 +372,153 @@ def get_dandiset_s3_urls(
         falling back to draft.
     order : Literal["path", "created", "modified", "-path", "-created", "-modified"], default "path"
         Order results by field. Use '-' prefix for descending (e.g., '-created').
+        Ignored when asset_ids is provided without asset_filter.
+    asset_ids : Sequence[str] | None, optional
+        DANDI asset IDs to resolve. When provided without asset_filter, this avoids
+        listing dandiset assets and preserves the given ID order.
+    asset_filter : Callable[[dict[str, Any]], bool] | None, optional
+        Function to filter NWB assets. Receives each asset's metadata dict and
+        returns True/False to include/exclude, respectively.
+    max_assets : int | None, optional
+        Maximum number of NWB assets to include. Useful for testing large dandisets.
 
     Returns
     -------
     list[str]
-        List of S3 URLs for all NWB assets
+        Sources for matching NWB assets, usable with get_df(), get_timeseries(),
+        and scan_nwb().
 
     Examples
     --------
-    >>> urls = get_dandiset_s3_urls('000363', version='0.231012.2129')
-    >>> len(urls)
+    >>> sources = get_dandi_sources('000363', version='0.231012.2129')
+    >>> len(sources)
     174
-    >>> all('s3.amazonaws.com' in url for url in urls[:3])
+    >>> all('s3.amazonaws.com' in source for source in sources[:3])
     True
     """
+    normalized_asset_ids = _normalize_dandi_asset_ids(asset_ids)
+    if asset_ids is not None and not normalized_asset_ids:
+        logger.debug(
+            "DANDI source asset ID selection was empty: dandiset_id=%s version=%s",
+            dandiset_id,
+            version,
+        )
+        raise ValueError(f"No DANDI asset IDs provided for dandiset {dandiset_id}")
+
     session = _get_session()
+    requested_version = version
     resolved_version = _resolve_dandiset_version(
         dandiset_id,
         version,
         session=session,
     )
-    assets = _get_dandiset_assets(
+
+    if normalized_asset_ids is not None and asset_filter is None:
+        assets = _asset_metadata_from_ids(normalized_asset_ids)
+        nwb_assets = assets
+        selected_assets = assets
+        asset_count = len(assets)
+    else:
+        assets = _get_dandiset_assets(
+            dandiset_id,
+            resolved_version,
+            order,
+            session=session,
+        )
+        nwb_assets = _filter_dandi_nwb_assets(assets, order=order)
+        selected_assets = nwb_assets
+        if normalized_asset_ids is not None:
+            asset_id_positions = {
+                asset_id: index for index, asset_id in enumerate(normalized_asset_ids)
+            }
+            selected_assets = [
+                asset
+                for asset in selected_assets
+                if _dandi_asset_id(asset) in asset_id_positions
+            ]
+            selected_assets.sort(
+                key=lambda asset: asset_id_positions[_dandi_asset_id(asset)]
+            )
+        asset_count = len(assets)
+
+    if asset_filter is not None:
+        selected_assets = [asset for asset in selected_assets if asset_filter(asset)]
+
+    if max_assets is not None:
+        selected_assets = selected_assets[:max_assets]
+
+    selected_asset_paths = tuple(_dandi_asset_path(asset) for asset in selected_assets)
+    logger.debug(
+        "selected DANDI NWB assets for source resolution: "
+        "dandiset_id=%s requested_version=%s resolved_version=%s order=%s "
+        "asset_count=%d nwb_asset_count=%d selected_asset_count=%d "
+        "selected_asset_paths=%s asset_ids_count=%s asset_filter=%s "
+        "max_assets=%s",
         dandiset_id,
+        requested_version,
         resolved_version,
         order,
-        session=session,
-    )
-    nwb_assets = _filter_dandi_nwb_assets(assets, order=order)
-    logger.debug(
-        "filtered DANDI asset metadata to NWB assets for URL resolution: "
-        "dandiset_id=%s requested_version=%s resolved_version=%s before=%d after=%d",
-        dandiset_id,
-        version,
-        resolved_version,
-        len(assets),
+        asset_count,
         len(nwb_assets),
+        len(selected_assets),
+        selected_asset_paths,
+        None if normalized_asset_ids is None else len(normalized_asset_ids),
+        asset_filter is not None,
+        max_assets,
     )
-    return _get_asset_s3_urls(
+
+    if not selected_assets:
+        logger.debug(
+            "DANDI source asset selection was empty: dandiset_id=%s "
+            "resolved_version=%s asset_count=%d nwb_asset_count=%d "
+            "asset_ids_count=%s asset_filter=%s max_assets=%s "
+            "selected_asset_paths=%s",
+            dandiset_id,
+            resolved_version,
+            asset_count,
+            len(nwb_assets),
+            None if normalized_asset_ids is None else len(normalized_asset_ids),
+            asset_filter is not None,
+            max_assets,
+            selected_asset_paths,
+        )
+        message = _empty_dandi_source_selection_message(
+            dandiset_id=dandiset_id,
+            resolved_version=resolved_version,
+            asset_count=asset_count,
+            nwb_asset_count=len(nwb_assets),
+            asset_ids=normalized_asset_ids,
+            asset_filter=asset_filter,
+            max_assets=max_assets,
+        )
+        raise ValueError(message)
+
+    source_uris = _get_asset_s3_urls(
         dandiset_id=dandiset_id,
         version=resolved_version,
-        assets=nwb_assets,
+        assets=selected_assets,
     )
+    if not source_uris:
+        logger.debug(
+            "DANDI source URL resolution returned no URLs: dandiset_id=%s "
+            "resolved_version=%s selected_asset_count=%d selected_asset_paths=%s",
+            dandiset_id,
+            resolved_version,
+            len(selected_assets),
+            selected_asset_paths,
+        )
+        raise ValueError(f"No valid S3 URLs found for assets in dandiset {dandiset_id}")
+
+    source_count = len(source_uris)
+    logger.debug(
+        "resolved DANDI sources: dandiset_id=%s requested_version=%s "
+        "resolved_version=%s source_count=%d",
+        dandiset_id,
+        requested_version,
+        resolved_version,
+        source_count,
+    )
+    return source_uris
 
 
 def _get_asset_s3_urls(
@@ -484,6 +583,22 @@ def _filter_dandi_nwb_assets(
     return nwb_assets
 
 
+def _normalize_dandi_asset_ids(
+    asset_ids: collections.abc.Sequence[str] | None,
+) -> tuple[str, ...] | None:
+    if asset_ids is None:
+        return None
+    if isinstance(asset_ids, str):
+        raise ValueError("asset_ids must be a sequence of DANDI asset ID strings")
+    return tuple(asset_id for asset_id in asset_ids if asset_id)
+
+
+def _asset_metadata_from_ids(
+    asset_ids: collections.abc.Sequence[str],
+) -> list[dict[str, typing.Any]]:
+    return [{"asset_id": asset_id} for asset_id in asset_ids]
+
+
 def _is_dandi_nwb_asset(asset: typing.Mapping[str, typing.Any]) -> bool:
     path = asset.get("path")
     return isinstance(path, str) and path.lower().endswith(".nwb")
@@ -510,105 +625,19 @@ def _dandi_asset_id(asset: typing.Mapping[str, typing.Any]) -> str:
     raise ValueError("DANDI asset metadata did not include an asset identifier")
 
 
-def _get_scan_dandiset_s3_urls(
-    *,
-    dandiset_id: str,
-    version: str | None,
-    asset_filter: collections.abc.Callable[[dict[str, typing.Any]], bool] | None,
-    max_assets: int | None,
-) -> _DandisetScanUrls:
-    session = _get_session()
-    resolved_version = _resolve_dandiset_version(
-        dandiset_id,
-        version,
-        session=session,
-    )
-    assets = _get_dandiset_assets(dandiset_id, resolved_version, session=session)
-    nwb_assets = _filter_dandi_nwb_assets(assets)
-
-    selected_assets = nwb_assets
-    if asset_filter is not None:
-        selected_assets = [asset for asset in selected_assets if asset_filter(asset)]
-
-    if max_assets is not None:
-        selected_assets = selected_assets[:max_assets]
-
-    selected_asset_paths = tuple(_dandi_asset_path(asset) for asset in selected_assets)
-    logger.debug(
-        "selected DANDI NWB assets for scan: dandiset_id=%s requested_version=%s "
-        "resolved_version=%s asset_count=%d nwb_asset_count=%d "
-        "selected_asset_count=%d selected_asset_paths=%s asset_filter=%s "
-        "max_assets=%s",
-        dandiset_id,
-        version,
-        resolved_version,
-        len(assets),
-        len(nwb_assets),
-        len(selected_assets),
-        selected_asset_paths,
-        asset_filter is not None,
-        max_assets,
-    )
-
-    if not selected_assets:
-        message = _empty_dandiset_scan_selection_message(
-            dandiset_id=dandiset_id,
-            resolved_version=resolved_version,
-            asset_count=len(assets),
-            nwb_asset_count=len(nwb_assets),
-            asset_filter=asset_filter,
-            max_assets=max_assets,
-        )
-        logger.debug(
-            "DANDI scan asset selection was empty: dandiset_id=%s "
-            "resolved_version=%s asset_count=%d nwb_asset_count=%d "
-            "asset_filter=%s max_assets=%s selected_asset_paths=%s",
-            dandiset_id,
-            resolved_version,
-            len(assets),
-            len(nwb_assets),
-            asset_filter is not None,
-            max_assets,
-            selected_asset_paths,
-        )
-        raise ValueError(message)
-
-    s3_urls = tuple(
-        _get_asset_s3_urls(
-            dandiset_id=dandiset_id,
-            version=resolved_version,
-            assets=selected_assets,
-        )
-    )
-    if not s3_urls:
-        logger.debug(
-            "DANDI scan URL resolution returned no URLs: dandiset_id=%s "
-            "resolved_version=%s selected_asset_count=%d selected_asset_paths=%s",
-            dandiset_id,
-            resolved_version,
-            len(selected_assets),
-            selected_asset_paths,
-        )
-        raise ValueError(f"No valid S3 URLs found for assets in dandiset {dandiset_id}")
-
-    return _DandisetScanUrls(
-        resolved_version=resolved_version,
-        asset_count=len(assets),
-        selected_asset_paths=selected_asset_paths,
-        s3_urls=s3_urls,
-    )
-
-
-def _empty_dandiset_scan_selection_message(
+def _empty_dandi_source_selection_message(
     *,
     dandiset_id: str,
     resolved_version: str,
     asset_count: int,
     nwb_asset_count: int,
+    asset_ids: tuple[str, ...] | None,
     asset_filter: collections.abc.Callable[[dict[str, typing.Any]], bool] | None,
     max_assets: int | None,
 ) -> str:
     criteria = []
+    if asset_ids is not None:
+        criteria.append(f"asset_ids={len(asset_ids)}")
     if asset_filter is not None:
         criteria.append("asset_filter")
     if max_assets is not None:
@@ -662,77 +691,6 @@ def from_dandi_asset(
     """
     s3_url = _get_asset_s3_url(dandiset_id, asset_id, version)
     return lazynwb.file_io.FileAccessor(s3_url)
-
-
-def scan_dandiset(
-    dandiset_id: str,
-    table_path: str,
-    version: str | None = None,
-    asset_filter: collections.abc.Callable[[dict[str, typing.Any]], bool] | None = None,
-    max_assets: int | None = None,
-    **scan_kwargs: object,
-) -> pl.LazyFrame:
-    """
-    Scan a common table across all NWB assets in a DANDI dandiset.
-
-    Parameters
-    ----------
-    dandiset_id : str
-        The DANDI archive dandiset ID (e.g., '000363')
-    table_path : str
-        Path to the table within each NWB file (e.g., '/units', '/intervals/trials')
-    version : str | None, optional
-        Specific version to retrieve. If None, uses most recent published version,
-        falling back to draft.
-    asset_filter : Callable[[dict[str, Any]], bool] | None, optional
-        Function to filter assets. Receives each asset's metadata dict and returns
-        True/False to include/exclude, respectively.
-    max_assets : int | None, optional
-        Maximum number of assets to scan. Useful for testing on large dandisets.
-    **scan_kwargs
-        Additional keyword arguments to pass to scan_nwb()
-
-    Returns
-    -------
-    polars.LazyFrame
-        LazyFrame containing concatenated tables from all matching assets
-
-    Examples
-    --------
-    >>> lf = scan_dandiset(
-    ...     dandiset_id='000363',
-    ...     table_path='/units',
-    ...     version='0.231012.2129',
-    ...     max_assets=1,           # limit for testing
-    ...     infer_schema_length=1, # limit for testing
-    ... )
-    >>> 'spike_times' in lf.collect_schema()
-    True
-    """
-    scan_urls = _get_scan_dandiset_s3_urls(
-        dandiset_id=dandiset_id,
-        version=version,
-        asset_filter=asset_filter,
-        max_assets=max_assets,
-    )
-    logger.debug(
-        "delegating DANDI scan to scan_nwb: dandiset_id=%s requested_version=%s "
-        "resolved_version=%s asset_count=%d selected_asset_count=%d "
-        "selected_asset_paths=%s table_path=%s scan_kwargs=%s",
-        dandiset_id,
-        version,
-        scan_urls.resolved_version,
-        scan_urls.asset_count,
-        len(scan_urls.s3_urls),
-        scan_urls.selected_asset_paths,
-        table_path,
-        sorted(scan_kwargs),
-    )
-    return lazynwb.lazyframe.scan_nwb(
-        source=scan_urls.s3_urls,
-        table_path=table_path,
-        **scan_kwargs,
-    )
 
 
 if __name__ == "__main__":

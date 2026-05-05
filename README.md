@@ -78,8 +78,8 @@ lazynwb.get_df('my_file.nwb', '/trials')
 lazynwb.get_df('s3://bucket/session.nwb', '/trials')
 
 # DANDI archive
-dandi_urls = lazynwb.get_dandiset_s3_urls('000363', version='0.231012.2129')
-lf = lazynwb.scan_nwb(dandi_urls, '/trials')
+dandi_sources = lazynwb.get_dandi_sources('000363', version='0.231012.2129')
+lf = lazynwb.scan_nwb(dandi_sources, '/trials')
 ```
 
 ### Basic benchmarks
@@ -479,8 +479,8 @@ describe that custom service rather than an AWS bucket location.
 
 ## DANDI archive
 
-Use DANDI as a URI discovery step: resolve NWB asset URLs with
-`get_dandiset_s3_urls`, then pass those URLs to the regular `lazynwb` APIs.
+Use DANDI as a URI discovery step: resolve NWB asset sources with
+`get_dandi_sources`, then pass those sources to the regular `lazynwb` APIs.
 This keeps DANDI-specific version and asset resolution separate from table,
 TimeSeries, and metadata reads.
 
@@ -489,34 +489,46 @@ DANDI:001637 draft sample:
 ```python
 import lazynwb
 
-dandi_urls = lazynwb.get_dandiset_s3_urls('001637', version='draft')
+dandi_sources = lazynwb.get_dandi_sources('001637', version='draft')
+```
+
+Known DANDI asset IDs can be resolved directly, avoiding asset listing:
+```python
+dandi_sources = lazynwb.get_dandi_sources(
+    '001637',
+    version='draft',
+    asset_ids=[
+        'ca248278-e1b2-4896-ad1c-900e4506cd04',
+        '1e37bc82-fd23-4cb5-a253-e794cea932ba',
+    ],
+)
 ```
 
 Published versions can be pinned for reproducible analyses:
 ```python
-published_urls = lazynwb.get_dandiset_s3_urls(
+published_sources = lazynwb.get_dandi_sources(
     '000363',
     version='0.231012.2129',
 )
 ```
 
-Use the resolved URLs with `get_df` for eager table reads. Large array columns
+Use the resolved sources with `get_df` for eager table reads. Large array columns
 are excluded by default, so this reads scalar columns unless you opt in to
 specific arrays:
 ```python
 units = lazynwb.get_df(
-    dandi_urls[:2],
+    dandi_sources[:2],
     '/units',
     include_column_names=['id', 'firing_rate'],
 )
 ```
 
-Use the same URLs with `scan_nwb` when you want Polars projections and filters
+Use the same sources with `scan_nwb` when you want Polars projections and filters
 to bound the remote reads before collection:
 ```python
 import polars as pl
 
-lf = lazynwb.scan_nwb(dandi_urls, '/units', infer_schema_length=2)
+lf = lazynwb.scan_nwb(dandi_sources, '/units', infer_schema_length=2)
 units = (
     lf
     .filter(pl.col('firing_rate') > 1.0)
@@ -525,24 +537,24 @@ units = (
 )
 ```
 
-Use a single resolved URL for TimeSeries discovery and bounded reads. The
+Use a single resolved source for TimeSeries discovery and bounded reads. The
 returned `data` and `timestamps` objects stay lazy until you slice them:
 ```python
-timeseries_by_path = lazynwb.get_timeseries(dandi_urls[0], match_all=True)
+timeseries_by_path = lazynwb.get_timeseries(dandi_sources[0], match_all=True)
 path, ts = next(iter(timeseries_by_path.items()))
 preview = ts.data[:1000]
 ```
 
-Use the resolved URLs for metadata across the same DANDI asset set:
+Use the resolved sources for metadata across the same DANDI asset set:
 ```python
-metadata = lazynwb.get_metadata_df(dandi_urls, as_polars=True)
+metadata = lazynwb.get_metadata_df(dandi_sources, as_polars=True)
 ```
 
 Performance expectations for DANDI workflows are the same as for other remote
 NWB files:
 
-- `get_dandiset_s3_urls` reads DANDI asset metadata and resolves object-store
-  URLs; it does not read NWB table or array payloads.
+- `get_dandi_sources` reads DANDI asset metadata and resolves object-store
+  sources; it does not read NWB table or array payloads.
 - `get_df` avoids full large array reads by default with
   `exclude_array_columns=True`. Use `include_column_names` or
   `exclude_column_names` to keep table reads narrow.
@@ -556,20 +568,17 @@ NWB files:
   so they should not require broad raw data traversal on supported remote HDF5
   sources.
 
-`scan_dandiset` remains a compatibility and convenience wrapper for existing
-table-scan code. It performs the DANDI asset selection and URL resolution, then
-delegates to `scan_nwb`:
+Limit DANDI source discovery before handing sources to table or TimeSeries APIs:
 ```python
-lf = lazynwb.scan_dandiset(
+dandi_sources = lazynwb.get_dandi_sources(
     dandiset_id='000363',
-    table_path='/units',
     version='0.231012.2129',
     max_assets=10,
-    infer_schema_length=2,
 )
+lf = lazynwb.scan_nwb(dandi_sources, '/units', infer_schema_length=2)
 ```
 
-Prefer the URI-first form for new workflows because the same resolved URLs can
+Prefer the source-first form for new workflows because the same resolved sources can
 feed `get_df`, `scan_nwb`, `get_timeseries`, and `get_metadata_df`.
 
 The opt-in DANDI:001637 integration checks exercise the draft sample against
