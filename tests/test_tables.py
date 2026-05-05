@@ -7,6 +7,7 @@ import pynwb
 import pytest
 
 import lazynwb
+import lazynwb.tables
 
 
 @pytest.mark.parametrize(
@@ -133,6 +134,35 @@ def test_indexed_column_full_table_reads_full_column_once() -> None:
 
     assert result == [[10, 11], [20, 21, 22], [30], [40, 41]]
     assert data_accessor.keys == [slice(None)]
+
+
+def test_get_df_row_index_lookup_uses_normalized_source_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    def _fake_get_table_data(*args: object, **kwargs: object) -> dict[str, object]:
+        del args
+        calls.append(kwargs["table_row_indices"])
+        return {"value": [10, 20]}
+
+    monkeypatch.setattr(
+        lazynwb.tables,
+        "_catalog_snapshot_key",
+        lambda path: f"normalized:{path}",
+    )
+    monkeypatch.setattr(lazynwb.tables, "_get_table_data", _fake_get_table_data)
+
+    df = lazynwb.tables.get_df(
+        "source",
+        "/units",
+        nwb_path_to_row_indices={"source": [2, 0]},
+        parallel=False,
+        as_polars=True,
+    )
+
+    assert calls == [[2, 0]]
+    assert df["value"].to_list() == [10, 20]
 
 
 class _CountingArray:

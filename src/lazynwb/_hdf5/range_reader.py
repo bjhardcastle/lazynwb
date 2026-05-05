@@ -10,6 +10,7 @@ import threading
 import time
 import typing
 import urllib.parse
+import urllib.request
 from collections.abc import Iterable, Mapping
 
 import obstore
@@ -471,7 +472,7 @@ def _obstore_url_context(
         )
     )
     if parsed.scheme == "file":
-        path = pathlib.Path(urllib.parse.unquote(parsed.path))
+        path = _path_from_file_url(parsed)
         store_url = path.parent.as_uri()
         object_path = path.name
     elif parsed.scheme == "s3":
@@ -489,6 +490,14 @@ def _obstore_url_context(
         object_path=object_path,
         storage_options=storage_options,
     )
+
+
+def _path_from_file_url(parsed: urllib.parse.SplitResult) -> pathlib.Path:
+    if parsed.netloc and parsed.netloc != "localhost":
+        path = f"//{parsed.netloc}{parsed.path}"
+    else:
+        path = parsed.path
+    return pathlib.Path(urllib.request.url2pathname(path))
 
 
 def _s3_bucket_from_parsed_url(parsed: urllib.parse.SplitResult) -> str | None:

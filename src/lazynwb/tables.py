@@ -233,12 +233,12 @@ def get_df(
         search_term = lazynwb.utils.TABLE_SHORTCUTS[search_term]
         exact_path = True
 
-    if nwb_path_to_row_indices is None:
-        nwb_path_to_row_indices = {}
+    path_to_row_indices = _normalize_path_to_row_indices(nwb_path_to_row_indices)
 
     results: list[dict] = []
     if not parallel or len(paths) == 1:  # don't use a pool for a single file
         for path in paths:
+            path_key = _catalog_snapshot_key(path)
             results.append(
                 _get_table_data(
                     path=path,
@@ -247,11 +247,9 @@ def get_df(
                     exclude_column_names=exclude_column_names,
                     include_column_names=include_column_names,
                     exclude_array_columns=exclude_array_columns,
-                    table_row_indices=nwb_path_to_row_indices.get(
-                        lazynwb.file_io.from_pathlike(path).as_posix()
-                    ),
+                    table_row_indices=path_to_row_indices.get(path_key),
                     catalog_snapshot=(
-                        _catalog_snapshots.get(_catalog_snapshot_key(path))
+                        _catalog_snapshots.get(path_key)
                         if _catalog_snapshots is not None
                         else None
                     ),
@@ -273,6 +271,7 @@ def get_df(
         )
         future_to_path = {}
         for path in paths:
+            path_key = _catalog_snapshot_key(path)
             future = executor.submit(
                 _get_table_data,
                 path=path,
@@ -281,11 +280,9 @@ def get_df(
                 exclude_column_names=exclude_column_names,
                 include_column_names=include_column_names,
                 exclude_array_columns=exclude_array_columns,
-                table_row_indices=nwb_path_to_row_indices.get(
-                    lazynwb.file_io.from_pathlike(path).as_posix()
-                ),
+                table_row_indices=path_to_row_indices.get(path_key),
                 catalog_snapshot=(
-                    _catalog_snapshots.get(_catalog_snapshot_key(path))
+                    _catalog_snapshots.get(path_key)
                     if _catalog_snapshots is not None
                     else None
                 ),
@@ -523,6 +520,17 @@ def _get_fast_catalog_snapshot_if_available(
 
 def _catalog_snapshot_key(file_path: lazynwb.types_.PathLike) -> str:
     return lazynwb.file_io.from_pathlike(file_path).as_posix()
+
+
+def _normalize_path_to_row_indices(
+    path_to_row_indices: Mapping[str, Sequence[int]] | None,
+) -> dict[str, Sequence[int]]:
+    if path_to_row_indices is None:
+        return {}
+    return {
+        _catalog_snapshot_key(path): row_indices
+        for path, row_indices in path_to_row_indices.items()
+    }
 
 
 def _raw_metadata_from_catalog_column(

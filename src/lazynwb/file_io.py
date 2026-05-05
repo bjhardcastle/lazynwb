@@ -744,7 +744,7 @@ def _hdf5_catalog_source_if_available(
     parsed = urllib.parse.urlsplit(raw_path)
     if parsed.scheme in {"file", "http", "https", "s3", "gs", "gcs", "az", "abfs"}:
         return raw_path
-    if parsed.scheme:
+    if parsed.scheme and not _has_windows_drive_scheme(raw_path, parsed):
         logger.debug(
             "HDF5 catalog path summary skipped unsupported source scheme %r for %r",
             parsed.scheme,
@@ -762,6 +762,13 @@ def _hdf5_catalog_source_if_available(
     if not local_path.is_file():
         return None
     return local_path.resolve().as_uri()
+
+
+def _has_windows_drive_scheme(
+    raw_path: str,
+    parsed: urllib.parse.SplitResult,
+) -> bool:
+    return len(parsed.scheme) == 1 and len(raw_path) >= 2 and raw_path[1] == ":"
 
 
 def _pathlike_to_string(path: lazynwb.types_.PathLike) -> str:
@@ -1050,11 +1057,11 @@ def _traverse_internal_paths(
     is_metadata = is_scalar or group.name.startswith(
         "/general"
     )  # other metadata like /general/lab
-    if is_metadata and not include_metadata:
+    if is_rate_starting_time and include_child_datasets:
+        results[group.name] = group
+    elif is_metadata and not include_metadata:
         return {}
     elif is_metadata and include_metadata:
-        results[group.name] = group
-    elif is_rate_starting_time and include_child_datasets:
         results[group.name] = group
     elif is_timeseries_group:
         results[group.name] = group

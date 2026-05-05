@@ -179,6 +179,15 @@ def test_subcommand_usage_error_points_at_specific_help_command() -> None:
     assert "valid_commands" not in payload["error"]["details"]
 
 
+def test_usage_error_message_normalizes_python_314_choice_lists() -> None:
+    assert cli_main._normalize_usage_error_message(
+        "argument --format: invalid choice: 'bogus' (choose from json, table)"
+    ) == (
+        "argument --format: invalid choice: 'bogus' "
+        "(choose from 'json', 'table')"
+    )
+
+
 def test_debug_usage_error_keeps_stdout_parseable_and_logs_to_stderr() -> None:
     exit_code, stdout, stderr = _run_cli(["--debug", "paths", "--format", "bogus"])
 

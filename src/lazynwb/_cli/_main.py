@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import collections.abc
 import logging
+import re
 import sys
 import time
 import typing
@@ -15,6 +16,7 @@ import lazynwb._cli._sources as cli_sources
 logger = logging.getLogger(__name__)
 
 _ROOT_COMMANDS = ("paths", "tables", "context", "schema", "preview", "query", "config")
+_INVALID_CHOICE_PATTERN = re.compile(r"(\(choose from )(.+)(\))$")
 
 
 class _ArgumentParser(argparse.ArgumentParser):
@@ -25,7 +27,7 @@ class _ArgumentParser(argparse.ArgumentParser):
             code=cli_errors._ErrorCode.USAGE_ERROR,
             details=_usage_error_details(self),
             exit_code=cli_errors._ExitCode.USAGE_ERROR,
-            message=message,
+            message=_normalize_usage_error_message(message),
         )
 
 
@@ -315,6 +317,25 @@ def _usage_error_details(parser: argparse.ArgumentParser) -> dict[str, typing.An
     if valid_commands:
         details["valid_commands"] = list(valid_commands)
     return details
+
+
+def _normalize_usage_error_message(message: str) -> str:
+    match = _INVALID_CHOICE_PATTERN.search(message)
+    if match is None:
+        return message
+
+    choices = [choice.strip() for choice in match.group(2).split(",")]
+    if not all(choices):
+        return message
+
+    normalized_choices = ", ".join(_quote_usage_choice(choice) for choice in choices)
+    return f"{message[: match.start(2)]}{normalized_choices}{message[match.end(2) :]}"
+
+
+def _quote_usage_choice(choice: str) -> str:
+    if len(choice) >= 2 and choice[0] == choice[-1] and choice[0] in {"'", '"'}:
+        return choice
+    return repr(choice)
 
 
 def _help_command(parser: argparse.ArgumentParser) -> str:

@@ -143,10 +143,11 @@ def test_open_file_prefers_zarr_when_zarr_word_is_in_uri(
     monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _unexpected_hdf5_open)
     monkeypatch.setattr(lazynwb.file_io.zarr, "open", _zarr_open)
 
-    result = lazynwb.file_io._open_file("file:///tmp/zarr-benchmark.nwb")
+    path = "file:///tmp/zarr-benchmark.nwb"
+    result = lazynwb.file_io._open_file(path)
 
     assert result is sentinel
-    assert calls == ["zarr:file:///tmp/zarr-benchmark.nwb:r"]
+    assert calls == [_expected_local_zarr_open_call(path)]
 
 
 def test_open_file_prefers_zarr_for_explicit_zarr_marker(
@@ -168,10 +169,11 @@ def test_open_file_prefers_zarr_for_explicit_zarr_marker(
     monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _unexpected_hdf5_open)
     monkeypatch.setattr(lazynwb.file_io.zarr, "open", _zarr_open)
 
-    result = lazynwb.file_io._open_file("file:///tmp/example.nwb.zarr")
+    path = "file:///tmp/example.nwb.zarr"
+    result = lazynwb.file_io._open_file(path)
 
     assert result is sentinel
-    assert calls == ["zarr:file:///tmp/example.nwb.zarr:r"]
+    assert calls == [_expected_local_zarr_open_call(path)]
 
 
 def test_open_file_uses_fsspec_mapper_for_remote_zarr_without_zarr_suffix(
@@ -270,6 +272,11 @@ def test_storage_options_fall_back_to_legacy_anon_setting() -> None:
 
     assert lazynwb.file_io._get_fsspec_storage_options()["anon"] is True
     assert lazynwb.file_io._get_obstore_storage_options()["skip_signature"] is True
+
+
+def _expected_local_zarr_open_call(path: str) -> str:
+    normalized_path = lazynwb.file_io.from_pathlike(path).as_posix()
+    return f"zarr:{normalized_path}:r"
 
 
 if __name__ == "__main__":
