@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import collections.abc
 import gc
+import os
 import pathlib
 import random
 import shutil
@@ -18,6 +20,7 @@ from pynwb.file import Subject
 from pynwb.misc import Units  # Uncommented: Ensure Units is imported
 
 import lazynwb
+import tests._dandi_sample as dandi_sample
 
 RESET_FILES = False
 CLEANUP_FILES = False
@@ -25,7 +28,8 @@ OVERRIDE_DIR: None | pathlib.Path = (
     None if CLEANUP_FILES else pathlib.Path(__file__).parent / "files" / "nwb_files"
 )
 
-def _reset_nwb_files(dir_path: pathlib.Path):
+
+def _reset_nwb_files(dir_path: pathlib.Path) -> None:
     lazynwb.clear_cache()
     gc.collect()
     if dir_path.exists():
@@ -35,18 +39,60 @@ if OVERRIDE_DIR is not None and RESET_FILES:
     _reset_nwb_files(OVERRIDE_DIR)
 
 
-def pytest_collection_modifyitems(session, config, items: list[pytest.Function]):
+def pytest_addoption(parser: pytest.Parser) -> None:
+    group = parser.getgroup("lazynwb")
+    group.addoption(
+        dandi_sample._DANDI_SAMPLE_OPTION,
+        action="store_true",
+        default=False,
+        help=(
+            "run opt-in DANDI:001637 sample integration tests; alternatively set "
+            f"{dandi_sample._DANDI_SAMPLE_ENV_VAR}=1"
+        ),
+    )
+
+
+def pytest_collection_modifyitems(
+    session: pytest.Session,
+    config: pytest.Config,
+    items: list[pytest.Function],
+) -> None:
     """Modify the order of tests"""
-    # run this test last as it will close all FileAccessor instances which are reused for the whole session
+    _skip_dandi_sample_tests_if_disabled(config, items)
+    # Run this test last because it closes FileAccessor instances reused for the session.
     cache_clearing_test = next(
         (i for i in items if i.name == "test_file_accessor_clearing"), None
     )
     if cache_clearing_test is not None:
         items.remove(cache_clearing_test)
-        items[:] = items + [cache_clearing_test]
+        items[:] = [*items, cache_clearing_test]
 
 
-def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
+def _skip_dandi_sample_tests_if_disabled(
+    config: pytest.Config,
+    items: list[pytest.Function],
+) -> None:
+    if _dandi_sample_tests_enabled(config):
+        return
+    skip_marker = pytest.mark.skip(
+        reason=(
+            f"set {dandi_sample._DANDI_SAMPLE_ENV_VAR}=1 or pass "
+            f"{dandi_sample._DANDI_SAMPLE_OPTION} to run DANDI:001637 sample "
+            "integration tests"
+        )
+    )
+    for item in items:
+        if "dandi_sample" in item.keywords:
+            item.add_marker(skip_marker)
+
+
+def _dandi_sample_tests_enabled(config: pytest.Config) -> bool:
+    return bool(config.getoption(dandi_sample._DANDI_SAMPLE_OPTION)) or (
+        os.environ.get(dandi_sample._DANDI_SAMPLE_ENV_VAR) == "1"
+    )
+
+
+def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = "") -> NWBFile:
     """
     Populates an NWBFile object with predefined content.
     """
@@ -149,14 +195,16 @@ def _add_nwb_file_content(nwbfile: NWBFile, unique_id_suffix: str = ""):
 
 
 @pytest.fixture(scope="session")
-def local_hdf5_path(local_hdf5_paths):
+def local_hdf5_path(
+    local_hdf5_paths: list[pathlib.Path],
+) -> collections.abc.Iterator[pathlib.Path]:
     """Provides a path to a single HDF5 NWB file."""
     # Use the first file in the list of HDF5 files
     yield local_hdf5_paths[0]
 
 
 @pytest.fixture(scope="session")
-def local_hdf5_paths():
+def local_hdf5_paths() -> collections.abc.Iterator[list[pathlib.Path]]:
     """Provides a path to a directory with multiple HDF5 NWB files."""
     test_dir = OVERRIDE_DIR or (
         pathlib.Path(tempfile.gettempdir()) / f"lazynwb_test_dir_{uuid.uuid4().hex}"
@@ -194,13 +242,15 @@ def local_hdf5_paths():
         _reset_nwb_files(test_dir)
 
 @pytest.fixture(scope="session")
-def local_zarr_path(local_zarr_paths):
+def local_zarr_path(
+    local_zarr_paths: list[pathlib.Path],
+) -> collections.abc.Iterator[pathlib.Path]:
     """Provides a path to a single Zarr NWB store (directory)."""
     yield local_zarr_paths[0]
 
 
 @pytest.fixture(scope="session")
-def local_zarr_paths():
+def local_zarr_paths() -> collections.abc.Iterator[list[pathlib.Path]]:
     """Provides a path to a directory with multiple Zarr NWB files."""
     test_dir = OVERRIDE_DIR or (
         pathlib.Path(tempfile.gettempdir()) / f"lazynwb_zarr_dir_{uuid.uuid4().hex}"
@@ -232,3 +282,28 @@ def local_zarr_paths():
 
     if CLEANUP_FILES:
         _reset_nwb_files(test_dir)
+
+
+@pytest.fixture(scope="session")
+def dandi_001637_sample_assets() -> tuple[dandi_sample._DandiSampleAsset, ...]:
+    return dandi_sample._DANDI_SAMPLE_ASSETS
+
+
+@pytest.fixture(scope="session")
+def _dandi_001637_resolved_sample_assets_cache() -> tuple[
+    dandi_sample._DandiSampleResolvedAsset, ...
+]:
+    return dandi_sample._resolve_sample_asset_urls()
+
+
+@pytest.fixture
+def dandi_001637_resolved_sample_assets(
+    _dandi_001637_resolved_sample_assets_cache: tuple[
+        dandi_sample._DandiSampleResolvedAsset, ...
+    ],
+) -> tuple[dandi_sample._DandiSampleResolvedAsset, ...]:
+    dandi_sample._log_resolved_sample_assets(
+        _dandi_001637_resolved_sample_assets_cache,
+        cache_scope="session",
+    )
+    return _dandi_001637_resolved_sample_assets_cache

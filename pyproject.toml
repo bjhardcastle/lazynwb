@@ -185,6 +185,7 @@ doctest_optionflags = [
 testpaths = ["src", "tests"]
 markers = [
     "integration: tests that make real network calls or require external services",
+    "dandi_sample: opt-in DANDI:001637 sample integration framework tests",
     "remote_schema_budget: opt-in remote HDF5 schema request-budget tests",
 ]
 

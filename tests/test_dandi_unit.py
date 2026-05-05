@@ -8,6 +8,7 @@ import pytest
 
 import lazynwb.dandi as dandi
 import lazynwb.utils as utils
+import tests._dandi_sample as dandi_sample
 
 
 class _FakeResponse:
@@ -388,3 +389,93 @@ def test_scan_dandiset_empty_filtered_result_is_clear(
     assert "asset_filter" in message
     assert "Found 1 assets, 1 NWB assets, selected 0." in message
     assert "selected_asset_paths=()" in caplog.text
+
+
+def test_dandi_001637_sample_registry_uses_fixed_small_assets() -> None:
+    assert dandi_sample._DANDI_SAMPLE_DANDISET_ID == "001637"
+    assert dandi_sample._DANDI_SAMPLE_VERSION == "draft"
+    assert dandi_sample._sample_asset_ids() == (
+        "ca248278-e1b2-4896-ad1c-900e4506cd04",
+        "1e37bc82-fd23-4cb5-a253-e794cea932ba",
+    )
+    assert dandi_sample._sample_asset_paths() == (
+        "sub-830849/"
+        "sub-830849_ses-ecephys-830849-2026-03-07-09-48-16_ecephys.nwb",
+        "sub-830795/"
+        "sub-830795_ses-ecephys-830795-2026-02-25-16-03-31_ecephys.nwb",
+    )
+    assert all(
+        asset.max_bounded_read_bytes <= 1024 * 1024
+        for asset in dandi_sample._DANDI_SAMPLE_ASSETS
+    )
+
+
+def test_dandi_001637_sample_resolver_uses_fixed_ids_and_redacts_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    calls: list[tuple[str, str, str | None]] = []
+
+    def _get_asset_s3_url(
+        dandiset_id: str,
+        asset_id: str,
+        version: str | None = None,
+    ) -> str:
+        calls.append((dandiset_id, asset_id, version))
+        return (
+            f"https://dandiarchive.s3.amazonaws.com/blobs/{asset_id}"
+            "?X-Amz-Credential=secret&X-Amz-Signature=also-secret"
+        )
+
+    monkeypatch.setattr(dandi_sample.dandi, "_get_asset_s3_url", _get_asset_s3_url)
+    caplog.set_level(logging.DEBUG, logger=dandi_sample._LOGGER_NAME)
+
+    resolved_assets = dandi_sample._resolve_sample_asset_urls()
+
+    assert calls == [
+        (
+            dandi_sample._DANDI_SAMPLE_DANDISET_ID,
+            asset.asset_id,
+            dandi_sample._DANDI_SAMPLE_VERSION,
+        )
+        for asset in dandi_sample._DANDI_SAMPLE_ASSETS
+    ]
+    assert tuple(resolved.asset.asset_id for resolved in resolved_assets) == (
+        dandi_sample._sample_asset_ids()
+    )
+    assert dandi_sample._DANDI_SAMPLE_DANDISET_ID in caplog.text
+    assert dandi_sample._DANDI_SAMPLE_VERSION in caplog.text
+    for asset in dandi_sample._DANDI_SAMPLE_ASSETS:
+        assert asset.asset_id in caplog.text
+        assert asset.path in caplog.text
+    assert "source_url=https://dandiarchive.s3.amazonaws.com" in caplog.text
+    assert "?<redacted>" in caplog.text
+    assert "secret" not in caplog.text
+    assert "X-Amz-Signature" not in caplog.text
+
+
+def test_dandi_001637_sample_cached_url_logging_redacts_query_values(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    resolved_assets = (
+        dandi_sample._DandiSampleResolvedAsset(
+            asset=dandi_sample._DANDI_SAMPLE_ASSETS[0],
+            source_url=(
+                "https://user:password@dandiarchive.s3.amazonaws.com/blobs/sample"
+                "?token=secret#fragment-secret"
+            ),
+        ),
+    )
+    caplog.set_level(logging.DEBUG, logger=dandi_sample._LOGGER_NAME)
+
+    dandi_sample._log_resolved_sample_assets(resolved_assets, cache_scope="session")
+
+    assert dandi_sample._DANDI_SAMPLE_DANDISET_ID in caplog.text
+    assert dandi_sample._DANDI_SAMPLE_VERSION in caplog.text
+    assert dandi_sample._DANDI_SAMPLE_ASSETS[0].asset_id in caplog.text
+    assert dandi_sample._DANDI_SAMPLE_ASSETS[0].path in caplog.text
+    assert "source_url=https://<redacted>@dandiarchive.s3.amazonaws.com" in caplog.text
+    assert "?<redacted>#<redacted>" in caplog.text
+    assert "password" not in caplog.text
+    assert "secret" not in caplog.text
+    assert "token" not in caplog.text
