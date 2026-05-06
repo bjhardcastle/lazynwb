@@ -23,6 +23,8 @@ dependencies = [
     "pydantic-settings>=2.11.0",
     "aiosqlite>=0.20.0",
     "tomli>=2.0.0; python_version < '3.11'",
+    "ipykernel>=7.2.0",
+    "matplotlib>=3.10.9",
 ]
 version = "0.2.90"
 classifiers = [
