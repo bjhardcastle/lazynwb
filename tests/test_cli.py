@@ -1069,6 +1069,30 @@ def test_preview_command_supports_table_output(
     assert "B" in stdout
 
 
+def test_preview_table_output_preserves_long_string_cells(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    long_label = "stimulus-label-" * 10
+
+    monkeypatch.setattr(
+        cli_preview.lazyframe,
+        "scan_nwb",
+        lambda **kwargs: _FakeLazyFrame(polars.DataFrame({"label": [long_label]})),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["preview", "--format", "table", "units", str(path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert long_label in stdout
+    assert "..." not in stdout
+
+
 def test_preview_command_debug_logs_read_planning_and_materialization(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1371,6 +1395,32 @@ def test_query_command_supports_table_output(
     assert "condition" in stdout
     assert "A" in stdout
     assert "B" in stdout
+
+
+def test_query_table_output_preserves_long_string_cells(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "source.nwb"
+    path.touch()
+    long_label = "session-description-" * 8
+
+    monkeypatch.setattr(
+        cli_query.conversion,
+        "get_sql_context",
+        lambda *args, **kwargs: _FakeQuerySQLContext(
+            polars.DataFrame({"label": [long_label]})
+        ),
+    )
+
+    exit_code, stdout, stderr = _run_cli(
+        ["query", "--format", "table", "SELECT label FROM units", str(path)]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert long_label in stdout
+    assert "..." not in stdout
 
 
 def test_query_command_returns_query_failed_error(

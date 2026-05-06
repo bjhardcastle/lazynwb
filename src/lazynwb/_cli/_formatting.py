@@ -420,6 +420,8 @@ def _write_rows_table(
 
 
 def _preview_cell(value: object, *, max_width: int = 80) -> str:
+    if isinstance(value, str):
+        return value
     if isinstance(value, (dict, list)):
         cell = json.dumps(value, sort_keys=True, separators=(",", ":"))
     elif value is None:
