@@ -39,6 +39,27 @@ if OVERRIDE_DIR is not None and RESET_FILES:
     _reset_nwb_files(OVERRIDE_DIR)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _fresh_catalog_cache_per_test_module(
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> collections.abc.Iterator[None]:
+    module_name = request.module.__name__.replace(".", "_")
+    cache_dir = tmp_path_factory.mktemp(f"{module_name}_catalog_cache")
+    cache_path = cache_dir / "catalog.sqlite"
+    previous_cache_path = os.environ.get("LAZYNWB_CATALOG_CACHE_PATH")
+
+    os.environ["LAZYNWB_CATALOG_CACHE_PATH"] = str(cache_path)
+    lazynwb.clear_cache()
+    yield
+    lazynwb.clear_cache()
+
+    if previous_cache_path is None:
+        os.environ.pop("LAZYNWB_CATALOG_CACHE_PATH", None)
+    else:
+        os.environ["LAZYNWB_CATALOG_CACHE_PATH"] = previous_cache_path
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("lazynwb")
     group.addoption(

@@ -24,7 +24,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "tomli>=2.0.0; python_version < '3.11'",
 ]
-version = "0.2.90"
+version = "1.0.0.dev1"
 classifiers = [
     "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",

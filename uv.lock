@@ -955,7 +955,7 @@ wheels = [
 
 [[package]]
 name = "lazynwb"
-version = "0.2.90"
+version = "1.0.0.dev1"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
