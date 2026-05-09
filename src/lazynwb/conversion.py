@@ -655,39 +655,56 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
         if not _is_group_path_entry(accessor):
             continue
         attrs = _path_entry_attrs(accessor)
+        has_data = _path_entry_has_child_dataset(path, accessor, internal_paths, "data")
+        has_timestamps = _path_entry_has_child_dataset(
+            path,
+            accessor,
+            internal_paths,
+            "timestamps",
+        )
+        has_rate_starting_time = _path_entry_has_rate_starting_time(
+            path,
+            accessor,
+            internal_paths,
+        )
+        neurodata_type = str(attrs.get("neurodata_type", "")).lower()
+        type_says_series = "series" in neurodata_type
 
-        try:
-            if (
-                # required attributes for TimeSeries objects
-                (
-                    f"{path}/timestamps" in internal_paths
-                    or (
-                        "timestamps" in accessor
-                        if not isinstance(accessor, catalog_models._PathSummaryEntry)
-                        else False
-                    )
-                    or _path_entry_has_rate_starting_time(path, accessor, internal_paths)
-                )
-                or
-                # try to accommodate possible variants
-                (
-                    "series" in attrs.get("neurodata_type", "").lower()
-                    and (
-                        f"{path}/data" in internal_paths
-                        or (
-                            "data" in accessor
-                            if not isinstance(
-                                accessor,
-                                catalog_models._PathSummaryEntry,
-                            )
-                            else False
-                        )
-                    )
-                )
-            ):
-                timeseries_paths.append(path)
-        except AttributeError:
-            continue
+        if has_data and (has_timestamps or has_rate_starting_time):
+            logger.debug(
+                "discovered TimeSeries path %s from child datasets "
+                "(has_timestamps=%s has_rate_starting_time=%s)",
+                path,
+                has_timestamps,
+                has_rate_starting_time,
+            )
+            timeseries_paths.append(path)
+        elif type_says_series and (
+            has_data or has_timestamps or has_rate_starting_time
+        ):
+            logger.debug(
+                "discovered TimeSeries-like path %s from neurodata_type=%r "
+                "(has_data=%s has_timestamps=%s has_rate_starting_time=%s)",
+                path,
+                attrs.get("neurodata_type", ""),
+                has_data,
+                has_timestamps,
+                has_rate_starting_time,
+            )
+            timeseries_paths.append(path)
+        elif (
+            f"{path}/timestamps" in internal_paths
+            or f"{path}/starting_time" in internal_paths
+        ):
+            logger.debug(
+                "skipped TimeSeries candidate %s because required child paths "
+                "were not datasets (has_data=%s has_timestamps=%s "
+                "has_rate_starting_time=%s)",
+                path,
+                has_data,
+                has_timestamps,
+                has_rate_starting_time,
+            )
 
     return timeseries_paths
 
@@ -718,7 +735,7 @@ def _get_internal_paths_for_discovery(
     )
 
 
-def _is_group_path_entry(accessor: Any) -> bool:
+def _is_group_path_entry(accessor: object) -> bool:
     if isinstance(accessor, catalog_models._PathSummaryEntry):
         return accessor.is_group
     if isinstance(accessor, dict):
@@ -726,13 +743,13 @@ def _is_group_path_entry(accessor: Any) -> bool:
     return lazynwb.file_io.is_group(accessor)
 
 
-def _path_entry_attrs(accessor: Any) -> dict[str, Any]:
+def _path_entry_attrs(accessor: object) -> dict[str, Any]:
     if isinstance(accessor, dict):
         return dict(accessor.get("attrs", {}))
     return dict(getattr(accessor, "attrs", {}))
 
 
-def _path_entry_is_timeseries(accessor: Any) -> bool:
+def _path_entry_is_timeseries(accessor: object) -> bool:
     if isinstance(accessor, catalog_models._PathSummaryEntry):
         return accessor.is_timeseries
     if isinstance(accessor, dict):
@@ -740,20 +757,60 @@ def _path_entry_is_timeseries(accessor: Any) -> bool:
     return False
 
 
-def _path_entry_has_rate_starting_time(
+def _path_entry_has_child_dataset(
     path: str,
-    accessor: Any,
+    accessor: object,
     internal_paths: dict[str, Any],
+    child_name: str,
 ) -> bool:
-    starting_time = internal_paths.get(f"{path}/starting_time")
-    if starting_time is not None:
-        return "rate" in _path_entry_attrs(starting_time)
+    child_path = f"{path.rstrip('/')}/{child_name}"
+    child_entry = internal_paths.get(child_path)
+    if child_entry is not None:
+        return _is_dataset_path_entry(child_entry)
     if isinstance(accessor, catalog_models._PathSummaryEntry) or isinstance(
         accessor,
         dict,
     ):
         return False
-    return "rate" in getattr(accessor.get("starting_time", {}), "attrs", {})
+    get_child = getattr(accessor, "get", None)
+    if not callable(get_child):
+        return False
+    child = get_child(child_name, None)
+    return child is not None and _is_dataset_path_entry(child)
+
+
+def _is_dataset_path_entry(accessor: object) -> bool:
+    if isinstance(accessor, catalog_models._PathSummaryEntry):
+        return accessor.is_dataset
+    if isinstance(accessor, dict):
+        if "is_dataset" in accessor:
+            return bool(accessor["is_dataset"])
+        return not bool(accessor.get("is_group", False))
+    return not lazynwb.file_io.is_group(accessor)
+
+
+def _path_entry_has_rate_starting_time(
+    path: str,
+    accessor: object,
+    internal_paths: dict[str, Any],
+) -> bool:
+    starting_time = internal_paths.get(f"{path}/starting_time")
+    if starting_time is not None:
+        return _is_dataset_path_entry(starting_time) and (
+            "rate" in _path_entry_attrs(starting_time)
+        )
+    if isinstance(accessor, catalog_models._PathSummaryEntry) or isinstance(
+        accessor,
+        dict,
+    ):
+        return False
+    get_child = getattr(accessor, "get", None)
+    if not callable(get_child):
+        return False
+    starting_time = get_child("starting_time", None)
+    return starting_time is not None and _is_dataset_path_entry(starting_time) and (
+        "rate" in _path_entry_attrs(starting_time)
+    )
 
 
 def _table_path_to_output_path(

@@ -6,14 +6,16 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 
+import h5py
 import numpy as np
 import polars as pl
 import pytest
 from pynwb import NWBHDF5IO, NWBFile
 from pynwb.device import Device
-from pynwb.ecephys import ElectricalSeries, LFP
+from pynwb.ecephys import LFP, ElectricalSeries
 
 import lazynwb
+import lazynwb.conversion as conversion
 
 CLEANUP_FILES = True
 OVERRIDE_DIR: None | pathlib.Path = (
@@ -116,7 +118,38 @@ def test_table_path_to_output_path():
         output_dir, "/processing/behavior/running_speed", ".json", full_path=False
     )
     assert result == output_dir / "running_speed.json"
-    
+
+
+def test_common_path_discovery_does_not_promote_container_with_timeseries_child(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A container that has a child TimeSeries path is not itself a TimeSeries."""
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    nwb_path = tmp_path / "stimulus_container.nwb"
+    with h5py.File(nwb_path, "w") as h5_file:
+        stimulus = h5_file.create_group("processing/stimulus")
+        stimulus.attrs["neurodata_type"] = "ProcessingModule"
+        timestamps = h5_file.create_group("processing/stimulus/timestamps")
+        timestamps.attrs["neurodata_type"] = "TimeSeries"
+        timestamps.create_dataset("data", data=np.array([1.0, 2.0, 3.0]))
+        timestamps.create_dataset("timestamps", data=np.array([0.1, 0.2, 0.3]))
+
+    try:
+        common_paths = conversion._find_common_paths(
+            (nwb_path,),
+            min_file_count=1,
+            disable_progress=True,
+            include_timeseries=True,
+            include_metadata=True,
+        )
+    finally:
+        lazynwb.clear_cache()
+
+    assert "/processing/stimulus" not in common_paths
+    assert "/processing/stimulus/timestamps" in common_paths
+
+
 @pytest.mark.parametrize(
     "nwb_fixture_name",
     [
