@@ -113,6 +113,30 @@ def test_get_internal_paths_include_child_datasets(
         assert path_info[path]["is_timeseries"] is False
 
 
+def test_get_internal_path_info_marks_events_as_timeseries(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    nwb_path = tmp_path / "events.nwb"
+    with h5py.File(nwb_path, "w") as h5_file:
+        events = h5_file.create_group("processing/events")
+        events.attrs["neurodata_type"] = "Events"
+        events.create_dataset("timestamps", data=[0.1, 0.2, 0.3])
+
+    try:
+        path_info = lazynwb.get_internal_path_info(
+            nwb_path,
+            include_child_datasets=True,
+            parents=True,
+        )
+    finally:
+        lazynwb.clear_cache()
+
+    assert path_info["/processing/events"]["is_timeseries"] is True
+    assert path_info["/processing/events/timestamps"]["is_timeseries"] is False
+
+
 def test_get_nwb_file_structure_filtering(local_hdf5_path):
     """Test get_nwb_file_structure with different filtering options."""
     # Test with all filtering disabled

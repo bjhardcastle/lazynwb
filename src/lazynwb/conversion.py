@@ -667,8 +667,7 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
             accessor,
             internal_paths,
         )
-        neurodata_type = str(attrs.get("neurodata_type", "")).lower()
-        type_says_series = "series" in neurodata_type
+        type_says_time_aligned = _path_entry_neurodata_type_is_time_aligned(attrs)
 
         if has_data and (has_timestamps or has_rate_starting_time):
             logger.debug(
@@ -679,11 +678,17 @@ def _filter_timeseries_paths(internal_paths: dict[str, Any]) -> list[str]:
                 has_rate_starting_time,
             )
             timeseries_paths.append(path)
-        elif type_says_series and (
-            has_data or has_timestamps or has_rate_starting_time
+        elif has_timestamps:
+            logger.debug(
+                "discovered timestamps-only time-aligned path %s",
+                path,
+            )
+            timeseries_paths.append(path)
+        elif type_says_time_aligned and (
+            has_data or has_rate_starting_time
         ):
             logger.debug(
-                "discovered TimeSeries-like path %s from neurodata_type=%r "
+                "discovered time-aligned path %s from neurodata_type=%r "
                 "(has_data=%s has_timestamps=%s has_rate_starting_time=%s)",
                 path,
                 attrs.get("neurodata_type", ""),
@@ -755,6 +760,11 @@ def _path_entry_is_timeseries(accessor: object) -> bool:
     if isinstance(accessor, dict):
         return bool(accessor.get("is_timeseries", False))
     return False
+
+
+def _path_entry_neurodata_type_is_time_aligned(attrs: dict[str, Any]) -> bool:
+    neurodata_type = str(attrs.get("neurodata_type", "")).lower()
+    return "series" in neurodata_type or neurodata_type == "events"
 
 
 def _path_entry_has_child_dataset(

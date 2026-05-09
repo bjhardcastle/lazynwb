@@ -932,14 +932,13 @@ def _is_timeseries_summary_path(
         and "rate" in starting_time_entry.attrs
     )
     attrs = dict(entry.attrs)
-    neurodata_type = str(attrs.get("neurodata_type", "")).lower()
-    type_says_series = "timeseries" in neurodata_type or neurodata_type.endswith(
-        "series"
-    )
+    type_says_time_aligned = _neurodata_type_is_time_aligned(attrs)
     if has_data and (has_timestamps or has_rate_starting_time):
         return True
-    return type_says_series and (
-        has_data or has_timestamps or has_rate_starting_time
+    if has_timestamps:
+        return True
+    return type_says_time_aligned and (
+        has_data or has_rate_starting_time
     )
 
 
@@ -960,14 +959,22 @@ def _is_timeseries_accessor_path(
     has_rate_starting_time = _path_entry_has_rate_starting_time(
         path, accessor, path_entries
     )
-    neurodata_type = str(attrs.get("neurodata_type", "")).lower()
-    type_says_series = "timeseries" in neurodata_type or neurodata_type.endswith(
-        "series"
-    )
+    type_says_time_aligned = _neurodata_type_is_time_aligned(attrs)
     if has_data and (has_timestamps or has_rate_starting_time):
         return True
-    return type_says_series and (
-        has_data or has_timestamps or has_rate_starting_time
+    if has_timestamps:
+        return True
+    return type_says_time_aligned and (
+        has_data or has_rate_starting_time
+    )
+
+
+def _neurodata_type_is_time_aligned(attrs: dict[str, Any]) -> bool:
+    neurodata_type = str(attrs.get("neurodata_type", "")).lower()
+    return (
+        "timeseries" in neurodata_type
+        or neurodata_type.endswith("series")
+        or neurodata_type == "events"
     )
 
 

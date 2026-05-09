@@ -124,7 +124,7 @@ def test_common_path_discovery_does_not_promote_container_with_timeseries_child(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A container that has a child TimeSeries path is not itself a TimeSeries."""
+    """A container with a child TimeSeries is not itself a TimeSeries path."""
     monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
     nwb_path = tmp_path / "stimulus_container.nwb"
     with h5py.File(nwb_path, "w") as h5_file:
@@ -134,6 +134,17 @@ def test_common_path_discovery_does_not_promote_container_with_timeseries_child(
         timestamps.attrs["neurodata_type"] = "TimeSeries"
         timestamps.create_dataset("data", data=np.array([1.0, 2.0, 3.0]))
         timestamps.create_dataset("timestamps", data=np.array([0.1, 0.2, 0.3]))
+        rate_timeseries = h5_file.create_group("processing/rate_timeseries")
+        rate_timeseries.attrs["neurodata_type"] = "TimeSeries"
+        rate_timeseries.create_dataset("data", data=np.array([1.0, 2.0, 3.0]))
+        starting_time = rate_timeseries.create_dataset(
+            "starting_time",
+            data=np.array(0.0),
+        )
+        starting_time.attrs["rate"] = 30.0
+        events = h5_file.create_group("processing/events")
+        events.attrs["neurodata_type"] = "Events"
+        events.create_dataset("timestamps", data=np.array([0.1, 0.2, 0.3]))
 
     try:
         common_paths = conversion._find_common_paths(
@@ -148,6 +159,8 @@ def test_common_path_discovery_does_not_promote_container_with_timeseries_child(
 
     assert "/processing/stimulus" not in common_paths
     assert "/processing/stimulus/timestamps" in common_paths
+    assert "/processing/rate_timeseries" in common_paths
+    assert "/processing/events" in common_paths
 
 
 @pytest.mark.parametrize(
