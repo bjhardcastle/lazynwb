@@ -25,6 +25,7 @@ import lazynwb._catalog._schema as catalog_schema
 import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
 import lazynwb._catalog.polars as catalog_polars
+import lazynwb._config as lazynwb_config
 import lazynwb._hdf5.range_reader as hdf5_range_reader
 import lazynwb._hdf5.reader as hdf5_reader
 import lazynwb._zarr.reader as zarr_reader
@@ -115,6 +116,32 @@ def get_df(
     raise_on_missing: bool = False,
     ignore_errors: bool = False,
     low_memory: bool = False,
+    as_polars: None = None,
+    _catalog_snapshots: Mapping[
+        str,
+        catalog_models._TableSchemaSnapshot,
+    ]
+    | None = None,
+) -> pd.DataFrame | pl.DataFrame: ...
+
+
+@typing.overload
+def get_df(
+    nwb_data_sources: (
+        str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike]
+    ),
+    search_term: str,
+    exact_path: bool = False,
+    include_column_names: str | Iterable[str] | None = None,
+    exclude_column_names: str | Iterable[str] | None = None,
+    nwb_path_to_row_indices: Mapping[str, Sequence[int]] | None = None,
+    exclude_array_columns: bool = True,
+    parallel: bool = True,
+    use_process_pool: bool = False,
+    disable_progress: bool = False,
+    raise_on_missing: bool = False,
+    ignore_errors: bool = False,
+    low_memory: bool = False,
     as_polars: Literal[False] = False,
     _catalog_snapshots: Mapping[
         str,
@@ -148,6 +175,7 @@ def get_df(
 ) -> pl.DataFrame: ...
 
 
+@typing.overload
 def get_df(
     nwb_data_sources: (
         str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike]
@@ -164,7 +192,32 @@ def get_df(
     raise_on_missing: bool = False,
     ignore_errors: bool = False,
     low_memory: bool = False,
-    as_polars: bool = False,
+    as_polars: bool | None = None,
+    _catalog_snapshots: Mapping[
+        str,
+        catalog_models._TableSchemaSnapshot,
+    ]
+    | None = None,
+) -> pd.DataFrame | pl.DataFrame: ...
+
+
+def get_df(
+    nwb_data_sources: (
+        str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike]
+    ),
+    search_term: str,
+    exact_path: bool = False,
+    include_column_names: str | Iterable[str] | None = None,
+    exclude_column_names: str | Iterable[str] | None = None,
+    nwb_path_to_row_indices: Mapping[str, Sequence[int]] | None = None,
+    exclude_array_columns: bool = True,
+    parallel: bool = True,
+    use_process_pool: bool = False,
+    disable_progress: bool = False,
+    raise_on_missing: bool = False,
+    ignore_errors: bool = False,
+    low_memory: bool = False,
+    as_polars: bool | None = None,
     _catalog_snapshots: Mapping[
         str,
         catalog_models._TableSchemaSnapshot,
@@ -206,10 +259,12 @@ def get_df(
         will be logged.
     low_memory : bool, default False
         If True, the data will be read in smaller chunks to reduce memory usage, at the cost of speed.
-    as_polars : bool, default False
-        If True, a Polars DataFrame will be returned. Otherwise, a Pandas DataFrame will be returned.
+    as_polars : bool or None, default None
+        If True, a Polars DataFrame will be returned. If False, a Pandas DataFrame will be
+        returned. If None, ``lazynwb.config.use_polars`` decides the DataFrame backend.
     """
     t0 = time.time()
+    as_polars = lazynwb_config._resolve_as_polars(as_polars)
 
     if nwb_path_to_row_indices is not None:
         paths = tuple(nwb_path_to_row_indices.keys())
@@ -2452,10 +2507,11 @@ def get_spike_times_in_intervals(
     keep_only_necessary_cols: bool = False,
     use_process_pool: bool = True,
     disable_progress: bool = False,
-    as_polars: bool = False,
+    as_polars: bool | None = None,
     align_times: bool = False,
-) -> pl.DataFrame:
+) -> pd.DataFrame | pl.DataFrame:
     """"""
+    as_polars = lazynwb_config._resolve_as_polars(as_polars)
     if align_times and as_counts:
         raise ValueError(
             "Cannot use `align_times` and `as_counts` at the same time: please choose one"

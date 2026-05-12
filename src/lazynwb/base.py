@@ -14,6 +14,7 @@ import polars as pl
 import tqdm
 import upath
 
+import lazynwb._config as lazynwb_config
 import lazynwb.file_io
 import lazynwb.tables
 import lazynwb.timeseries
@@ -213,19 +214,19 @@ class LazyNWB:
         return _cast(self._accessor, "session_description")
 
     @property
-    def trials(self) -> pd.DataFrame:
+    def trials(self) -> pd.DataFrame | pl.DataFrame:
         return lazynwb.tables.get_df(
             self._file_path, search_term="/intervals/trials", exact_path=True
         )
 
     @property
-    def epochs(self) -> pd.DataFrame:
+    def epochs(self) -> pd.DataFrame | pl.DataFrame:
         return lazynwb.tables.get_df(
             self._file_path, search_term="/intervals/epochs", exact_path=True
         )
 
     @property
-    def electrodes(self) -> pd.DataFrame:
+    def electrodes(self) -> pd.DataFrame | pl.DataFrame:
         return lazynwb.tables.get_df(
             self._file_path,
             search_term="/general/extracellular_ephys/electrodes",
@@ -233,7 +234,7 @@ class LazyNWB:
         )
 
     @property
-    def units(self) -> pd.DataFrame:
+    def units(self) -> pd.DataFrame | pl.DataFrame:
         return lazynwb.tables.get_df(
             self._file_path,
             search_term="/units",
@@ -320,6 +321,22 @@ class LazyNWB:
         disable_progress: bool = True,
         raise_on_missing: bool = True,
         ignore_errors: bool = False,
+        as_polars: None = None,
+    ) -> pd.DataFrame | pl.DataFrame:
+        ...
+
+    @typing.overload
+    def get_df(
+        self,
+        search_term: str,
+        exact_path: bool = False,
+        include_column_names: str | Iterable[str] | None = None,
+        exclude_column_names: str | Iterable[str] | None = None,
+        exclude_array_columns: bool = True,
+        use_process_pool: bool = False,
+        disable_progress: bool = True,
+        raise_on_missing: bool = True,
+        ignore_errors: bool = False,
         as_polars: Literal[False] = False,
     ) -> pd.DataFrame:
         ...
@@ -340,6 +357,7 @@ class LazyNWB:
     ) -> pl.DataFrame:
         ...
 
+    @typing.overload
     def get_df(
         self,
         search_term: str,
@@ -351,7 +369,22 @@ class LazyNWB:
         disable_progress: bool = True,
         raise_on_missing: bool = True,
         ignore_errors: bool = False,
-        as_polars: bool = False,
+        as_polars: bool | None = None,
+    ) -> pd.DataFrame | pl.DataFrame:
+        ...
+
+    def get_df(
+        self,
+        search_term: str,
+        exact_path: bool = False,
+        include_column_names: str | Iterable[str] | None = None,
+        exclude_column_names: str | Iterable[str] | None = None,
+        exclude_array_columns: bool = True,
+        use_process_pool: bool = False,
+        disable_progress: bool = True,
+        raise_on_missing: bool = True,
+        ignore_errors: bool = False,
+        as_polars: bool | None = None,
     ) -> pd.DataFrame | pl.DataFrame:
         return lazynwb.tables.get_df(
             nwb_data_sources=self._file_path,
@@ -365,7 +398,7 @@ class LazyNWB:
             raise_on_missing=raise_on_missing,
             ignore_errors=ignore_errors,
             as_polars=as_polars,
-        )  # type: ignore[call-overload]
+        )
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -471,6 +504,15 @@ class Subject:
 def get_metadata_df(
     nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
+    as_polars: None = None,
+) -> pd.DataFrame | pl.DataFrame:
+    ...
+
+
+@typing.overload
+def get_metadata_df(
+    nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
+    disable_progress: bool = False,
     as_polars: Literal[False] = False,
 ) -> pd.DataFrame:
     ...
@@ -485,11 +527,21 @@ def get_metadata_df(
     ...
 
 
+@typing.overload
 def get_metadata_df(
     nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
-    as_polars: bool = False,
-) -> pd.DataFrame:
+    as_polars: bool | None = None,
+) -> pd.DataFrame | pl.DataFrame:
+    ...
+
+
+def get_metadata_df(
+    nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
+    disable_progress: bool = False,
+    as_polars: bool | None = None,
+) -> pd.DataFrame | pl.DataFrame:
+    as_polars = lazynwb_config._resolve_as_polars(as_polars)
     if isinstance(nwb_path_or_paths, str) or not isinstance(
         nwb_path_or_paths, Iterable
     ):

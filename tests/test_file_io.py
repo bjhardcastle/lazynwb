@@ -10,13 +10,32 @@ import lazynwb.file_io
 @pytest.fixture(autouse=True)
 def reset_file_io_config():
     """Keep file I/O config isolated between tests."""
+    original_use_polars = lazynwb.file_io.config.use_polars
     original_anon = lazynwb.file_io.config.anon
     original_storage_options = dict(lazynwb.file_io.config.fsspec_storage_options)
     try:
         yield
     finally:
+        lazynwb.file_io.config.use_polars = original_use_polars
         lazynwb.file_io.config.anon = original_anon
         lazynwb.file_io.config.fsspec_storage_options = original_storage_options
+
+
+def test_file_io_config_aliases_global_config() -> None:
+    assert lazynwb.file_io.config is lazynwb.config
+    assert lazynwb.file_io.FileIOConfig is lazynwb.Config
+
+
+def test_config_reads_global_and_legacy_environment_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_USE_POLARS", "true")
+    monkeypatch.setenv("LAZYNWB_FILE_IO_USE_REMFILE", "false")
+
+    config = lazynwb.Config()
+
+    assert config.use_polars is True
+    assert config.use_remfile is False
 
 
 @pytest.mark.parametrize(

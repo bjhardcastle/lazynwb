@@ -16,12 +16,12 @@ from typing import Any
 import fsspec
 import h5py
 import obstore.fsspec
-import pydantic_settings
 import remfile
 import upath
 import zarr
 
 import lazynwb._catalog.models as catalog_models
+import lazynwb._config as lazynwb_config
 import lazynwb._storage_options
 import lazynwb.types_
 import lazynwb.utils
@@ -29,25 +29,8 @@ import lazynwb.utils
 logger = logging.getLogger(__name__)
 
 
-class FileIOConfig(pydantic_settings.BaseSettings):
-    """
-    Global configuration for file I/O behavior.
-    """
-
-    model_config = pydantic_settings.SettingsConfigDict(
-        env_prefix="LAZYNWB_FILE_IO_",
-    )
-    use_remfile: bool = True
-    use_obstore: bool = False
-    anon: bool | None = None
-    fsspec_storage_options: dict[str, Any] = {
-        "anon": False,
-    }
-    disable_cache: bool = False
-
-
-# singleton config
-config = FileIOConfig()
+FileIOConfig = lazynwb_config.Config
+config = lazynwb_config.config
 
 # cache for FileAccessor instances by canonical path
 _accessor_cache: dict[str, FileAccessor] = {}

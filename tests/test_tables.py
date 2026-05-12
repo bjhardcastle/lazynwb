@@ -35,6 +35,22 @@ def test_internal_column_names(local_hdf5_path):
     for col in lazynwb.INTERNAL_COLUMN_NAMES:
         assert col in df.columns, f"Internal column {col!r} not found"
 
+
+def test_get_df_uses_configured_polars_default(local_hdf5_path, monkeypatch):
+    monkeypatch.setattr(lazynwb.config, "use_polars", True)
+
+    df = lazynwb.get_df(local_hdf5_path, "/intervals/trials", exact_path=True)
+    pandas_df = lazynwb.get_df(
+        local_hdf5_path,
+        "/intervals/trials",
+        exact_path=True,
+        as_polars=False,
+    )
+
+    assert isinstance(df, pl.DataFrame)
+    assert isinstance(pandas_df, pd.DataFrame)
+
+
 @pytest.mark.parametrize("table_name", ["trials", "units"])
 def test_contents(local_hdf5_path, table_name):
     """Validate contents of dataframes against those obtained via pynwb"""

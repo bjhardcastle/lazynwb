@@ -457,10 +457,11 @@ df = lazynwb.get_df('az://my-container/data/file.nwb', '/units')
 df = lazynwb.get_df('https://example.com/data/file.nwb', '/units')
 ```
 
-Configure cloud access via `lazynwb.file_io.config`:
+Configure global defaults via `lazynwb.config`:
 ```python
-from lazynwb.file_io import config
+from lazynwb import config
 
+config.use_polars = True                          # return Polars by default from get_df/get_metadata_df
 config.use_obstore = True                         # use obstore for S3/GCS/Azure (default: False)
 config.use_remfile = False                        # use remfile for HTTP byte-range requests (default: True)
 config.anon = True                                # anonymous access across backends
