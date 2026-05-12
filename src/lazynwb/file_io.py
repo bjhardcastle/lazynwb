@@ -21,16 +21,13 @@ import upath
 import zarr
 
 import lazynwb._catalog.models as catalog_models
-import lazynwb._config as lazynwb_config
 import lazynwb._storage_options
 import lazynwb.types_
 import lazynwb.utils
+from lazynwb._config import config
 
 logger = logging.getLogger(__name__)
 
-
-FileIOConfig = lazynwb_config.Config
-config = lazynwb_config.config
 
 # cache for FileAccessor instances by canonical path
 _accessor_cache: dict[str, FileAccessor] = {}
