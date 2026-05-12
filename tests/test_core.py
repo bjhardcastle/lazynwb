@@ -82,6 +82,46 @@ def test_lazynwb_get_df_uses_configured_polars_default(local_hdf5_path, monkeypa
     assert isinstance(pandas_df, pd.DataFrame)
 
 
+def test_get_returns_dataframe_for_table(local_hdf5_path):
+    df = lazynwb.get(local_hdf5_path, "/intervals/trials", exact_path=True)
+
+    assert isinstance(df, pd.DataFrame)
+    assert not df.empty
+
+
+def test_get_returns_timeseries_for_timeseries_container(local_hdf5_path):
+    result = lazynwb.get(
+        local_hdf5_path,
+        "/processing/behavior/running_speed_with_timestamps",
+        exact_path=True,
+    )
+
+    assert isinstance(result, lazynwb.TimeSeries)
+    assert result._table_path == "/processing/behavior/running_speed_with_timestamps"
+
+
+def test_get_force_as_df_for_timeseries(local_hdf5_path):
+    df = lazynwb.get(
+        local_hdf5_path,
+        "/processing/behavior/running_speed_with_timestamps",
+        exact_path=True,
+        as_df=True,
+        as_polars=True,
+    )
+
+    assert isinstance(df, pl.DataFrame)
+    assert "timestamps" in df.columns
+    assert "data" in df.columns
+
+
+def test_lazynwb_get_uses_general_get(local_hdf5_path):
+    nwb = lazynwb.LazyNWB(local_hdf5_path)
+
+    result = nwb.get("running_speed_with_rate")
+
+    assert isinstance(result, lazynwb.TimeSeries)
+
+
 def test_get_metadata_df_zarr(local_zarr_path):
     df = lazynwb.get_metadata_df(local_zarr_path, disable_progress=True)
     assert isinstance(df, pd.DataFrame)

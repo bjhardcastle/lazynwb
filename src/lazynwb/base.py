@@ -309,6 +309,36 @@ class LazyNWB:
             self._file_path, search_term=search_term, match_all=False
         )
 
+    def get(
+        self,
+        search_term: str,
+        *,
+        as_df: bool = False,
+        exact_path: bool = False,
+        include_column_names: str | Iterable[str] | None = None,
+        exclude_column_names: str | Iterable[str] | None = None,
+        exclude_array_columns: bool = True,
+        use_process_pool: bool = False,
+        disable_progress: bool = True,
+        raise_on_missing: bool = True,
+        ignore_errors: bool = False,
+        as_polars: bool | None = None,
+    ) -> pd.DataFrame | pl.DataFrame | lazynwb.timeseries.TimeSeries:
+        return get(
+            nwb_data_sources=self._file_path,
+            search_term=search_term,
+            as_df=as_df,
+            exact_path=exact_path,
+            include_column_names=include_column_names,
+            exclude_column_names=exclude_column_names,
+            exclude_array_columns=exclude_array_columns,
+            use_process_pool=use_process_pool,
+            disable_progress=disable_progress,
+            raise_on_missing=raise_on_missing,
+            ignore_errors=ignore_errors,
+            as_polars=as_polars,
+        )
+
     @typing.overload
     def get_df(
         self,
@@ -498,6 +528,223 @@ class Subject:
 
     def _to_dict(self) -> dict[str, Any]:
         return to_dict(self)
+
+
+def _source_paths(
+    nwb_data_sources: (
+        str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike]
+    ),
+) -> tuple[str | lazynwb.types_.PathLike, ...]:
+    if isinstance(nwb_data_sources, (str, bytes)) or not isinstance(
+        nwb_data_sources, Iterable
+    ):
+        return (nwb_data_sources,)
+    return tuple(nwb_data_sources)
+
+
+def _path_info_key(path: str) -> str:
+    normalized_path = lazynwb.utils.normalize_internal_file_path(path).rstrip("/")
+    if normalized_path == "":
+        return "/"
+    return f"/{normalized_path.removeprefix('/')}"
+
+
+def _get_matching_path(
+    path_info: dict[str, dict[str, Any]],
+    search_term: str,
+    exact_path: bool,
+) -> tuple[str, dict[str, Any]] | None:
+    search_path = _path_info_key(search_term)
+    match = path_info.get(search_path)
+    if match is not None:
+        return search_path, match
+    if exact_path:
+        return None
+
+    timeseries_matches = tuple(
+        (path, metadata)
+        for path, metadata in path_info.items()
+        if metadata["is_timeseries"] and search_term in path
+    )
+    if timeseries_matches:
+        if len(timeseries_matches) > 1:
+            logger.warning(
+                "Found multiple timeseries matching %r: %s - returning first",
+                search_term,
+                [path for path, _ in timeseries_matches],
+            )
+        return timeseries_matches[0]
+    return None
+
+
+def _get_direct_container(
+    nwb_data_source: lazynwb.types_.PathLike,
+    search_term: str,
+) -> tuple[str, dict[str, Any]] | None:
+    search_path = _path_info_key(search_term)
+    file = lazynwb.file_io._get_accessor(nwb_data_source)
+    accessor = file.get(search_path, None)
+    if accessor is None:
+        return None
+    return search_path, lazynwb.file_io._path_metadata_from_entry(
+        search_path,
+        accessor,
+        {},
+    )
+
+
+def _get_inferred_container(
+    nwb_data_source: lazynwb.types_.PathLike,
+    search_term: str,
+    exact_path: bool,
+) -> tuple[str, dict[str, Any]] | None:
+    direct_match = _get_direct_container(
+        nwb_data_source=nwb_data_source,
+        search_term=search_term,
+    )
+    if direct_match is not None or exact_path:
+        logger.debug(
+            "general get direct container inference source=%r search_term=%r "
+            "exact_path=%s match=%s is_timeseries=%s",
+            nwb_data_source,
+            search_term,
+            exact_path,
+            None if direct_match is None else direct_match[0],
+            None if direct_match is None else direct_match[1]["is_timeseries"],
+        )
+        return direct_match
+
+    path_info = lazynwb.file_io.get_internal_path_info(nwb_data_source)
+    match = _get_matching_path(
+        path_info=path_info,
+        search_term=search_term,
+        exact_path=exact_path,
+    )
+    logger.debug(
+        "general get container inference source=%r search_term=%r exact_path=%s "
+        "match=%s is_timeseries=%s",
+        nwb_data_source,
+        search_term,
+        exact_path,
+        None if match is None else match[0],
+        None if match is None else match[1]["is_timeseries"],
+    )
+    return match
+
+
+def get(
+    nwb_data_sources: (
+        str | lazynwb.types_.PathLike | Iterable[str | lazynwb.types_.PathLike]
+    ),
+    search_term: str,
+    *,
+    as_df: bool = False,
+    exact_path: bool = False,
+    include_column_names: str | Iterable[str] | None = None,
+    exclude_column_names: str | Iterable[str] | None = None,
+    exclude_array_columns: bool = True,
+    use_process_pool: bool = False,
+    disable_progress: bool = False,
+    raise_on_missing: bool = False,
+    ignore_errors: bool = False,
+    as_polars: bool | None = None,
+) -> pd.DataFrame | pl.DataFrame | lazynwb.timeseries.TimeSeries:
+    """
+    Return a DataFrame or TimeSeries from one or more NWB files.
+
+    By default, TimeSeries containers return a :class:`lazynwb.TimeSeries` and
+    table-like containers return a pandas or polars DataFrame. Set ``as_df=True``
+    to force DataFrame materialization for any container, including TimeSeries.
+    """
+    paths = _source_paths(nwb_data_sources)
+    if not paths:
+        raise ValueError("At least one NWB source is required")
+    data_sources: (
+        str
+        | lazynwb.types_.PathLike
+        | tuple[
+            str | lazynwb.types_.PathLike,
+            ...,
+        ]
+    )
+    data_sources = paths[0] if len(paths) == 1 else paths
+    if as_df:
+        logger.debug(
+            "general get forced DataFrame path source_count=%d search_term=%r "
+            "exact_path=%s as_polars=%s",
+            len(paths),
+            search_term,
+            exact_path,
+            as_polars,
+        )
+        return lazynwb.tables.get_df(
+            nwb_data_sources=data_sources,
+            search_term=search_term,
+            exact_path=exact_path,
+            include_column_names=include_column_names,
+            exclude_column_names=exclude_column_names,
+            exclude_array_columns=exclude_array_columns,
+            use_process_pool=use_process_pool,
+            disable_progress=disable_progress,
+            raise_on_missing=raise_on_missing,
+            ignore_errors=ignore_errors,
+            as_polars=as_polars,
+        )
+
+    inferred_container = _get_inferred_container(
+        nwb_data_source=paths[0],
+        search_term=search_term,
+        exact_path=exact_path,
+    )
+    if (
+        inferred_container is not None
+        and inferred_container[1]["is_timeseries"]
+        and len(paths) > 1
+    ):
+        raise ValueError(
+            "TimeSeries containers can only be returned for a single NWB source; "
+            "set `as_df=True` to materialize matching TimeSeries from multiple "
+            "sources as a DataFrame"
+        )
+    if inferred_container is not None and inferred_container[1]["is_timeseries"]:
+        timeseries_path = inferred_container[0]
+        logger.debug(
+            "general get returning TimeSeries source=%r search_term=%r "
+            "timeseries_path=%s",
+            paths[0],
+            search_term,
+            timeseries_path,
+        )
+        return lazynwb.timeseries.TimeSeries(
+            _file_path=paths[0],
+            _table_path=timeseries_path,
+        )
+
+    table_search_term = (
+        inferred_container[0] if inferred_container is not None else search_term
+    )
+    logger.debug(
+        "general get returning DataFrame source_count=%d search_term=%r "
+        "table_search_term=%r exact_path=%s as_polars=%s",
+        len(paths),
+        search_term,
+        table_search_term,
+        exact_path,
+        as_polars,
+    )
+    return lazynwb.tables.get_df(
+        nwb_data_sources=data_sources,
+        search_term=table_search_term,
+        exact_path=exact_path or inferred_container is not None,
+        include_column_names=include_column_names,
+        exclude_column_names=exclude_column_names,
+        exclude_array_columns=exclude_array_columns,
+        use_process_pool=use_process_pool,
+        disable_progress=disable_progress,
+        raise_on_missing=raise_on_missing,
+        ignore_errors=ignore_errors,
+        as_polars=as_polars,
+    )
 
 
 @typing.overload

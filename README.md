@@ -162,6 +162,17 @@ lazynwb.get_internal_paths('my_file.nwb')
 # ['/intervals/trials', '/processing/behavior/running_speed', '/units', ...]
 ```
 
+Use `get` when you want lazynwb to choose the return type from the NWB container:
+```python
+df = lazynwb.get('my_file.nwb', '/units')  # pandas DataFrame by default
+ts = lazynwb.get('my_file.nwb', '/processing/behavior/running_speed', exact_path=True)
+```
+
+Force DataFrame materialization, even for a TimeSeries container:
+```python
+df = lazynwb.get('my_file.nwb', '/processing/behavior/running_speed', exact_path=True, as_df=True)
+```
+
 ---
 
 ## Reading tables
@@ -298,6 +309,13 @@ nwb.subject.date_of_birth
 Get a table as polars:
 ```python
 df = nwb.get_df('/units', as_polars=True)
+```
+
+Use the general accessor when you want tables as DataFrames and TimeSeries as
+`TimeSeries` objects:
+```python
+result = nwb.get('/processing/behavior/running_speed', exact_path=True)
+df = nwb.get('/processing/behavior/running_speed', exact_path=True, as_df=True)
 ```
 
 Get a summary of everything in the file:
