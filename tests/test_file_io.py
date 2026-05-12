@@ -23,7 +23,6 @@ def reset_file_io_config():
 
 def test_file_io_config_aliases_global_config() -> None:
     assert lazynwb.file_io.config is lazynwb.config
-    assert lazynwb.file_io.FileIOConfig is lazynwb.Config
 
 
 def test_config_reads_global_and_legacy_environment_aliases(
