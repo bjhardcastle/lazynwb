@@ -66,6 +66,9 @@ The related upstream issue is still open:
 
 <https://github.com/pola-rs/polars/issues/23026>
 
+For the separate Polars `1.39+` dynamic TopK predicate behavior in Python IO
+plugins, see `docs/polars-dynamic-topk-python-io-plugin.md`.
+
 ## Remote NWB/HDF5 impact
 
 Natural query measured against a public remote HDF5 NWB file:

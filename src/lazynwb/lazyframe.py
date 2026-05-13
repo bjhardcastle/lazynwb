@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import functools
+import json
 import logging
+import operator
 from collections.abc import Iterable, Iterator, Mapping
 
 import polars as pl
@@ -13,6 +16,8 @@ import lazynwb.tables
 import lazynwb.types_
 
 logger = logging.getLogger(__name__)
+
+_POLARS_DYNAMIC_PREDICATE_TOKEN = "dynamic_pred"
 
 
 def scan_nwb(
@@ -132,6 +137,17 @@ def scan_nwb(
             )
         else:
             logger.debug(f"Batch size set to {batch_size} rows per batch")
+
+        predicate, dynamic_predicate_count = _remove_polars_dynamic_predicates(
+            predicate
+        )
+        if dynamic_predicate_count:
+            logger.debug(
+                "Removed %d Polars dynamic predicate conjunct(s) from %r scan "
+                "predicate; Python IO plugins do not receive the dynamic TopK state",
+                dynamic_predicate_count,
+                table_path,
+            )
 
         if predicate is not None:
             # - if we have a predicate, we'll fetch the minimal df, apply predicate, then fetch remaining columns in with_columns
@@ -280,6 +296,136 @@ def scan_nwb(
     return polars.io.plugins.register_io_source(
         io_source=source_generator, schema=schema
     )
+
+
+def _remove_polars_dynamic_predicates(
+    predicate: pl.Expr | None,
+) -> tuple[pl.Expr | None, int]:
+    if predicate is None or not _predicate_contains_polars_dynamic_predicate(
+        predicate
+    ):
+        return predicate, 0
+
+    conjuncts = _split_conjunctive_predicate(predicate)
+    retained_conjuncts: list[pl.Expr] = []
+    dropped_conjunct_count = 0
+    for conjunct in conjuncts:
+        if not _predicate_contains_polars_dynamic_predicate(conjunct):
+            retained_conjuncts.append(conjunct)
+            continue
+        if _is_standalone_polars_dynamic_predicate(conjunct):
+            dropped_conjunct_count += 1
+            continue
+        logger.debug(
+            "Cannot isolate Polars dynamic predicate from pushed predicate %s; "
+            "leaving predicate unchanged",
+            conjunct,
+        )
+        return predicate, 0
+
+    if dropped_conjunct_count == 0:
+        return predicate, 0
+    if not retained_conjuncts:
+        return None, dropped_conjunct_count
+    return functools.reduce(operator.and_, retained_conjuncts), dropped_conjunct_count
+
+
+def _split_conjunctive_predicate(predicate: pl.Expr) -> list[pl.Expr]:
+    if not _is_binary_and_predicate(predicate):
+        return [predicate]
+
+    conjuncts: list[pl.Expr] = []
+    try:
+        children = predicate.meta.pop()
+    except BaseException as exc:
+        if not _is_polars_panic_exception(exc):
+            raise
+        logger.debug(
+            "Polars panicked while splitting pushed predicate %s; leaving it intact",
+            predicate,
+        )
+        return [predicate]
+
+    for child in children:
+        conjuncts.extend(_split_conjunctive_predicate(child))
+    return conjuncts
+
+
+def _is_binary_and_predicate(predicate: pl.Expr) -> bool:
+    payload = _predicate_json_payload(predicate)
+    if not isinstance(payload, dict):
+        return False
+    binary_expr = payload.get("BinaryExpr")
+    return isinstance(binary_expr, dict) and binary_expr.get("op") == "And"
+
+
+def _is_standalone_polars_dynamic_predicate(predicate: pl.Expr) -> bool:
+    payload = _predicate_json_payload(predicate)
+    if not isinstance(payload, dict):
+        return False
+    display_expr = payload.get("Display")
+    if not isinstance(display_expr, dict):
+        return False
+    fmt_str = display_expr.get("fmt_str")
+    return isinstance(fmt_str, str) and fmt_str.startswith(
+        _POLARS_DYNAMIC_PREDICATE_TOKEN
+    )
+
+
+def _predicate_contains_polars_dynamic_predicate(predicate: pl.Expr) -> bool:
+    predicate_text = str(predicate)
+    if _POLARS_DYNAMIC_PREDICATE_TOKEN not in predicate_text:
+        return False
+
+    payload = _predicate_json_payload(predicate)
+    if payload is None:
+        return True
+    return _json_payload_contains_polars_dynamic_predicate(payload)
+
+
+def _predicate_json_payload(predicate: pl.Expr) -> object | None:
+    try:
+        serialized = predicate.meta.serialize(format="json")
+    except BaseException as exc:
+        if not _is_polars_panic_exception(exc):
+            raise
+        logger.debug(
+            "Polars panicked while serializing pushed predicate %s to JSON",
+            predicate,
+        )
+        return None
+
+    if not isinstance(serialized, str):
+        return None
+    try:
+        return json.loads(serialized)
+    except json.JSONDecodeError:
+        logger.debug("Could not decode pushed predicate JSON: %s", serialized)
+        return None
+
+
+def _json_payload_contains_polars_dynamic_predicate(payload: object) -> bool:
+    if isinstance(payload, dict):
+        display_expr = payload.get("Display")
+        if isinstance(display_expr, dict):
+            fmt_str = display_expr.get("fmt_str")
+            if isinstance(fmt_str, str) and fmt_str.startswith(
+                _POLARS_DYNAMIC_PREDICATE_TOKEN
+            ):
+                return True
+        return any(
+            _json_payload_contains_polars_dynamic_predicate(value)
+            for value in payload.values()
+        )
+    if isinstance(payload, list):
+        return any(
+            _json_payload_contains_polars_dynamic_predicate(value) for value in payload
+        )
+    return False
+
+
+def _is_polars_panic_exception(exc: BaseException) -> bool:
+    return type(exc).__name__ == "PanicException"
 
 
 def _get_limited_path_to_row_indices(

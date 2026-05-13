@@ -4,15 +4,15 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 
+import h5py
 import polars as pl
 import pytest
-
-import h5py
 from pynwb import NWBHDF5IO, NWBFile
 from pynwb.epoch import TimeIntervals
 
 import lazynwb
 import lazynwb.tables
+
 
 def test_polars_dtype_inference(local_hdf5_path):
     schema = lazynwb.tables.get_table_schema(
@@ -159,6 +159,41 @@ def test_scan_nwb_predicate_pushdown(local_hdf5_path):
         filtered_internal_df[lazynwb.TABLE_INDEX_COLUMN_NAME] == 3
     ).all(), "Predicate pushdown filter on internal column was not applied correctly"
     assert len(filtered_internal_df) == len(lf.collect().filter(internal_expr)), "Filtered DataFrame length does not match length when collecting and filtering separately"
+
+
+def test_scan_nwb_sort_head_ignores_polars_dynamic_topk_predicate(
+    local_hdf5_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Polars 1.39+ may push optimizer-only dynamic TopK predicates into IO plugins."""
+    caplog.set_level(logging.DEBUG, logger="lazynwb.lazyframe")
+
+    lf = lazynwb.scan_nwb(
+        source=local_hdf5_path,
+        table_path="/units",
+        disable_progress=True,
+    )
+    query = (
+        lf.filter(pl.col("structure") == "VISp")
+        .sort(lazynwb.TABLE_INDEX_COLUMN_NAME, descending=True)
+        .head(1)
+        .select(lazynwb.TABLE_INDEX_COLUMN_NAME, "spike_times")
+    )
+    plan = query.explain()
+
+    result = query.collect()
+    expected = (
+        lf.collect()
+        .filter(pl.col("structure") == "VISp")
+        .sort(lazynwb.TABLE_INDEX_COLUMN_NAME, descending=True)
+        .head(1)
+        .select(lazynwb.TABLE_INDEX_COLUMN_NAME, "spike_times")
+    )
+
+    assert result.equals(expected)
+    if "dynamic_predicate" in plan:
+        assert "Removed 1 Polars dynamic predicate conjunct" in caplog.text
+
 
 def test_scan_nwb_raises_on_missing(local_hdf5_path):
     """Test that scan_nwb raises an error when the table is not found and raise_on_missing=True."""
