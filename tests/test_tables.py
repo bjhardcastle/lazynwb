@@ -1,11 +1,13 @@
 import logging
 
-import pytest
-
+import numpy as np
 import pandas as pd
 import polars as pl
-import lazynwb
 import pynwb
+import pytest
+
+import lazynwb
+import lazynwb.tables
 
 
 @pytest.mark.parametrize(
@@ -32,6 +34,22 @@ def test_internal_column_names(local_hdf5_path):
     )
     for col in lazynwb.INTERNAL_COLUMN_NAMES:
         assert col in df.columns, f"Internal column {col!r} not found"
+
+
+def test_get_df_uses_configured_polars_default(local_hdf5_path, monkeypatch):
+    monkeypatch.setattr(lazynwb.config, "use_polars", True)
+
+    df = lazynwb.get_df(local_hdf5_path, "/intervals/trials", exact_path=True)
+    pandas_df = lazynwb.get_df(
+        local_hdf5_path,
+        "/intervals/trials",
+        exact_path=True,
+        as_polars=False,
+    )
+
+    assert isinstance(df, pl.DataFrame)
+    assert isinstance(pandas_df, pd.DataFrame)
+
 
 @pytest.mark.parametrize("table_name", ["trials", "units"])
 def test_contents(local_hdf5_path, table_name):
@@ -91,6 +109,92 @@ def test_timeseries_with_rate(nwb_fixture_name, request):
     df = lazynwb.get_df(nwb_path_or_paths, "processing/behavior/running_speed_with_rate", as_polars=True)
     assert 'timestamps' in df.columns, f"'trials' table should provide a 'timestamps' column"
     assert isinstance(df.schema['timestamps'], pl.Float64), f"'timestamps' column should be a float type, not {df.schema['timestamps']}"
+
+
+def test_indexed_column_subset_reads_data_slices_not_full_column() -> None:
+    data_accessor = _CountingArray([10, 11, 20, 21, 22, 30, 40, 41])
+    index_accessor = _CountingArray([2, 5, 6, 8])
+
+    result = lazynwb.tables._get_indexed_column_data(
+        data_column_accessor=data_accessor,
+        index_column_accessor=index_accessor,
+        table_row_indices=[1, 3],
+    )
+
+    assert result == [[20, 21, 22], [40, 41]]
+    assert data_accessor.keys == [slice(2, 5), slice(6, 8)]
+
+
+def test_indexed_column_subset_coalesces_contiguous_rows_into_one_slice() -> None:
+    data_accessor = _CountingArray([10, 11, 20, 21, 22, 30, 40, 41])
+    index_accessor = _CountingArray([2, 5, 6, 8])
+
+    result = lazynwb.tables._get_indexed_column_data(
+        data_column_accessor=data_accessor,
+        index_column_accessor=index_accessor,
+        table_row_indices=[1, 2],
+    )
+
+    assert result == [[20, 21, 22], [30]]
+    assert data_accessor.keys == [slice(2, 6)]
+
+
+def test_indexed_column_full_table_reads_full_column_once() -> None:
+    data_accessor = _CountingArray([10, 11, 20, 21, 22, 30, 40, 41])
+    index_accessor = _CountingArray([2, 5, 6, 8])
+
+    result = lazynwb.tables._get_indexed_column_data(
+        data_column_accessor=data_accessor,
+        index_column_accessor=index_accessor,
+    )
+
+    assert result == [[10, 11], [20, 21, 22], [30], [40, 41]]
+    assert data_accessor.keys == [slice(None)]
+
+
+def test_get_df_row_index_lookup_uses_normalized_source_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    def _fake_get_table_data(*args: object, **kwargs: object) -> dict[str, object]:
+        del args
+        calls.append(kwargs["table_row_indices"])
+        return {"value": [10, 20]}
+
+    monkeypatch.setattr(
+        lazynwb.tables,
+        "_catalog_snapshot_key",
+        lambda path: f"normalized:{path}",
+    )
+    monkeypatch.setattr(lazynwb.tables, "_get_table_data", _fake_get_table_data)
+
+    df = lazynwb.tables.get_df(
+        "source",
+        "/units",
+        nwb_path_to_row_indices={"source": [2, 0]},
+        parallel=False,
+        as_polars=True,
+    )
+
+    assert calls == [[2, 0]]
+    assert df["value"].to_list() == [10, 20]
+
+
+class _CountingArray:
+    def __init__(
+        self,
+        values: list[int],
+        chunks: tuple[int, ...] | None = None,
+    ) -> None:
+        self._values = np.asarray(values)
+        self.chunks = chunks
+        self.keys: list[object] = []
+
+    def __getitem__(self, key: object) -> np.ndarray:
+        self.keys.append(key)
+        return self._values[key]
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

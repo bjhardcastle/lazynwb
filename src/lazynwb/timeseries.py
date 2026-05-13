@@ -29,23 +29,37 @@ class TimeSeries:
 
     @property
     def data(self) -> h5py.Dataset | zarr.Array:
+        file = self._file
+        data_path = f"{self._table_path}/data"
         try:
-            return self._file[f"{self._table_path}/data"]
+            data = file[data_path]
         except KeyError:
-            if self._table_path not in self._file:
+            if self._table_path not in file:
                 raise lazynwb.exceptions.InternalPathError(
                     f"{self._table_path} not found in file"
                 ) from None
             raise AttributeError(
                 f"{self._table_path} has no data: use event timestamps alone"
-            )
+            ) from None
+        logger.debug(
+            "resolved TimeSeries data accessor: source_url=%s "
+            "timeseries_path=%s data_path=%s shape=%s dtype=%s",
+            file._path.as_posix(),
+            self._table_path,
+            data_path,
+            getattr(data, "shape", None),
+            getattr(data, "dtype", None),
+        )
+        return data
 
     @property
     def timestamps(self) -> h5py.Dataset | zarr.Array:
+        file = self._file
+        timestamps_path = f"{self._table_path}/timestamps"
         try:
-            return self._file[f"{self._table_path}/timestamps"]
+            timestamps = file[timestamps_path]
         except KeyError:
-            if self._table_path not in self._file:
+            if self._table_path not in file:
                 raise lazynwb.exceptions.InternalPathError(
                     f"{self._table_path} not found in file"
                 ) from None
@@ -53,9 +67,29 @@ class TimeSeries:
             starting_time = self._starting_time
             if rate is None or starting_time is None:
                 raise AssertionError(
-                    f"Not enough information to calculate timestamps for {self._table_path}: need rate and starting_time"
+                    "Not enough information to calculate timestamps for "
+                    f"{self._table_path}: need rate and starting_time"
                 ) from None
-            return (np.arange(len(self.data)) / rate) + starting_time
+            generated_timestamps = (np.arange(len(self.data)) / rate) + starting_time
+            logger.debug(
+                "generated rate-derived TimeSeries timestamps: source_url=%s "
+                "timeseries_path=%s sample_count=%d rate=%s",
+                file._path.as_posix(),
+                self._table_path,
+                len(generated_timestamps),
+                rate,
+            )
+            return generated_timestamps
+        logger.debug(
+            "resolved TimeSeries timestamps accessor: source_url=%s "
+            "timeseries_path=%s timestamps_path=%s shape=%s dtype=%s",
+            file._path.as_posix(),
+            self._table_path,
+            timestamps_path,
+            getattr(timestamps, "shape", None),
+            getattr(timestamps, "dtype", None),
+        )
+        return timestamps
 
     @property
     def electrodes(self) -> h5py.Dataset | zarr.Array:
@@ -66,7 +100,7 @@ class TimeSeries:
                 raise lazynwb.exceptions.InternalPathError(
                     f"{self._table_path} not found in file"
                 ) from None
-            raise AttributeError(f"{self._table_path} has no electrode data")
+            raise AttributeError(f"{self._table_path} has no electrode data") from None
 
     @property
     def conversion(self) -> float | None:
@@ -116,11 +150,12 @@ class TimeSeries:
                 "unit", None
             )
         raise AttributeError(
-            f"Cannot find timestamps unit for {self._table_path}: no timestamps or starting_time found"
+            f"Cannot find timestamps unit for {self._table_path}: "
+            "no timestamps or starting_time found"
         )
 
     @property
-    def unit(self):
+    def unit(self) -> str | None:
         return self.data.attrs.get("unit", None)
 
     def __getattr__(self, name: str) -> h5py.Dataset | zarr.Array:
@@ -140,7 +175,8 @@ def get_timeseries(
     search_term: str | None = None,
     exact_path: bool = False,
     match_all: Literal[True] = True,
-) -> dict[str, TimeSeries]: ...
+) -> dict[str, TimeSeries]:
+    ...
 
 
 @typing.overload
@@ -149,7 +185,8 @@ def get_timeseries(
     search_term: str | None = None,
     exact_path: bool = False,
     match_all: Literal[False] = False,
-) -> TimeSeries: ...
+) -> TimeSeries:
+    ...
 
 
 def get_timeseries(
@@ -205,29 +242,73 @@ def get_timeseries(
         return name.removesuffix("/data").removesuffix("/timestamps")
 
     file = lazynwb.file_io._get_accessor(nwb_path)
-    is_in_file = search_term in file
+    source_url = file._path.as_posix()
+    logger.debug(
+        "searching TimeSeries: source_url=%s search_term=%r "
+        "exact_path=%s match_all=%s",
+        source_url,
+        search_term,
+        exact_path,
+        match_all,
+    )
+    is_in_file = search_term is not None and search_term in file
     if exact_path and not is_in_file:
+        logger.debug(
+            "exact TimeSeries path was not found: source_url=%s search_term=%r",
+            source_url,
+            search_term,
+        )
         raise lazynwb.exceptions.InternalPathError(
-            f"Exact path {search_term!r} not found in file {file._path.as_posix()}"
+            f"Exact path {search_term!r} not found in file {source_url}"
         )
     elif not match_all and search_term and is_in_file:
-        return TimeSeries(_file_path=nwb_path, _table_path=_format(search_term))
+        timeseries_path = _format(search_term)
+        logger.debug(
+            "selected exact TimeSeries path: source_url=%s timeseries_path=%s",
+            source_url,
+            timeseries_path,
+        )
+        return TimeSeries(_file_path=nwb_path, _table_path=timeseries_path)
     else:
-        path_to_accessor = {
-            _format(k): TimeSeries(_file_path=nwb_path, _table_path=_format(k))
-            for k in lazynwb.file_io.get_internal_paths(nwb_path)
-            if k.split("/")[-1] in ("data", "timestamps")
-            and (not search_term or search_term in k)
-            # regular timeseries will be a dir with /data and optional /timestamps
-            # eventseries will be a dir with /timestamps only
+        path_info = lazynwb.file_io.get_internal_path_info(nwb_path)
+        path_to_timeseries = {
+            path: TimeSeries(_file_path=nwb_path, _table_path=path)
+            for path, metadata in path_info.items()
+            if metadata["is_timeseries"] and (not search_term or search_term in path)
         }
+        logger.debug(
+            "discovered TimeSeries paths: source_url=%s search_term=%r "
+            "match_count=%d paths=%s",
+            source_url,
+            search_term,
+            len(path_to_timeseries),
+            list(path_to_timeseries),
+        )
         if match_all:
-            return path_to_accessor
-        if len(path_to_accessor) > 1:
-            logger.warning(
-                f"Found multiple timeseries matching {search_term!r}: {list(path_to_accessor.keys())} - returning first"
+            return path_to_timeseries
+        if not path_to_timeseries:
+            logger.debug(
+                "no TimeSeries paths matched search term: source_url=%s "
+                "search_term=%r",
+                source_url,
+                search_term,
             )
-        return next(iter(path_to_accessor.values()))
+            raise lazynwb.exceptions.InternalPathError(
+                f"No TimeSeries matching {search_term!r} found in file {source_url}"
+            )
+        if len(path_to_timeseries) > 1:
+            logger.warning(
+                "Found multiple timeseries matching %r: %s - returning first",
+                search_term,
+                list(path_to_timeseries.keys()),
+            )
+        selected_path, selected_timeseries = next(iter(path_to_timeseries.items()))
+        logger.debug(
+            "selected discovered TimeSeries path: source_url=%s timeseries_path=%s",
+            source_url,
+            selected_path,
+        )
+        return selected_timeseries
 
 
 if __name__ == "__main__":

@@ -1,0 +1,431 @@
+from __future__ import annotations
+
+import collections.abc
+import json
+import typing
+
+import lazynwb._cli._config as cli_config
+import lazynwb._cli._context as cli_context
+import lazynwb._cli._preview as cli_preview
+import lazynwb._cli._query as cli_query
+import lazynwb._cli._schema as cli_schema
+import lazynwb._cli._sources as cli_sources
+
+
+class _SQLTableLike(typing.Protocol):
+    name: str
+    path: str
+
+
+def _write_json(
+    stream: typing.TextIO,
+    payload: collections.abc.Mapping[str, typing.Any],
+) -> None:
+    stream.write(json.dumps(payload, indent=2, sort_keys=True))
+    stream.write("\n")
+
+
+def _source_paths_json_object(
+    paths: collections.abc.Iterable[collections.abc.Mapping[str, str]],
+    resolved_source: cli_sources._ResolvedSource,
+) -> dict[str, typing.Any]:
+    resolved_paths = tuple(paths)
+    return {
+        "command": "paths",
+        "paths": list(resolved_paths),
+        "source": cli_sources._source_json_object(
+            resolved_source,
+            paths=resolved_paths,
+        ),
+    }
+
+
+def _sql_tables_json_object(
+    tables: collections.abc.Sequence[_SQLTableLike],
+    resolved_source: cli_sources._ResolvedSource,
+    *,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+    sql_defaults: collections.abc.Mapping[str, typing.Any],
+) -> dict[str, typing.Any]:
+    return {
+        "command": "tables",
+        "resolved_count": len(paths),
+        "source": cli_sources._source_json_object(
+            resolved_source,
+            paths=paths,
+        ),
+        "sql": dict(sql_defaults),
+        "table_count": len(tables),
+        "tables": [_sql_table_json_object(table) for table in tables],
+    }
+
+
+def _sql_table_json_object(table: _SQLTableLike) -> dict[str, str]:
+    return {
+        "name": table.name,
+        "path": table.path,
+    }
+
+
+def _schema_json_object(
+    schema: cli_schema._TableSchema,
+    resolved_source: cli_sources._ResolvedSource,
+    *,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+) -> dict[str, typing.Any]:
+    return {
+        "column_count": len(schema.columns),
+        "columns": [_schema_column_json_object(column) for column in schema.columns],
+        "command": "schema",
+        "infer_schema_length": schema.infer_schema_length,
+        "requested_table": schema.requested_table,
+        "resolved_count": len(paths),
+        "resolved_table_path": schema.resolved_table_path,
+        "source": cli_sources._source_json_object(
+            resolved_source,
+            paths=paths,
+        ),
+    }
+
+
+def _schema_column_json_object(
+    column: cli_schema._SchemaColumn,
+) -> dict[str, str | bool]:
+    return {
+        "dtype": column.dtype,
+        "internal": column.internal,
+        "name": column.name,
+    }
+
+
+def _preview_json_object(
+    preview: cli_preview._TablePreview,
+    resolved_source: cli_sources._ResolvedSource,
+    *,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+) -> dict[str, typing.Any]:
+    return {
+        "columns": list(preview.columns),
+        "command": "preview",
+        "limit": preview.limit,
+        "max_limit": cli_preview._MAX_PREVIEW_LIMIT,
+        "requested_table": preview.requested_table,
+        "resolved_count": len(paths),
+        "resolved_table_path": preview.resolved_table_path,
+        "row_count": len(preview.rows),
+        "rows": list(preview.rows),
+        "source": cli_sources._source_json_object(
+            resolved_source,
+            paths=paths,
+        ),
+    }
+
+
+def _query_json_object(
+    result: cli_query._SQLQueryResult,
+    resolved_source: cli_sources._ResolvedSource,
+    *,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+    sql_defaults: collections.abc.Mapping[str, typing.Any],
+) -> dict[str, typing.Any]:
+    return {
+        "allow_large": result.allow_large,
+        "columns": list(result.columns),
+        "command": "query",
+        "limit": result.limit,
+        "observed_count": result.observed_count,
+        "query": result.query,
+        "resolved_count": len(paths),
+        "row_count": len(result.rows),
+        "rows": list(result.rows),
+        "source": cli_sources._source_json_object(
+            resolved_source,
+            paths=paths,
+        ),
+        "sql": dict(sql_defaults),
+        "truncated": result.truncated,
+    }
+
+
+def _context_json_object(context: cli_context._AgentContext) -> dict[str, typing.Any]:
+    return {
+        "command": "context",
+        "config": context.config,
+        "notes": list(context.notes),
+        "python_snippets": list(context.python_snippets),
+        "recommended_workflow": list(context.recommended_workflow),
+        "resolved_count": len(context.paths),
+        "source": cli_sources._source_json_object(
+            context.resolved_source,
+            paths=context.paths,
+        ),
+        "sql": dict(context.sql_defaults),
+        "table_count": len(context.tables),
+        "tables": [_sql_table_json_object(table) for table in context.tables],
+    }
+
+
+def _config_init_json_object(path: str) -> dict[str, typing.Any]:
+    return {
+        "command": "config init",
+        "config": {
+            "path": path,
+            "version": cli_config._CONFIG_VERSION,
+        },
+    }
+
+
+def _config_show_json_object(
+    loaded_config: cli_config._LoadedConfig,
+    resolved_source: cli_sources._ResolvedSource,
+) -> dict[str, typing.Any]:
+    return {
+        "command": "config show",
+        "commands": cli_config._commands_json_object(loaded_config.project.commands),
+        "config": cli_config._config_json_object(loaded_config),
+        "source": cli_sources._source_json_object(resolved_source),
+    }
+
+
+def _write_source_paths_table(
+    stream: typing.TextIO,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+) -> None:
+    rows = tuple((path["input"], path["resolved"]) for path in paths)
+    headers = ("input", "resolved")
+    input_width = max((len(row[0]) for row in rows), default=0)
+    resolved_width = max((len(row[1]) for row in rows), default=0)
+    widths = (
+        max(len(headers[0]), input_width),
+        max(len(headers[1]), resolved_width),
+    )
+
+    stream.write(f"{headers[0]:<{widths[0]}} | {headers[1]:<{widths[1]}}\n")
+    stream.write(f"{'-' * widths[0]}-+-{'-' * widths[1]}\n")
+    for input_path, resolved_path in rows:
+        stream.write(f"{input_path:<{widths[0]}} | {resolved_path:<{widths[1]}}\n")
+
+
+def _write_sql_tables_table(
+    stream: typing.TextIO,
+    tables: collections.abc.Sequence[_SQLTableLike],
+) -> None:
+    rows = tuple((table.name, table.path) for table in tables)
+    headers = ("name", "path")
+    name_width = max((len(row[0]) for row in rows), default=0)
+    path_width = max((len(row[1]) for row in rows), default=0)
+    widths = (
+        max(len(headers[0]), name_width),
+        max(len(headers[1]), path_width),
+    )
+
+    stream.write(f"{headers[0]:<{widths[0]}} | {headers[1]:<{widths[1]}}\n")
+    stream.write(f"{'-' * widths[0]}-+-{'-' * widths[1]}\n")
+    for table_name, table_path in rows:
+        stream.write(f"{table_name:<{widths[0]}} | {table_path:<{widths[1]}}\n")
+
+
+def _write_schema_table(
+    stream: typing.TextIO,
+    schema: cli_schema._TableSchema,
+) -> None:
+    rows = tuple(
+        (column.name, column.dtype, str(column.internal).lower())
+        for column in schema.columns
+    )
+    headers = ("name", "dtype", "internal")
+    name_width = max((len(row[0]) for row in rows), default=0)
+    dtype_width = max((len(row[1]) for row in rows), default=0)
+    internal_width = max((len(row[2]) for row in rows), default=0)
+    widths = (
+        max(len(headers[0]), name_width),
+        max(len(headers[1]), dtype_width),
+        max(len(headers[2]), internal_width),
+    )
+
+    stream.write(
+        f"{headers[0]:<{widths[0]}} | "
+        f"{headers[1]:<{widths[1]}} | "
+        f"{headers[2]:<{widths[2]}}\n"
+    )
+    stream.write(f"{'-' * widths[0]}-+-" f"{'-' * widths[1]}-+-" f"{'-' * widths[2]}\n")
+    for column_name, dtype, internal in rows:
+        stream.write(
+            f"{column_name:<{widths[0]}} | "
+            f"{dtype:<{widths[1]}} | "
+            f"{internal:<{widths[2]}}\n"
+        )
+
+
+def _write_preview_table(
+    stream: typing.TextIO,
+    preview: cli_preview._TablePreview,
+) -> None:
+    columns = preview.columns
+    if not columns:
+        stream.write("(no columns)\n")
+        return
+
+    rows = tuple(
+        tuple(_preview_cell(row.get(column)) for column in columns)
+        for row in preview.rows
+    )
+    widths = tuple(
+        max(
+            len(column),
+            max((len(row[column_index]) for row in rows), default=0),
+        )
+        for column_index, column in enumerate(columns)
+    )
+
+    stream.write(
+        " | ".join(
+            f"{column:<{widths[column_index]}}"
+            for column_index, column in enumerate(columns)
+        )
+    )
+    stream.write("\n")
+    stream.write("-+-".join("-" * width for width in widths))
+    stream.write("\n")
+    for row in rows:
+        stream.write(
+            " | ".join(
+                f"{cell:<{widths[column_index]}}"
+                for column_index, cell in enumerate(row)
+            )
+        )
+        stream.write("\n")
+
+
+def _write_query_table(
+    stream: typing.TextIO,
+    result: cli_query._SQLQueryResult,
+) -> None:
+    _write_rows_table(stream, result.columns, result.rows)
+
+
+def _write_query_jsonl(
+    stream: typing.TextIO,
+    result: cli_query._SQLQueryResult,
+) -> None:
+    for row in result.rows:
+        stream.write(json.dumps(row, sort_keys=True))
+        stream.write("\n")
+
+
+def _write_context_text(
+    stream: typing.TextIO,
+    context: cli_context._AgentContext,
+) -> None:
+    source = cli_sources._source_json_object(
+        context.resolved_source,
+        paths=context.paths,
+    )
+    stream.write("lazynwb context\n")
+    stream.write("\n")
+    stream.write("Source\n")
+    stream.write(f"  kind: {source['kind']}\n")
+    stream.write(f"  precedence: {source['precedence']}\n")
+    stream.write(f"  resolved_count: {source['resolved_count']}\n")
+    stream.write(f"  config: {_config_text(context.config)}\n")
+    if source.get("local") is not None:
+        stream.write(f"  local: {json.dumps(source['local'], sort_keys=True)}\n")
+    if source.get("dandi") is not None:
+        stream.write(f"  dandi: {json.dumps(source['dandi'], sort_keys=True)}\n")
+    stream.write("  paths:\n")
+    _write_context_path_lines(stream, context.paths)
+
+    stream.write("\n")
+    stream.write("SQL tables\n")
+    stream.write(f"  table_count: {len(context.tables)}\n")
+    for table in context.tables:
+        stream.write(f"  - {table.name}\n")
+
+    stream.write("\n")
+    stream.write("SQL defaults\n")
+    for key, value in sorted(context.sql_defaults.items()):
+        stream.write(f"  {key}: {json.dumps(value, sort_keys=True)}\n")
+
+    stream.write("\n")
+    stream.write("Next CLI commands\n")
+    for command in context.recommended_workflow:
+        stream.write(f"  $ {command}\n")
+
+    stream.write("\n")
+    stream.write("Python snippets\n")
+    for index, snippet in enumerate(context.python_snippets, start=1):
+        stream.write(f"  [{index}]\n")
+        for line in snippet.splitlines():
+            stream.write(f"    {line}\n")
+
+    stream.write("\n")
+    stream.write("Notes\n")
+    for note in context.notes:
+        stream.write(f"  - {note}\n")
+
+
+def _config_text(config: collections.abc.Mapping[str, typing.Any]) -> str:
+    exists = "found" if config["exists"] else "not found"
+    return f"{config['path']} ({exists}, version {config['version']})"
+
+
+def _write_context_path_lines(
+    stream: typing.TextIO,
+    paths: collections.abc.Sequence[collections.abc.Mapping[str, str]],
+) -> None:
+    if not paths:
+        stream.write("  - none\n")
+        return
+    for path in paths:
+        stream.write(f"  - {path['resolved']}\n")
+
+
+def _write_rows_table(
+    stream: typing.TextIO,
+    columns: collections.abc.Sequence[str],
+    rows: collections.abc.Sequence[collections.abc.Mapping[str, object]],
+) -> None:
+    if not columns:
+        stream.write("(no columns)\n")
+        return
+
+    serialized_rows = tuple(
+        tuple(_preview_cell(row.get(column)) for column in columns) for row in rows
+    )
+    widths = tuple(
+        max(
+            len(column),
+            max((len(row[column_index]) for row in serialized_rows), default=0),
+        )
+        for column_index, column in enumerate(columns)
+    )
+
+    stream.write(
+        " | ".join(
+            f"{column:<{widths[column_index]}}"
+            for column_index, column in enumerate(columns)
+        )
+    )
+    stream.write("\n")
+    stream.write("-+-".join("-" * width for width in widths))
+    stream.write("\n")
+    for row in serialized_rows:
+        stream.write(
+            " | ".join(
+                f"{cell:<{widths[column_index]}}"
+                for column_index, cell in enumerate(row)
+            )
+        )
+        stream.write("\n")
+
+
+def _preview_cell(value: object, *, max_width: int = 80) -> str:
+    if isinstance(value, (dict, list)):
+        cell = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    elif value is None:
+        cell = "null"
+    else:
+        cell = str(value)
+    if len(cell) <= max_width:
+        return cell
+    return f"{cell[: max_width - 3]}..."

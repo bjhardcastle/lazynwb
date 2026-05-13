@@ -1,9 +1,13 @@
 """Tests for attrs module functions."""
 
+import asyncio
+import logging
 import pathlib
+import shutil
 
 import pytest
 
+import lazynwb._zarr.reader as zarr_reader
 import lazynwb.attrs
 import lazynwb.file_io
 
@@ -105,7 +109,9 @@ def test_get_sub_attrs(nwb_fixture_name: str, request: pytest.FixtureRequest) ->
         "local_zarr_path",
     ],
 )
-def test_get_sub_attrs_root(nwb_fixture_name: str, request: pytest.FixtureRequest) -> None:
+def test_get_sub_attrs_root(
+    nwb_fixture_name: str, request: pytest.FixtureRequest
+) -> None:
     """Test retrieving all sub-attributes from root."""
     nwb_path = request.getfixturevalue(nwb_fixture_name)
     all_attrs = lazynwb.attrs.get_sub_attrs(
@@ -125,7 +131,9 @@ def test_get_sub_attrs_root(nwb_fixture_name: str, request: pytest.FixtureReques
         "local_zarr_path",
     ],
 )
-def test_get_sub_attrs_nonexistent(nwb_fixture_name: str, request: pytest.FixtureRequest) -> None:
+def test_get_sub_attrs_nonexistent(
+    nwb_fixture_name: str, request: pytest.FixtureRequest
+) -> None:
     """Test retrieving sub-attrs from nonexistent path."""
     nwb_path = request.getfixturevalue(nwb_fixture_name)
     all_attrs = lazynwb.attrs.get_sub_attrs(
@@ -145,7 +153,9 @@ def test_get_sub_attrs_nonexistent(nwb_fixture_name: str, request: pytest.Fixtur
         "local_zarr_path",
     ],
 )
-def test_get_sub_attrs_filtering(nwb_fixture_name: str, request: pytest.FixtureRequest) -> None:
+def test_get_sub_attrs_filtering(
+    nwb_fixture_name: str, request: pytest.FixtureRequest
+) -> None:
     """Test that filtering works for sub_attrs."""
     nwb_path = request.getfixturevalue(nwb_fixture_name)
     attrs_filtered = lazynwb.attrs.get_sub_attrs(
@@ -262,9 +272,8 @@ def test_get_sub_attrs_hdf5_zarr_parity(
 ) -> None:
     """Test that get_sub_attrs returns consistent results for HDF5 and zarr backends.
 
-    Zarr stores scalars as separate arrays and adds zarr-specific attrs
-    (zarr_dtype, _ARRAY_DIMENSIONS), so we compare the intersection of paths
-    after stripping zarr-only attrs.
+    Zarr stores scalars as separate arrays, so we compare the shared path set. Zarr-only
+    attrs are filtered by the attrs reader before comparison.
     """
     zarr_only_attrs = {"zarr_dtype", "_ARRAY_DIMENSIONS"}
 
@@ -285,15 +294,102 @@ def test_get_sub_attrs_hdf5_zarr_parity(
         f"{hdf5_keys - zarr_keys}"
     )
 
-    # For shared paths, attrs should match after removing zarr-specific keys
+    # For shared paths, attrs should match after the attrs reader drops zarr-only keys
     for path in hdf5_keys:
         hdf5_attrs = hdf5_result[path]
-        zarr_attrs = {
-            k: v for k, v in zarr_result[path].items() if k not in zarr_only_attrs
-        }
-        assert hdf5_attrs == zarr_attrs, (
-            f"Value mismatch at {path!r}: hdf5={hdf5_attrs}, zarr={zarr_attrs}"
-        )
+        zarr_attrs = zarr_result[path]
+        assert not (set(zarr_attrs) & zarr_only_attrs)
+        assert (
+            hdf5_attrs == zarr_attrs
+        ), f"Value mismatch at {path!r}: hdf5={hdf5_attrs}, zarr={zarr_attrs}"
+
+
+@pytest.mark.parametrize(
+    "internal_path",
+    ["/units", "/units/spike_times", "/intervals/trials"],
+)
+def test_get_attrs_hdf5_zarr_parity(
+    local_hdf5_path: pathlib.Path,
+    local_zarr_path: pathlib.Path,
+    internal_path: str,
+) -> None:
+    """Test that single-path attrs match across HDF5 and zarr backends."""
+    zarr_only_attrs = {"zarr_dtype", "_ARRAY_DIMENSIONS"}
+
+    lazynwb.attrs.clear_attrs_cache()
+    hdf5_attrs = lazynwb.attrs.get_attrs(local_hdf5_path, internal_path)
+    lazynwb.attrs.clear_attrs_cache()
+    zarr_attrs = lazynwb.attrs.get_attrs(local_zarr_path, internal_path)
+
+    assert not (set(zarr_attrs) & zarr_only_attrs)
+    assert hdf5_attrs == zarr_attrs
+
+
+def test_zarr_attrs_reuse_schema_metadata_catalog(
+    local_zarr_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Schema reads populate the shared Zarr catalog used by attrs reads."""
+    lazynwb.attrs.clear_attrs_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._zarr.reader")
+    reader = zarr_reader._ZarrBackendReader(local_zarr_path)
+
+    snapshot = asyncio.run(reader.read_table_schema_snapshot("units"))
+    columns_by_name = {column.name: column for column in snapshot.columns}
+    caplog.clear()
+    attrs = lazynwb.attrs.get_attrs(
+        local_zarr_path,
+        "/units/spike_times",
+        exclude_private=False,
+    )
+    normalized_attrs = lazynwb.attrs.get_attrs(
+        local_zarr_path,
+        "units/spike_times",
+        exclude_private=False,
+    )
+
+    assert reader.metadata_read_count == 1
+    assert reader.used_consolidated_metadata
+    assert attrs == normalized_attrs
+    assert attrs == dict(columns_by_name["spike_times"].dataset.attrs)
+    assert "zarr_dtype" not in attrs
+    assert "_ARRAY_DIMENSIONS" not in attrs
+    assert "shared Zarr metadata catalog cache hit" in caplog.text
+
+
+def test_zarr_schema_reuses_attrs_metadata_catalog(
+    local_zarr_path: pathlib.Path,
+) -> None:
+    """Attrs reads can warm the shared Zarr catalog used by schema snapshots."""
+    lazynwb.attrs.clear_attrs_cache()
+    lazynwb.attrs.get_sub_attrs(local_zarr_path, parent_path="/units")
+    reader = zarr_reader._ZarrBackendReader(local_zarr_path)
+
+    snapshot = asyncio.run(reader.read_table_schema_snapshot("units"))
+
+    assert snapshot.columns
+    assert reader.used_consolidated_metadata
+    assert reader.metadata_read_count == 0
+
+
+def test_zarr_attrs_use_targeted_metadata_without_consolidated(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    copied_zarr = tmp_path / "attrs-without-consolidated.nwb.zarr"
+    shutil.copytree(local_zarr_path, copied_zarr)
+    (copied_zarr / ".zmetadata").unlink()
+    lazynwb.attrs.clear_attrs_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._zarr.reader")
+
+    attrs = lazynwb.attrs.get_attrs(copied_zarr, "/units/spike_times")
+    sub_attrs = lazynwb.attrs.get_sub_attrs(copied_zarr, parent_path="/units")
+
+    assert attrs["description"] == "the spike times for each unit in seconds"
+    assert "units/spike_times" in sub_attrs
+    assert "zarr_dtype" not in sub_attrs["units/spike_times"]
+    assert "read targeted Zarr metadata file" in caplog.text
 
 
 def test_get_attrs_normalize_path(local_hdf5_path: pathlib.Path) -> None:

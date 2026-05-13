@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import functools
+import json
 import logging
-from collections.abc import Iterable, Iterator
+import operator
+from collections.abc import Iterable, Iterator, Mapping
 
 import polars as pl
 import polars._typing
 import polars.io.plugins
 
+import lazynwb._catalog.models as catalog_models
+import lazynwb.file_io
 import lazynwb.tables
 import lazynwb.types_
 
 logger = logging.getLogger(__name__)
+
+_POLARS_DYNAMIC_PREDICATE_TOKEN = "dynamic_pred"
 
 
 def scan_nwb(
@@ -73,8 +80,9 @@ def scan_nwb(
     if not source:
         raise ValueError("No NWB source files provided.")
 
+    scan_catalog_snapshots = {}
     if not schema:
-        schema = lazynwb.tables.get_table_schema(
+        schema_result = lazynwb.tables._get_table_schema_with_catalog_snapshots(
             file_paths=source,
             table_path=table_path,
             first_n_files_to_infer_schema=infer_schema_length,
@@ -82,6 +90,8 @@ def scan_nwb(
             exclude_internal_columns=False,
             raise_on_missing=raise_on_missing,
         )
+        schema = schema_result.schema
+        scan_catalog_snapshots = schema_result.catalog_snapshots
     schema = pl.Schema(schema) | pl.Schema(
         schema_overrides or {}
     )  # create new object to avoid mutating the original schema
@@ -128,6 +138,17 @@ def scan_nwb(
         else:
             logger.debug(f"Batch size set to {batch_size} rows per batch")
 
+        predicate, dynamic_predicate_count = _remove_polars_dynamic_predicates(
+            predicate
+        )
+        if dynamic_predicate_count:
+            logger.debug(
+                "Removed %d Polars dynamic predicate conjunct(s) from %r scan "
+                "predicate; Python IO plugins do not receive the dynamic TopK state",
+                dynamic_predicate_count,
+                table_path,
+            )
+
         if predicate is not None:
             # - if we have a predicate, we'll fetch the minimal df, apply predicate, then fetch remaining columns in with_columns
             initial_columns = predicate.meta.root_names()
@@ -146,7 +167,13 @@ def scan_nwb(
             sum_rows = 0
             for idx, file in enumerate(source):
                 try:
-                    sum_rows += lazynwb.tables._get_table_length(file, table_path)
+                    sum_rows += lazynwb.tables._get_table_length(
+                        file,
+                        table_path,
+                        catalog_snapshot=scan_catalog_snapshots.get(
+                            lazynwb.tables._catalog_snapshot_key(file)
+                        ),
+                    )
                 except KeyError:
                     continue
                 if sum_rows >= n_rows:
@@ -160,11 +187,29 @@ def scan_nwb(
             )
         else:
             filtered_files = source
+        nwb_path_to_row_indices = None
+        nwb_data_sources = filtered_files
+        if predicate is None and n_rows is not None:
+            nwb_path_to_row_indices = _get_limited_path_to_row_indices(
+                source=filtered_files,
+                table_path=table_path,
+                n_rows=n_rows,
+                catalog_snapshots=scan_catalog_snapshots,
+            )
+            nwb_data_sources = tuple(nwb_path_to_row_indices)
+            logger.debug(
+                "Limiting initial %r materialization to %d rows across %d files",
+                table_path,
+                n_rows,
+                len(nwb_path_to_row_indices),
+            )
+
         df = lazynwb.tables.get_df(
-            nwb_data_sources=filtered_files,
+            nwb_data_sources=nwb_data_sources,
             search_term=table_path,
             exact_path=True,
             include_column_names=initial_columns or None,
+            nwb_path_to_row_indices=nwb_path_to_row_indices,
             disable_progress=disable_progress,
             ignore_errors=ignore_errors,
             as_polars=True,
@@ -176,6 +221,7 @@ def scan_nwb(
                 # this setting. Otherwise, use the user setting.
             ),
             low_memory=low_memory,
+            _catalog_snapshots=scan_catalog_snapshots,
         )
 
         if predicate is None:
@@ -230,6 +276,7 @@ def scan_nwb(
                                     as_polars=True,
                                     ignore_errors=ignore_errors,
                                     low_memory=low_memory,
+                                    _catalog_snapshots=scan_catalog_snapshots,
                                 )
                             ),
                             on=[
@@ -249,6 +296,172 @@ def scan_nwb(
     return polars.io.plugins.register_io_source(
         io_source=source_generator, schema=schema
     )
+
+
+def _remove_polars_dynamic_predicates(
+    predicate: pl.Expr | None,
+) -> tuple[pl.Expr | None, int]:
+    if predicate is None or not _predicate_contains_polars_dynamic_predicate(
+        predicate
+    ):
+        return predicate, 0
+
+    conjuncts = _split_conjunctive_predicate(predicate)
+    retained_conjuncts: list[pl.Expr] = []
+    dropped_conjunct_count = 0
+    for conjunct in conjuncts:
+        if not _predicate_contains_polars_dynamic_predicate(conjunct):
+            retained_conjuncts.append(conjunct)
+            continue
+        if _is_standalone_polars_dynamic_predicate(conjunct):
+            dropped_conjunct_count += 1
+            continue
+        logger.debug(
+            "Cannot isolate Polars dynamic predicate from pushed predicate %s; "
+            "leaving predicate unchanged",
+            conjunct,
+        )
+        return predicate, 0
+
+    if dropped_conjunct_count == 0:
+        return predicate, 0
+    if not retained_conjuncts:
+        return None, dropped_conjunct_count
+    return functools.reduce(operator.and_, retained_conjuncts), dropped_conjunct_count
+
+
+def _split_conjunctive_predicate(predicate: pl.Expr) -> list[pl.Expr]:
+    if not _is_binary_and_predicate(predicate):
+        return [predicate]
+
+    conjuncts: list[pl.Expr] = []
+    try:
+        children = predicate.meta.pop()
+    except BaseException as exc:
+        if not _is_polars_panic_exception(exc):
+            raise
+        logger.debug(
+            "Polars panicked while splitting pushed predicate %s; leaving it intact",
+            predicate,
+        )
+        return [predicate]
+
+    for child in children:
+        conjuncts.extend(_split_conjunctive_predicate(child))
+    return conjuncts
+
+
+def _is_binary_and_predicate(predicate: pl.Expr) -> bool:
+    payload = _predicate_json_payload(predicate)
+    if not isinstance(payload, dict):
+        return False
+    binary_expr = payload.get("BinaryExpr")
+    return isinstance(binary_expr, dict) and binary_expr.get("op") == "And"
+
+
+def _is_standalone_polars_dynamic_predicate(predicate: pl.Expr) -> bool:
+    payload = _predicate_json_payload(predicate)
+    if not isinstance(payload, dict):
+        return False
+    display_expr = payload.get("Display")
+    if not isinstance(display_expr, dict):
+        return False
+    fmt_str = display_expr.get("fmt_str")
+    return isinstance(fmt_str, str) and fmt_str.startswith(
+        _POLARS_DYNAMIC_PREDICATE_TOKEN
+    )
+
+
+def _predicate_contains_polars_dynamic_predicate(predicate: pl.Expr) -> bool:
+    predicate_text = str(predicate)
+    if _POLARS_DYNAMIC_PREDICATE_TOKEN not in predicate_text:
+        return False
+
+    payload = _predicate_json_payload(predicate)
+    if payload is None:
+        return True
+    return _json_payload_contains_polars_dynamic_predicate(payload)
+
+
+def _predicate_json_payload(predicate: pl.Expr) -> object | None:
+    try:
+        serialized = predicate.meta.serialize(format="json")
+    except BaseException as exc:
+        if not _is_polars_panic_exception(exc):
+            raise
+        logger.debug(
+            "Polars panicked while serializing pushed predicate %s to JSON",
+            predicate,
+        )
+        return None
+
+    if not isinstance(serialized, str):
+        return None
+    try:
+        return json.loads(serialized)
+    except json.JSONDecodeError:
+        logger.debug("Could not decode pushed predicate JSON: %s", serialized)
+        return None
+
+
+def _json_payload_contains_polars_dynamic_predicate(payload: object) -> bool:
+    if isinstance(payload, dict):
+        display_expr = payload.get("Display")
+        if isinstance(display_expr, dict):
+            fmt_str = display_expr.get("fmt_str")
+            if isinstance(fmt_str, str) and fmt_str.startswith(
+                _POLARS_DYNAMIC_PREDICATE_TOKEN
+            ):
+                return True
+        return any(
+            _json_payload_contains_polars_dynamic_predicate(value)
+            for value in payload.values()
+        )
+    if isinstance(payload, list):
+        return any(
+            _json_payload_contains_polars_dynamic_predicate(value) for value in payload
+        )
+    return False
+
+
+def _is_polars_panic_exception(exc: BaseException) -> bool:
+    return type(exc).__name__ == "PanicException"
+
+
+def _get_limited_path_to_row_indices(
+    source: Iterable[lazynwb.types_.PathLike],
+    table_path: str,
+    n_rows: int,
+    catalog_snapshots: Mapping[
+        str,
+        catalog_models._TableSchemaSnapshot,
+    ]
+    | None = None,
+) -> dict[str, list[int]]:
+    remaining_rows = n_rows
+    path_to_row_indices: dict[str, list[int]] = {}
+    for file in source:
+        if remaining_rows <= 0:
+            break
+        try:
+            table_length = lazynwb.tables._get_table_length(
+                file,
+                table_path,
+                catalog_snapshot=(
+                    catalog_snapshots.get(lazynwb.tables._catalog_snapshot_key(file))
+                    if catalog_snapshots is not None
+                    else None
+                ),
+            )
+        except KeyError:
+            continue
+        row_count = min(remaining_rows, table_length)
+        if row_count > 0:
+            path_to_row_indices[
+                lazynwb.file_io.from_pathlike(file).as_posix()
+            ] = list(range(row_count))
+        remaining_rows -= row_count
+    return path_to_row_indices
 
 
 def read_nwb(
