@@ -22,7 +22,7 @@ dependencies = [
     "obstore>=0.8.2",
     "pydantic-settings>=2.11.0",
 ]
-version = "0.2.90"
+version = "0.2.91"
 classifiers = [
     "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",

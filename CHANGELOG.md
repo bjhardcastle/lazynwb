@@ -8,7 +8,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 <!-- insertion marker -->
 ## Unreleased
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.89...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.90...HEAD)</small>
+
+### Added
+
+- Add raw table metadata planning ([5536849](https://github.com/bjhardcastle/lazynwb/commit/5536849af970caf07ce00d604c71faf07479b314) by bjhardcastle).
+
+### Removed
+
+- Remove table metadata passthrough helpers ([a7fee89](https://github.com/bjhardcastle/lazynwb/commit/a7fee89e10621eae1a02ad8519df2df8cfaa0bed) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.90](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.90) - 2026-04-20
+
+<small>[Compare with v0.2.89](https://github.com/bjhardcastle/lazynwb/compare/v0.2.89...v0.2.90)</small>
 
 ### Added
 
@@ -19,7 +32,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Fix pydantic use on 3.9 ([0aa5e74](https://github.com/bjhardcastle/lazynwb/commit/0aa5e740f9b5a601dc91c5d9c884e79b3a84d242) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.89](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.89) - 2026-04-15
 
 <small>[Compare with v0.2.88](https://github.com/bjhardcastle/lazynwb/compare/v0.2.88...v0.2.89)</small>
