@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import enum
 import importlib.metadata
 import logging
@@ -90,23 +89,59 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     u = upath.UPath(p, **_get_fsspec_storage_options())
     key = u.as_posix()
     is_definitely_zarr = "zarr" in key
+    logger.debug(
+        "opening file path=%s protocol=%s is_definitely_zarr=%s",
+        key,
+        u.protocol,
+        is_definitely_zarr,
+    )
     if not is_definitely_zarr:
-        with contextlib.suppress(Exception):
+        try:
             return _open_hdf5(
                 u, use_remfile=config.use_remfile, use_obstore=config.use_obstore
             )
-    if config.use_obstore and u.protocol and u.protocol != "file":
-        with contextlib.suppress(Exception):
-            store = obstore.store.from_url(
-                key.split("//")[-1].split("/")[0], **_get_obstore_storage_options()
-            )
-            return zarr.open(store, mode="r")
-    with contextlib.suppress(Exception):
-        return zarr.open(u.as_posix(), mode="r")
+        except Exception as exc:
+            logger.debug("HDF5 open failed for %s: %r", key, exc)
+    if config.use_obstore and u.protocol in _OBSTORE_PROTOCOLS:
+        try:
+            return _open_obstore_zarr(u)
+        except Exception as exc:
+            logger.debug("obstore Zarr open failed for %s: %r", key, exc)
+    try:
+        return _open_zarr(u)
+    except Exception as exc:
+        logger.debug("fsspec Zarr open failed for %s: %r", key, exc)
     raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
 
 
 _OBSTORE_PROTOCOLS = frozenset({"s3", "gs", "gcs", "az", "abfs"})
+
+
+def _open_obstore_zarr(path: upath.UPath) -> zarr.Group:
+    """Open a Zarr store with obstore's fsspec adapter."""
+    logger.debug(
+        "opening Zarr store with obstore filesystem path=%s protocol=%s",
+        path.as_posix(),
+        path.protocol,
+    )
+    fs = obstore.fsspec.FsspecStore(path.protocol, **_get_obstore_storage_options())
+    store = zarr.storage.FSStore(path.as_posix(), fs=fs, mode="r")
+    return zarr.open(store, mode="r")
+
+
+def _open_zarr(path: upath.UPath) -> zarr.Group:
+    """Open a Zarr store while preserving any UPath-backed filesystem options."""
+    if path.protocol:
+        logger.debug(
+            "opening Zarr store with fsspec filesystem path=%s protocol=%s",
+            path.as_posix(),
+            path.protocol,
+        )
+        store = zarr.storage.FSStore(path.as_posix(), fs=path.fs, mode="r")
+        return zarr.open(store, mode="r")
+
+    logger.debug("opening local Zarr store path=%s", path.as_posix())
+    return zarr.open(path.as_posix(), mode="r")
 
 
 def _open_hdf5(

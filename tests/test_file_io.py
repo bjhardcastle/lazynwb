@@ -1,5 +1,5 @@
 import pathlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 import pytest
 
@@ -11,11 +11,13 @@ def reset_file_io_config():
     """Keep file I/O config isolated between tests."""
     original_anon = lazynwb.file_io.config.anon
     original_storage_options = dict(lazynwb.file_io.config.fsspec_storage_options)
+    original_use_obstore = lazynwb.file_io.config.use_obstore
     try:
         yield
     finally:
         lazynwb.file_io.config.anon = original_anon
         lazynwb.file_io.config.fsspec_storage_options = original_storage_options
+        lazynwb.file_io.config.use_obstore = original_use_obstore
 
 
 @pytest.mark.parametrize(
@@ -146,6 +148,60 @@ def test_storage_options_fall_back_to_legacy_anon_setting() -> None:
 
     assert lazynwb.file_io._get_fsspec_storage_options()["anon"] is True
     assert lazynwb.file_io._get_obstore_storage_options()["skip_signature"] is True
+
+
+def test_open_file_preserves_anonymous_s3_options_for_zarr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lazynwb.file_io.config.anon = True
+    lazynwb.file_io.config.fsspec_storage_options = {"anon": False}
+
+    opened: dict[str, object] = {}
+
+    def fake_zarr_open(store: object, mode: str, **kwargs: object) -> object:
+        opened["store"] = store
+        opened["mode"] = mode
+        opened["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open", fake_zarr_open)
+
+    lazynwb.file_io._open_file("s3://example-bucket/session.zarr")
+
+    opened_store = opened["store"]
+    if isinstance(opened_store, str):
+        opened_kwargs = opened["kwargs"]
+        assert isinstance(opened_kwargs, Mapping)
+        storage_options = opened_kwargs["storage_options"]
+        assert isinstance(storage_options, Mapping)
+        assert storage_options["anon"] is True
+    else:
+        assert opened_store.fs.anon is True  # type: ignore[attr-defined]
+    assert opened["mode"] == "r"
+
+
+def test_open_file_preserves_anonymous_s3_options_for_obstore_zarr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lazynwb.file_io.config.use_obstore = True
+    lazynwb.file_io.config.anon = True
+    lazynwb.file_io.config.fsspec_storage_options = {"anon": False}
+
+    opened: dict[str, object] = {}
+
+    def fake_zarr_open(store: object, mode: str, **kwargs: object) -> object:
+        opened["store"] = store
+        opened["mode"] = mode
+        opened["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open", fake_zarr_open)
+
+    lazynwb.file_io._open_file("s3://example-bucket/session.zarr")
+
+    opened_store = opened["store"]
+    assert opened_store.fs._config_kwargs["skip_signature"] is True  # type: ignore[attr-defined]
+    assert opened["mode"] == "r"
 
 
 if __name__ == "__main__":
