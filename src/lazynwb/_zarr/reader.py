@@ -13,12 +13,16 @@ import urllib.parse
 from collections.abc import Iterable, Mapping
 
 import numpy as np
+import obstore
+import obstore.store
 import upath
 
 import lazynwb._cache.sqlite as cache_sqlite
 import lazynwb._catalog._schema as catalog_schema
 import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
+import lazynwb._config
+import lazynwb._storage_options
 import lazynwb.types_
 import lazynwb.utils
 
@@ -27,7 +31,9 @@ logger = logging.getLogger(__name__)
 _ZARR_ONLY_ATTR_NAMES = frozenset({"_ARRAY_DIMENSIONS", "zarr_dtype"})
 _ZARR_CONSOLIDATED_METADATA_CACHE_LOCK = threading.RLock()
 _REMOTE_ZARR_SCHEMES = frozenset({"s3", "gs", "gcs", "az", "abfs", "http", "https"})
+_OBSTORE_REMOTE_ZARR_SCHEMES = frozenset({"s3", "gs", "gcs", "az", "abfs"})
 _ZarrPath = pathlib.Path | upath.UPath
+_ObstoreStoreCacheKey = tuple[str, tuple[tuple[str, str], ...]]
 
 
 @dataclasses.dataclass(slots=True)
@@ -67,10 +73,30 @@ class _ZarrConsolidatedMetadataCacheEntry:
     metadata: Mapping[str, object] | None
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _RemoteZarrStoreContext:
+    store_url: str
+    root_prefix: str
+    storage_options: dict[str, object]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _RemoteZarrConsolidatedPayload:
+    source_identity: catalog_models._SourceIdentity
+    metadata: Mapping[str, object]
+    fetched_bytes: int
+
+
 _ZARR_CONSOLIDATED_METADATA_CACHE: dict[
     str,
     _ZarrConsolidatedMetadataCacheEntry,
 ] = {}
+_REMOTE_ZARR_CONSOLIDATED_PAYLOAD_CACHE: dict[
+    str,
+    _RemoteZarrConsolidatedPayload | None,
+] = {}
+_OBSTORE_STORE_CACHE_LOCK = threading.RLock()
+_OBSTORE_STORE_CACHE: dict[_ObstoreStoreCacheKey, obstore.store.ObjectStore] = {}
 
 
 class _ZarrBackendReader:
@@ -85,7 +111,10 @@ class _ZarrBackendReader:
         self._source_path = _source_path(source)
         self._cache = cache
         self._source_identity: catalog_models._SourceIdentity | None = None
+        self._remote_metadata_client = _remote_metadata_client_if_available(source)
+        self._remote_consolidated_payload: _RemoteZarrConsolidatedPayload | None = None
         self.metadata_read_count = 0
+        self.metadata_bytes_fetched = 0
         self.used_consolidated_metadata = False
 
     async def get_source_identity(self) -> catalog_models._SourceIdentity:
@@ -216,7 +245,14 @@ class _ZarrBackendReader:
         return summary
 
     async def close(self) -> None:
-        logger.debug("closing Zarr backend reader for %s", self._source)
+        logger.debug(
+            "closing Zarr backend reader for %s (metadata_reads=%d "
+            "metadata_bytes=%d consolidated=%s)",
+            self._source,
+            self.metadata_read_count,
+            self.metadata_bytes_fetched,
+            self.used_consolidated_metadata,
+        )
 
     def _schema_scan_source_url(self) -> str:
         if self._source_identity is not None:
@@ -224,6 +260,15 @@ class _ZarrBackendReader:
         return str(self._source)
 
     def _build_source_identity(self) -> catalog_models._SourceIdentity:
+        remote_payload = _get_remote_consolidated_payload(self)
+        if remote_payload is not None:
+            logger.debug(
+                "built Zarr source identity for %s from obstore .zmetadata "
+                "(bytes=%d)",
+                self._source,
+                remote_payload.fetched_bytes,
+            )
+            return remote_payload.source_identity
         if not self._source_path.exists():
             return catalog_models._SourceIdentity(
                 source_url=str(self._source),
@@ -512,10 +557,15 @@ def _clear_shared_metadata_catalog_cache(
     with _ZARR_CONSOLIDATED_METADATA_CACHE_LOCK:
         if source is None:
             _ZARR_CONSOLIDATED_METADATA_CACHE.clear()
+            _REMOTE_ZARR_CONSOLIDATED_PAYLOAD_CACHE.clear()
+            _OBSTORE_STORE_CACHE.clear()
             logger.debug("cleared all shared Zarr metadata catalog cache entries")
             return
         cache_key = _zarr_metadata_cache_key(_source_path(source))
         _ZARR_CONSOLIDATED_METADATA_CACHE.pop(cache_key, None)
+        remote_cache_key = _remote_consolidated_payload_cache_key(source)
+        if remote_cache_key is not None:
+            _REMOTE_ZARR_CONSOLIDATED_PAYLOAD_CACHE.pop(remote_cache_key, None)
         logger.debug(
             "cleared shared Zarr metadata catalog cache entry for %s", cache_key
         )
@@ -525,6 +575,16 @@ def _get_shared_consolidated_metadata(
     root: _ZarrPath,
     reader: _ZarrBackendReader | None = None,
 ) -> Mapping[str, object] | None:
+    if reader is not None and reader._remote_metadata_client is not None:
+        remote_payload = _get_remote_consolidated_payload(reader)
+        if remote_payload is not None:
+            reader.used_consolidated_metadata = True
+            logger.debug(
+                "using obstore Zarr consolidated metadata for %s with %d entries",
+                reader._source,
+                len(remote_payload.metadata),
+            )
+            return remote_payload.metadata
     cache_key = _zarr_metadata_cache_key(root)
     stat_key = _zmetadata_stat_key(root)
     with _ZARR_CONSOLIDATED_METADATA_CACHE_LOCK:
@@ -594,6 +654,263 @@ def _load_consolidated_metadata(
         len(metadata),
     )
     return metadata
+
+
+class _ObstoreZarrMetadataClient:
+    """Private obstore client for remote Zarr metadata objects."""
+
+    def __init__(self, source: lazynwb.types_.PathLike) -> None:
+        context = _remote_zarr_store_context(source)
+        self._source_url = _source_uri(source)
+        self._context = context
+        self._store = _cached_obstore_store(context)
+        self.request_count = 0
+        self.bytes_fetched = 0
+        logger.debug(
+            "initialized obstore Zarr metadata client for %s as prefix %r",
+            self._source_url,
+            self._context.root_prefix,
+        )
+
+    @property
+    def cache_key(self) -> str:
+        return _remote_consolidated_payload_cache_key_from_context(self._context)
+
+    def read_consolidated_payload_sync(
+        self,
+    ) -> _RemoteZarrConsolidatedPayload | None:
+        return asyncio.run(self._read_consolidated_payload())
+
+    async def _read_consolidated_payload(
+        self,
+    ) -> _RemoteZarrConsolidatedPayload | None:
+        object_key = _remote_zarr_object_key(self._context.root_prefix, ".zmetadata")
+        started = time.perf_counter()
+        result = await obstore.get_async(self._store, object_key)
+        payload_bytes = _bytes_from_obstore_get_result(result)
+        self.request_count += 1
+        self.bytes_fetched += len(payload_bytes)
+        logger.debug(
+            "read obstore Zarr metadata object %s/%s in %.3f s (%d bytes)",
+            self._context.store_url,
+            object_key,
+            time.perf_counter() - started,
+            len(payload_bytes),
+        )
+        payload = json.loads(payload_bytes)
+        if not isinstance(payload, Mapping):
+            logger.debug("Zarr consolidated metadata payload is not a mapping")
+            return None
+        if payload.get("zarr_consolidated_format") != 1:
+            logger.debug(
+                "ignoring unsupported remote Zarr consolidated metadata format "
+                "for %s: %r",
+                self._source_url,
+                payload.get("zarr_consolidated_format"),
+            )
+            return None
+        metadata = payload.get("metadata")
+        if not isinstance(metadata, Mapping):
+            logger.debug(
+                "remote Zarr consolidated metadata for %s has no metadata mapping",
+                self._source_url,
+            )
+            return None
+        source_identity = _source_identity_from_obstore_metadata(
+            self._source_url,
+            getattr(result, "meta", None),
+            content_length=len(payload_bytes),
+        )
+        return _RemoteZarrConsolidatedPayload(
+            source_identity=source_identity,
+            metadata=metadata,
+            fetched_bytes=len(payload_bytes),
+        )
+
+
+def _remote_metadata_client_if_available(
+    source: lazynwb.types_.PathLike,
+) -> _ObstoreZarrMetadataClient | None:
+    try:
+        parsed = urllib.parse.urlsplit(_source_uri(source))
+    except (TypeError, ValueError):
+        logger.debug("cannot parse Zarr source %r for obstore metadata", source)
+        return None
+    if parsed.scheme not in _OBSTORE_REMOTE_ZARR_SCHEMES:
+        return None
+    try:
+        return _ObstoreZarrMetadataClient(source)
+    except Exception:
+        logger.debug(
+            "failed to initialize obstore Zarr metadata client for %r",
+            source,
+            exc_info=True,
+        )
+        return None
+
+
+def _get_remote_consolidated_payload(
+    reader: _ZarrBackendReader,
+) -> _RemoteZarrConsolidatedPayload | None:
+    client = reader._remote_metadata_client
+    if client is None:
+        return None
+    if reader._remote_consolidated_payload is not None:
+        return reader._remote_consolidated_payload
+    cache_key = client.cache_key
+    with _ZARR_CONSOLIDATED_METADATA_CACHE_LOCK:
+        if cache_key in _REMOTE_ZARR_CONSOLIDATED_PAYLOAD_CACHE:
+            cached = _REMOTE_ZARR_CONSOLIDATED_PAYLOAD_CACHE[cache_key]
+            reader._remote_consolidated_payload = cached
+            if cached is not None:
+                reader.used_consolidated_metadata = True
+                logger.debug(
+                    "remote Zarr consolidated metadata cache hit for %s with %d "
+                    "entries",
+                    reader._source,
+                    len(cached.metadata),
+                )
+            else:
+                logger.debug(
+                    "remote Zarr consolidated metadata cache hit without metadata "
+                    "for %s",
+                    reader._source,
+                )
+            return cached
+
+    request_count_before = client.request_count
+    bytes_before = client.bytes_fetched
+    try:
+        payload = client.read_consolidated_payload_sync()
+    except Exception:
+        logger.debug(
+            "obstore Zarr consolidated metadata read failed for %s; falling back",
+            reader._source,
+            exc_info=True,
+        )
+        payload = None
+    reader.metadata_read_count += client.request_count - request_count_before
+    reader.metadata_bytes_fetched += client.bytes_fetched - bytes_before
+    if payload is not None:
+        reader.used_consolidated_metadata = True
+    reader._remote_consolidated_payload = payload
+    with _ZARR_CONSOLIDATED_METADATA_CACHE_LOCK:
+        _REMOTE_ZARR_CONSOLIDATED_PAYLOAD_CACHE[cache_key] = payload
+    return payload
+
+
+def _remote_zarr_store_context(
+    source: lazynwb.types_.PathLike,
+) -> _RemoteZarrStoreContext:
+    source_url = _source_uri(source)
+    parsed = urllib.parse.urlsplit(source_url)
+    if parsed.scheme not in _OBSTORE_REMOTE_ZARR_SCHEMES:
+        raise ValueError(f"unsupported remote Zarr obstore scheme: {source_url!r}")
+    if not parsed.netloc:
+        raise ValueError(f"remote Zarr URL must include a store authority: {source_url!r}")
+    root_prefix = parsed.path.lstrip("/").rstrip("/")
+    store_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    storage_options = lazynwb._storage_options._get_obstore_storage_options(
+        lazynwb._config.config.fsspec_storage_options,
+        anon=lazynwb._config.config.anon,
+    )
+    if parsed.scheme == "s3":
+        storage_options = lazynwb._storage_options._add_discovered_s3_region(
+            bucket=parsed.netloc,
+            storage_options=storage_options,
+        )
+    return _RemoteZarrStoreContext(
+        store_url=store_url,
+        root_prefix=root_prefix,
+        storage_options=storage_options,
+    )
+
+
+def _cached_obstore_store(
+    context: _RemoteZarrStoreContext,
+) -> obstore.store.ObjectStore:
+    cache_key = _obstore_store_cache_key(context)
+    with _OBSTORE_STORE_CACHE_LOCK:
+        cached = _OBSTORE_STORE_CACHE.get(cache_key)
+        if cached is not None:
+            logger.debug("obstore Zarr store cache hit for %s", context.store_url)
+            return cached
+        logger.debug(
+            "obstore Zarr store cache miss for %s (storage_options=%s)",
+            context.store_url,
+            sorted(str(key) for key in context.storage_options),
+        )
+        store = obstore.store.from_url(context.store_url, **context.storage_options)
+        _OBSTORE_STORE_CACHE[cache_key] = store
+        return store
+
+
+def _obstore_store_cache_key(
+    context: _RemoteZarrStoreContext,
+) -> _ObstoreStoreCacheKey:
+    return (
+        context.store_url,
+        tuple(
+            sorted(
+                (str(key), repr(value))
+                for key, value in context.storage_options.items()
+            )
+        ),
+    )
+
+
+def _remote_consolidated_payload_cache_key(
+    source: lazynwb.types_.PathLike,
+) -> str | None:
+    try:
+        context = _remote_zarr_store_context(source)
+    except Exception:
+        logger.debug("cannot build remote Zarr cache key for %r", source, exc_info=True)
+        return None
+    return _remote_consolidated_payload_cache_key_from_context(context)
+
+
+def _remote_consolidated_payload_cache_key_from_context(
+    context: _RemoteZarrStoreContext,
+) -> str:
+    options_key = tuple(
+        sorted((str(key), repr(value)) for key, value in context.storage_options.items())
+    )
+    return repr((context.store_url, context.root_prefix, options_key))
+
+
+def _remote_zarr_object_key(root_prefix: str, key: str) -> str:
+    clean_key = key.lstrip("/")
+    if not root_prefix:
+        return clean_key
+    return f"{root_prefix}/{clean_key}"
+
+
+def _bytes_from_obstore_get_result(result: object) -> bytes:
+    bytes_method = getattr(result, "bytes", None)
+    if callable(bytes_method):
+        return bytes(bytes_method())
+    to_bytes = getattr(result, "to_bytes", None)
+    if callable(to_bytes):
+        return bytes(to_bytes())
+    return bytes(result)
+
+
+def _source_identity_from_obstore_metadata(
+    source_url: str,
+    metadata: object,
+    *,
+    content_length: int,
+) -> catalog_models._SourceIdentity:
+    metadata_mapping = metadata if isinstance(metadata, Mapping) else {}
+    size = metadata_mapping.get("size", content_length)
+    return catalog_models._SourceIdentity(
+        source_url=source_url,
+        content_length=int(size) if size is not None else content_length,
+        version_id=_stat_info_str(metadata_mapping, "VersionId", "version"),
+        etag=_stat_info_str(metadata_mapping, "ETag", "e_tag"),
+        last_modified=_metadata_datetime_iso(metadata_mapping.get("last_modified")),
+    )
 
 
 def _zmetadata_stat_key(root: _ZarrPath) -> tuple[int, int] | None:
@@ -875,6 +1192,16 @@ def _mtime_iso(mtime: float) -> str:
         mtime,
         tz=datetime.timezone.utc,
     ).isoformat()
+
+
+def _metadata_datetime_iso(value: object) -> str | None:
+    if isinstance(value, datetime.datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=datetime.timezone.utc)
+        return value.isoformat()
+    if value is None:
+        return None
+    return str(value)
 
 
 def _stat_info_str(info: object, *keys: str) -> str | None:
