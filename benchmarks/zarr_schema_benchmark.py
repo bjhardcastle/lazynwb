@@ -146,6 +146,7 @@ def _run_benchmark(args: argparse.Namespace, cache_dir: pathlib.Path) -> None:
     _print_summaries(summaries)
     _write_json(args.json_output, summaries, metrics)
     print(f"cold_zarr_schema_seconds={cold_summary.elapsed_seconds:.6f}")
+    print(f"{cold_summary.elapsed_seconds:.6f}")
 
 
 def _build_workload(args: argparse.Namespace) -> tuple[_ZarrSchemaWorkItem, ...]:
