@@ -2073,6 +2073,64 @@ async def _get_fast_hdf5_table_schema_snapshots(
         )
 
 
+async def _get_fast_zarr_table_schema_snapshots(
+    file_paths: Sequence[lazynwb.types_.PathLike],
+    table_path: str,
+    raise_on_missing: bool,
+) -> list[
+    tuple[
+        lazynwb.types_.PathLike,
+        catalog_models._TableSchemaSnapshot | None,
+        bool,
+    ]
+]:
+    readers = [
+        zarr_reader._default_zarr_backend_reader(file_path) for file_path in file_paths
+    ]
+    logger.debug(
+        "getting fast Zarr table schema for %r from %d files in one async batch",
+        table_path,
+        len(file_paths),
+    )
+
+    async def _read_schema(
+        reader: zarr_reader._ZarrBackendReader,
+        file_path: lazynwb.types_.PathLike,
+    ) -> tuple[
+        lazynwb.types_.PathLike,
+        catalog_models._TableSchemaSnapshot | None,
+        bool,
+    ]:
+        try:
+            snapshot = await reader.read_table_schema_snapshot(table_path)
+        except KeyError:
+            _handle_missing_schema_table(
+                file_path=file_path,
+                table_path=table_path,
+                raise_on_missing=raise_on_missing,
+            )
+            return file_path, None, True
+        except Exception as exc:
+            logger.debug("fast Zarr backend rejected source %r: %r", file_path, exc)
+            return file_path, None, False
+        return file_path, snapshot, True
+
+    try:
+        return list(
+            await asyncio.gather(
+                *(
+                    _read_schema(reader, file_path)
+                    for reader, file_path in zip(readers, file_paths, strict=True)
+                )
+            )
+        )
+    finally:
+        await asyncio.gather(
+            *(reader.close() for reader in readers),
+            return_exceptions=True,
+        )
+
+
 def _handle_missing_schema_table(
     file_path: lazynwb.types_.PathLike,
     table_path: str,
@@ -2140,6 +2198,7 @@ def _get_table_schema_with_catalog_snapshots(
     catalog_snapshots: dict[str, catalog_models._TableSchemaSnapshot] = {}
     normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
     fast_hdf5_paths: list[lazynwb.types_.PathLike] = []
+    fast_zarr_paths: list[lazynwb.types_.PathLike] = []
     fallback_jobs: list[
         tuple[lazynwb.types_.PathLike, Sequence[_FastCatalogBackendName] | None]
     ] = []
@@ -2150,6 +2209,11 @@ def _get_table_schema_with_catalog_snapshots(
             and hdf5_reader._is_fast_hdf5_candidate(file_path)
         ):
             fast_hdf5_paths.append(file_path)
+        elif (
+            backend_order[0] == "zarr"
+            and zarr_reader._is_fast_zarr_candidate(file_path)
+        ):
+            fast_zarr_paths.append(file_path)
         else:
             fallback_jobs.append((file_path, None))
     if fast_hdf5_paths:
@@ -2168,6 +2232,27 @@ def _get_table_schema_with_catalog_snapshots(
         ):
             if not used_fast_hdf5:
                 fallback_jobs.append((file_path, ("zarr",)))
+                continue
+            if snapshot is not None:
+                file_schema = catalog_polars._snapshot_to_polars_schema(snapshot)
+                per_file_schemas.append(file_schema)
+                catalog_snapshots[_catalog_snapshot_key(file_path)] = snapshot
+    if fast_zarr_paths:
+        logger.debug(
+            "using batched fast Zarr schema path for %d/%d files at %r",
+            len(fast_zarr_paths),
+            len(file_paths),
+            normalized_table_path,
+        )
+        for file_path, snapshot, used_fast_zarr in _run_async_schema_snapshot_batch(
+            _get_fast_zarr_table_schema_snapshots(
+                fast_zarr_paths,
+                normalized_table_path,
+                raise_on_missing,
+            )
+        ):
+            if not used_fast_zarr:
+                fallback_jobs.append((file_path, ("hdf5",)))
                 continue
             if snapshot is not None:
                 file_schema = catalog_polars._snapshot_to_polars_schema(snapshot)

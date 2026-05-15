@@ -499,6 +499,7 @@ def test_zarr_sql_context_discovery_uses_catalog_summary_without_accessor(
 
     assert "trials" in sql_context.tables()
     assert "path discovery used catalog summary" in caplog.text
+    assert "SQL context Zarr multi-table scan" in caplog.text
 
 
 def test_zarr_path_summary_uses_targeted_metadata_without_consolidated(
@@ -530,8 +531,10 @@ def test_public_get_table_schema_uses_zarr_backend_for_local_store(
     local_zarr_path: pathlib.Path,
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
 
     schema = lazynwb.tables.get_table_schema(
         local_zarr_path,
@@ -553,6 +556,7 @@ def test_public_get_table_schema_uses_zarr_backend_for_local_store(
     assert schema == existing_schema
     assert warm_snapshot.table_path == "units"
     assert warm_reader.metadata_read_count == 0
+    assert "using batched fast Zarr schema path" in caplog.text
 
 
 def test_public_get_table_schema_falls_back_to_zarr_after_hdf5_not_found(
