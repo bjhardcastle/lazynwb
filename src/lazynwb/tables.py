@@ -89,6 +89,23 @@ class _DirectHDF5TableReadPlan:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class _DirectZarrIndexedColumnReadPlan:
+    data_column: catalog_models._TableColumnSchema
+    index_column: catalog_models._TableColumnSchema
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _DirectZarrTableReadPlan:
+    array_columns: tuple[catalog_models._TableColumnSchema, ...] = ()
+    indexed_columns: tuple[_DirectZarrIndexedColumnReadPlan, ...] = ()
+    fallback_columns: tuple[catalog_models._TableColumnSchema, ...] = ()
+
+    @property
+    def has_direct_columns(self) -> bool:
+        return bool(self.array_columns or self.indexed_columns)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class _DirectHDF5IndexedRangeReadPlan:
     row_indices: npt.NDArray[np.intp]
     row_starts: npt.NDArray[np.intp]
@@ -753,6 +770,143 @@ def _plan_direct_hdf5_table_reads(
     return read_plan
 
 
+def _is_direct_zarr_array_column(
+    column: catalog_models._TableColumnSchema,
+    *,
+    table_row_indices: Sequence[int] | None,
+) -> bool:
+    rejection_checks = (
+        ("backend is not Zarr", column.backend != "zarr"),
+        ("column is not a dataset", column.is_group or not column.is_dataset),
+        ("column is indexed", column.is_nominally_indexed),
+        (
+            "column is synthetic TimeSeries starting_time",
+            column.name == "starting_time" and column.is_timeseries_with_rate,
+        ),
+        (
+            "TimeSeries column length is not data-aligned",
+            column.is_timeseries and not column.is_timeseries_length_aligned,
+        ),
+        ("dtype is not native numeric/bool", not _has_direct_zarr_numpy_dtype(column)),
+        ("rank is not 1D/2D", column.ndim not in (1, 2)),
+        ("chunk metadata is missing", column.dataset.chunks is None),
+        ("dataset path is missing", column.dataset.path == ""),
+        (
+            "row indices are not a single unit-step slice",
+            not _table_row_indices_are_native_zarr_sliceable(table_row_indices),
+        ),
+    )
+    for reason, rejected in rejection_checks:
+        if not rejected:
+            continue
+        logger.debug(
+            "rejecting native Zarr table column %r: %s",
+            column.name,
+            reason,
+        )
+        return False
+    return True
+
+
+def _has_direct_zarr_numpy_dtype(
+    column: catalog_models._TableColumnSchema,
+) -> bool:
+    return (
+        column.dtype.kind in {"numeric", "bool"}
+        and column.dtype.numpy_dtype is not None
+    )
+
+
+def _is_direct_zarr_indexed_data_column(
+    column: catalog_models._TableColumnSchema,
+    columns_by_name: Mapping[str, catalog_models._TableColumnSchema],
+) -> bool:
+    if column.backend != "zarr":
+        return False
+    if column.is_index_column or not column.is_nominally_indexed:
+        return False
+    if column.ndim != 1:
+        return False
+    if not _has_direct_zarr_numpy_dtype(column):
+        return False
+    if column.dataset.chunks is None or column.dataset.path == "":
+        return False
+    index_column_name = column.index_column_name or f"{column.name}_index"
+    index_column = columns_by_name.get(index_column_name)
+    if index_column is None:
+        return False
+    return (
+        index_column.backend == "zarr"
+        and index_column.is_index_column
+        and index_column.ndim == 1
+        and _has_direct_zarr_numpy_dtype(index_column)
+        and index_column.dataset.chunks is not None
+        and index_column.dataset.path != ""
+    )
+
+
+def _plan_direct_zarr_table_reads(
+    columns: Iterable[catalog_models._TableColumnSchema],
+    *,
+    table_row_indices: Sequence[int] | None,
+) -> _DirectZarrTableReadPlan:
+    columns = tuple(columns)
+    columns_by_name = {column.name: column for column in columns}
+    direct_columns: list[catalog_models._TableColumnSchema] = []
+    direct_indexed_columns: list[_DirectZarrIndexedColumnReadPlan] = []
+    fallback_columns: list[catalog_models._TableColumnSchema] = []
+    direct_indexed_raw_names: set[str] = set()
+    for column in columns:
+        if _is_direct_zarr_indexed_data_column(column, columns_by_name):
+            index_column_name = column.index_column_name or f"{column.name}_index"
+            direct_indexed_columns.append(
+                _DirectZarrIndexedColumnReadPlan(
+                    data_column=column,
+                    index_column=columns_by_name[index_column_name],
+                )
+            )
+            direct_indexed_raw_names.add(column.name)
+            direct_indexed_raw_names.add(index_column_name)
+    for column in columns:
+        if column.name in direct_indexed_raw_names:
+            continue
+        if _is_direct_zarr_array_column(
+            column,
+            table_row_indices=table_row_indices,
+        ):
+            direct_columns.append(column)
+        else:
+            fallback_columns.append(column)
+    read_plan = _DirectZarrTableReadPlan(
+        array_columns=tuple(direct_columns),
+        indexed_columns=tuple(direct_indexed_columns),
+        fallback_columns=tuple(fallback_columns),
+    )
+    logger.debug(
+        "planned direct Zarr table reads: array_columns=%s indexed_columns=%s "
+        "fallback_columns=%s",
+        [column.name for column in read_plan.array_columns],
+        [plan.data_column.name for plan in read_plan.indexed_columns],
+        [column.name for column in read_plan.fallback_columns],
+    )
+    return read_plan
+
+
+def _table_row_indices_are_native_zarr_sliceable(
+    table_row_indices: Sequence[int] | None,
+) -> bool:
+    if table_row_indices is None:
+        return True
+    row_indices = np.asarray(table_row_indices, dtype=np.intp)
+    if row_indices.ndim == 0:
+        return True
+    if row_indices.ndim != 1:
+        return False
+    if row_indices.size <= 1:
+        return True
+    return bool(np.all(np.diff(row_indices) == 1))
+
+
 def _source_path_strings(
     path: lazynwb.types_.PathLike,
 ) -> tuple[str, str]:
@@ -797,6 +951,220 @@ def _materialize_direct_hdf5_read_plan(
         int(getattr(reader._range_reader, "bytes_fetched", 0)) - fetched_bytes_before,
     )
     return column_data
+
+
+def _materialize_direct_zarr_read_plan(
+    path: lazynwb.types_.PathLike,
+    read_plan: _DirectZarrTableReadPlan,
+    table_row_indices: Sequence[int] | None,
+    *,
+    as_polars: bool,
+) -> dict[str, Any] | None:
+    if not read_plan.has_direct_columns:
+        return {}
+    reader = zarr_reader._default_zarr_backend_reader(path)
+    if getattr(reader, "_remote_metadata_client", None) is None:
+        logger.debug(
+            "rejecting direct Zarr materialization for %r: obstore transport unavailable",
+            path,
+        )
+        _run_async_value(reader.close())
+        return None
+
+    metadata_reads_before = int(getattr(reader, "metadata_read_count", 0))
+    metadata_bytes_before = int(getattr(reader, "metadata_bytes_fetched", 0))
+    chunk_reads_before = int(getattr(reader, "chunk_read_count", 0))
+    chunk_bytes_before = int(getattr(reader, "chunk_bytes_fetched", 0))
+    started = time.perf_counter()
+    try:
+        column_data = _run_async_value(
+            _materialize_direct_zarr_read_plan_async(
+                reader,
+                read_plan,
+                table_row_indices,
+                as_polars=as_polars,
+            )
+        )
+    except Exception as exc:
+        logger.debug(
+            "direct Zarr materialization failed for %r after %.3f s; "
+            "falling back to accessor path: %r",
+            path,
+            time.perf_counter() - started,
+            exc,
+            exc_info=True,
+        )
+        return None
+    finally:
+        _run_async_value(reader.close())
+    logger.debug(
+        "direct Zarr materialization for %r: array_columns=%s indexed_columns=%s "
+        "metadata_requests=%d metadata_bytes=%d chunk_requests=%d chunk_bytes=%d "
+        "elapsed=%.3f s",
+        path,
+        [column.name for column in read_plan.array_columns],
+        [plan.data_column.name for plan in read_plan.indexed_columns],
+        int(getattr(reader, "metadata_read_count", 0)) - metadata_reads_before,
+        int(getattr(reader, "metadata_bytes_fetched", 0)) - metadata_bytes_before,
+        int(getattr(reader, "chunk_read_count", 0)) - chunk_reads_before,
+        int(getattr(reader, "chunk_bytes_fetched", 0)) - chunk_bytes_before,
+        time.perf_counter() - started,
+    )
+    return column_data
+
+
+async def _materialize_direct_zarr_read_plan_async(
+    reader: zarr_reader._ZarrBackendReader,
+    read_plan: _DirectZarrTableReadPlan,
+    table_row_indices: Sequence[int] | None,
+    *,
+    as_polars: bool,
+) -> dict[str, Any]:
+    column_data: dict[str, Any] = {}
+    for column in read_plan.array_columns:
+        value = await _read_direct_zarr_column_array(
+            reader,
+            column,
+            table_row_indices,
+        )
+        if column.is_multidimensional and not as_polars:
+            value = _format_multi_dim_column_pd(value)
+        column_data[column.name] = value
+    for indexed_plan in read_plan.indexed_columns:
+        column_data[indexed_plan.data_column.name] = (
+            await _read_direct_zarr_indexed_column(
+                reader,
+                indexed_plan,
+                table_row_indices,
+            )
+        )
+    return column_data
+
+
+async def _read_direct_zarr_column_array(
+    reader: zarr_reader._ZarrBackendReader,
+    column: catalog_models._TableColumnSchema,
+    table_row_indices: Sequence[int] | None,
+) -> npt.NDArray[Any]:
+    if not column.dataset.path:
+        raise ValueError(f"column {column.name!r} is missing a Zarr dataset path")
+    selection = _native_zarr_table_row_selection(column, table_row_indices)
+    logger.debug(
+        "reading direct Zarr column %r from %s with selection=%r",
+        column.name,
+        column.dataset.path,
+        selection,
+    )
+    return await reader.read_array_selection(column.dataset.path, selection)
+
+
+async def _read_direct_zarr_indexed_column(
+    reader: zarr_reader._ZarrBackendReader,
+    indexed_plan: _DirectZarrIndexedColumnReadPlan,
+    table_row_indices: Sequence[int] | None,
+) -> list[list[Any]]:
+    data_column = indexed_plan.data_column
+    index_column = indexed_plan.index_column
+    chunk_reads_before = int(getattr(reader, "chunk_read_count", 0))
+    chunk_bytes_before = int(getattr(reader, "chunk_bytes_fetched", 0))
+    index_values = np.asarray(
+        await reader.read_array_selection(index_column.dataset.path, slice(None)),
+        dtype=np.intp,
+    )
+    range_plan = _plan_direct_hdf5_indexed_column_ranges(
+        index_values=index_values,
+        table_row_indices=table_row_indices,
+        max_gap=_get_zarr_indexed_data_coalesce_gap(data_column),
+    )
+    if range_plan.row_indices.size == 0:
+        logger.debug(
+            "direct Zarr indexed materialization for %r selected zero rows",
+            data_column.name,
+        )
+        return []
+
+    if range_plan.requested_element_count == 0:
+        logger.debug(
+            "direct Zarr indexed materialization for %r selected %d empty rows",
+            data_column.name,
+            len(range_plan.row_indices),
+        )
+        return [[] for _ in range_plan.row_indices]
+
+    span_payloads = await _read_direct_zarr_element_spans(
+        reader,
+        data_column,
+        range_plan.spans,
+    )
+    column_data = _split_direct_indexed_span_payloads(
+        row_starts=range_plan.row_starts,
+        row_ends=range_plan.row_ends,
+        spans=range_plan.spans,
+        span_payloads=span_payloads,
+    )
+    logger.debug(
+        "direct Zarr indexed materialization for %r: rows=%d spans=%d "
+        "requested_elements=%d spanned_elements=%d full_elements=%d "
+        "chunk_requests=%d chunk_bytes=%d",
+        data_column.name,
+        len(range_plan.row_indices),
+        len(range_plan.spans),
+        range_plan.requested_element_count,
+        range_plan.spanned_element_count,
+        range_plan.full_element_count,
+        int(getattr(reader, "chunk_read_count", 0)) - chunk_reads_before,
+        int(getattr(reader, "chunk_bytes_fetched", 0)) - chunk_bytes_before,
+    )
+    return column_data
+
+
+def _get_zarr_indexed_data_coalesce_gap(
+    data_column: catalog_models._TableColumnSchema,
+) -> int:
+    chunks = data_column.dataset.chunks
+    if not chunks:
+        return 0
+    return min(int(chunks[0]), _INDEXED_COLUMN_MAX_COALESCE_GAP_ELEMENTS)
+
+
+async def _read_direct_zarr_element_spans(
+    reader: zarr_reader._ZarrBackendReader,
+    column: catalog_models._TableColumnSchema,
+    spans: Sequence[tuple[int, int]],
+) -> list[npt.NDArray[Any]]:
+    if not spans:
+        return []
+    if not column.dataset.path:
+        raise ValueError(f"column {column.name!r} is missing a Zarr dataset path")
+    payloads: list[npt.NDArray[Any]] = []
+    for start, end in spans:
+        payloads.append(
+            await reader.read_array_selection(column.dataset.path, slice(start, end))
+        )
+    return payloads
+
+
+def _native_zarr_table_row_selection(
+    column: catalog_models._TableColumnSchema,
+    table_row_indices: Sequence[int] | None,
+) -> object:
+    if table_row_indices is None:
+        row_selection = slice(None)
+    else:
+        row_indices = np.asarray(table_row_indices, dtype=np.intp)
+        if row_indices.ndim == 0:
+            start = int(row_indices)
+            row_selection = slice(start, start + 1)
+        elif row_indices.size == 0:
+            row_selection = slice(0, 0)
+        elif not _table_row_indices_are_native_zarr_sliceable(table_row_indices):
+            raise ValueError("native Zarr table reads require unit-step row slices")
+        else:
+            start = int(row_indices[0])
+            row_selection = slice(start, int(row_indices[-1]) + 1)
+    if column.ndim == 1:
+        return row_selection
+    return (row_selection, *(slice(None) for _ in range((column.ndim or 1) - 1)))
 
 
 async def _materialize_direct_hdf5_read_plan_async(
@@ -940,6 +1308,7 @@ def _plan_direct_hdf5_indexed_column_ranges(
     *,
     index_values: npt.NDArray[Any],
     table_row_indices: Sequence[int] | None,
+    max_gap: int = 0,
 ) -> _DirectHDF5IndexedRangeReadPlan:
     index_values = np.asarray(index_values, dtype=np.intp)
     index_array = np.empty(index_values.size + 1, dtype=np.intp)
@@ -972,7 +1341,7 @@ def _plan_direct_hdf5_indexed_column_ranges(
         _coalesce_indexed_data_spans(
             row_starts,
             row_ends,
-            max_gap=0,
+            max_gap=max_gap,
         )
     )
     full_element_count = int(index_array[-1])
@@ -1113,29 +1482,63 @@ def _get_fast_table_data_if_available(
             exact_table_path,
         )
 
-    read_plan = _plan_direct_hdf5_table_reads(filtered_catalog_columns)
-    direct_column_data = _materialize_direct_hdf5_read_plan(
-        path,
-        read_plan,
-        table_row_indices,
-    )
-    logger.debug(
-        "fast HDF5 materialization selected direct scalar columns=%s "
-        "direct indexed columns=%s fallback columns=%s for %r/%s",
-        [column.name for column in read_plan.scalar_columns],
-        [plan.data_column.name for plan in read_plan.indexed_columns],
-        [column.name for column in read_plan.fallback_columns],
-        path,
-        exact_table_path,
-    )
+    if snapshot.backend == "zarr":
+        zarr_read_plan = _plan_direct_zarr_table_reads(
+            filtered_catalog_columns,
+            table_row_indices=table_row_indices,
+        )
+        direct_zarr_column_data = _materialize_direct_zarr_read_plan(
+            path,
+            zarr_read_plan,
+            table_row_indices,
+            as_polars=as_polars,
+        )
+        if direct_zarr_column_data is None:
+            direct_column_data: Mapping[str, Any] = {}
+            fallback_columns = filtered_catalog_columns
+            logger.debug(
+                "fast Zarr materialization fell back to accessor columns=%s for %r/%s",
+                [column.name for column in fallback_columns],
+                path,
+                exact_table_path,
+            )
+        else:
+            direct_column_data = direct_zarr_column_data
+            fallback_columns = zarr_read_plan.fallback_columns
+            logger.debug(
+                "fast Zarr materialization selected direct array columns=%s "
+                "direct indexed columns=%s fallback columns=%s for %r/%s",
+                [column.name for column in zarr_read_plan.array_columns],
+                [plan.data_column.name for plan in zarr_read_plan.indexed_columns],
+                [column.name for column in fallback_columns],
+                path,
+                exact_table_path,
+            )
+    else:
+        hdf5_read_plan = _plan_direct_hdf5_table_reads(filtered_catalog_columns)
+        direct_column_data = _materialize_direct_hdf5_read_plan(
+            path,
+            hdf5_read_plan,
+            table_row_indices,
+        )
+        fallback_columns = hdf5_read_plan.fallback_columns
+        logger.debug(
+            "fast HDF5 materialization selected direct scalar columns=%s "
+            "direct indexed columns=%s fallback columns=%s for %r/%s",
+            [column.name for column in hdf5_read_plan.scalar_columns],
+            [plan.data_column.name for plan in hdf5_read_plan.indexed_columns],
+            [column.name for column in fallback_columns],
+            path,
+            exact_table_path,
+        )
 
     source_path, log_source_path = _source_path_strings(path)
     materialization_columns = tuple(
         _raw_metadata_from_catalog_column(column, accessor[column.dataset.path])
         for accessor in (
-            (lazynwb.file_io._get_accessor(path),) if read_plan.fallback_columns else ()
+            (lazynwb.file_io._get_accessor(path),) if fallback_columns else ()
         )
-        for column in read_plan.fallback_columns
+        for column in fallback_columns
         if column.dataset.path
     )
     logger.debug(
@@ -1708,6 +2111,8 @@ def _format_multi_dim_column_pd(
 ) -> list[list[Any]]:
     """Pandas inists 'Per-column arrays must each be 1-dimensional': this converts to a list of
     arrays, if not already"""
+    if len(column_data) == 0:
+        return []
     if isinstance(column_data[0], list):
         return list(column_data)  # type: ignore[arg-type]
     else:

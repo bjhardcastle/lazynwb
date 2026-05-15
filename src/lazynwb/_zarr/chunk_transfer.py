@@ -59,18 +59,18 @@ class _ZarrV2ChunkTransferEngine:
         available_chunk_keys: Container[str] | None = None,
         missing_chunk_keys: Container[str] | None = None,
     ) -> np.ndarray:
-        spec = _zarr_v2_array_spec(array_path=array_path, zarray=zarray)
-        plan = chunk_planner._plan_array_chunks(
-            array_path=spec.array_path,
-            shape=spec.shape,
-            chunks=spec.chunks,
+        spec, plan = _plan_zarr_v2_array_selection(
+            array_path=array_path,
+            zarray=zarray,
             selection=selection,
-            dimension_separator=spec.dimension_separator,
-            fill_value=spec.fill_value,
             available_chunk_keys=available_chunk_keys,
             missing_chunk_keys=missing_chunk_keys,
         )
-        return await _read_planned_chunks(self._object_client, spec, plan)
+        return await _read_zarr_v2_array_selection_from_plan(
+            self._object_client,
+            spec=spec,
+            plan=plan,
+        )
 
 
 async def _read_zarr_v2_array_selection(
@@ -82,14 +82,49 @@ async def _read_zarr_v2_array_selection(
     available_chunk_keys: Container[str] | None = None,
     missing_chunk_keys: Container[str] | None = None,
 ) -> np.ndarray:
-    engine = _ZarrV2ChunkTransferEngine(object_client)
-    return await engine._read_array_selection(
+    spec, plan = _plan_zarr_v2_array_selection(
         array_path=array_path,
         zarray=zarray,
         selection=selection,
         available_chunk_keys=available_chunk_keys,
         missing_chunk_keys=missing_chunk_keys,
     )
+    return await _read_zarr_v2_array_selection_from_plan(
+        object_client,
+        spec=spec,
+        plan=plan,
+    )
+
+
+async def _read_zarr_v2_array_selection_from_plan(
+    object_client: _AsyncObjectClient,
+    *,
+    spec: _ZarrV2ArraySpec,
+    plan: chunk_planner._ArrayChunkPlan,
+) -> np.ndarray:
+    return await _read_planned_chunks(object_client, spec, plan)
+
+
+def _plan_zarr_v2_array_selection(
+    *,
+    array_path: str,
+    zarray: Mapping[str, object],
+    selection: object = None,
+    available_chunk_keys: Container[str] | None = None,
+    missing_chunk_keys: Container[str] | None = None,
+) -> tuple[_ZarrV2ArraySpec, chunk_planner._ArrayChunkPlan]:
+    spec = _zarr_v2_array_spec(array_path=array_path, zarray=zarray)
+    plan = chunk_planner._plan_array_chunks(
+        array_path=spec.array_path,
+        shape=spec.shape,
+        chunks=spec.chunks,
+        selection=selection,
+        dimension_separator=spec.dimension_separator,
+        fill_value=spec.fill_value,
+        available_chunk_keys=available_chunk_keys,
+        missing_chunk_keys=missing_chunk_keys,
+    )
+    return spec, plan
 
 
 async def _read_planned_chunks(

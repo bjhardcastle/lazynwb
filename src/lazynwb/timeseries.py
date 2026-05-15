@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import logging
+import time
 import typing
 from typing import Literal
 
@@ -10,12 +12,169 @@ import h5py
 import numpy as np
 import zarr
 
+import lazynwb._zarr.reader as zarr_reader
 import lazynwb.exceptions
 import lazynwb.file_io
 import lazynwb.types_
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
+
+
+AsyncValueType = typing.TypeVar("AsyncValueType")
+
+
+def _run_async_value(
+    coroutine: typing.Coroutine[object, object, AsyncValueType],
+) -> AsyncValueType:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+    future = lazynwb.utils.get_threadpool_executor().submit(asyncio.run, coroutine)
+    return future.result()
+
+
+def _native_zarr_array_accessor_if_available(
+    *,
+    file: lazynwb.file_io.FileAccessor,
+    array_path: str,
+    accessor: h5py.Dataset | zarr.Array,
+) -> h5py.Dataset | zarr.Array | _NativeZarrArrayAccessor:
+    if file._hdmf_backend != lazynwb.file_io.FileAccessor.HDMFBackend.ZARR:
+        return accessor
+    if not zarr_reader._source_supports_native_zarr_array_reads(file._path):
+        logger.debug(
+            "leaving TimeSeries data on Zarr accessor path for %s/%s: "
+            "native obstore transport unsupported",
+            file._path.as_posix(),
+            array_path,
+        )
+        return accessor
+    if not _array_accessor_metadata_supports_native_zarr(accessor):
+        logger.debug(
+            "leaving TimeSeries data on Zarr accessor path for %s/%s: "
+            "native array metadata unsupported (shape=%s dtype=%s chunks=%s)",
+            file._path.as_posix(),
+            array_path,
+            getattr(accessor, "shape", None),
+            getattr(accessor, "dtype", None),
+            getattr(accessor, "chunks", None),
+        )
+        return accessor
+    logger.debug(
+        "wrapping TimeSeries data accessor with native Zarr selector for %s/%s",
+        file._path.as_posix(),
+        array_path,
+    )
+    return _NativeZarrArrayAccessor(
+        source=file._path,
+        array_path=array_path,
+        fallback=accessor,
+    )
+
+
+def _array_accessor_metadata_supports_native_zarr(
+    accessor: h5py.Dataset | zarr.Array,
+) -> bool:
+    dtype = getattr(accessor, "dtype", None)
+    shape = getattr(accessor, "shape", None)
+    chunks = getattr(accessor, "chunks", None)
+    if dtype is None or shape is None or chunks is None:
+        return False
+    try:
+        np_dtype = np.dtype(dtype)
+    except TypeError:
+        return False
+    return len(tuple(shape)) in (1, 2) and np_dtype.kind in {"b", "i", "u", "f", "c"}
+
+
+class _NativeZarrArrayAccessor:
+    """Private array-like wrapper that tries native exact Zarr reads before fallback."""
+
+    def __init__(
+        self,
+        *,
+        source: lazynwb.types_.PathLike,
+        array_path: str,
+        fallback: h5py.Dataset | zarr.Array,
+    ) -> None:
+        self._source = source
+        self._array_path = array_path
+        self._fallback = fallback
+
+    @property
+    def attrs(self) -> object:
+        return self._fallback.attrs
+
+    @property
+    def chunks(self) -> object:
+        return getattr(self._fallback, "chunks", None)
+
+    @property
+    def dtype(self) -> object:
+        return getattr(self._fallback, "dtype", None)
+
+    @property
+    def name(self) -> str | None:
+        return getattr(self._fallback, "name", None)
+
+    @property
+    def ndim(self) -> int | None:
+        return getattr(self._fallback, "ndim", None)
+
+    @property
+    def shape(self) -> tuple[int, ...] | None:
+        return getattr(self._fallback, "shape", None)
+
+    def __len__(self) -> int:
+        return len(self._fallback)
+
+    def __array__(
+        self,
+        dtype: object | None = None,
+        copy: bool | None = None,
+    ) -> np.ndarray:
+        value = np.asarray(self[:])
+        if dtype is not None:
+            value = value.astype(dtype)
+        if copy:
+            return value.copy()
+        return value
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._fallback, name)
+
+    def __getitem__(self, selection: object) -> object:
+        reader = zarr_reader._default_zarr_backend_reader(self._source)
+        started = time.perf_counter()
+        try:
+            value = _run_async_value(
+                reader.read_array_selection(self._array_path, selection)
+            )
+        except Exception as exc:
+            logger.debug(
+                "native TimeSeries Zarr data read unavailable for %r/%s "
+                "selection=%r after %.3f s; using accessor fallback: %r",
+                self._source,
+                self._array_path,
+                selection,
+                time.perf_counter() - started,
+                exc,
+                exc_info=True,
+            )
+            return self._fallback[selection]
+        finally:
+            _run_async_value(reader.close())
+        logger.debug(
+            "read TimeSeries Zarr data via native selector for %r/%s "
+            "selection=%r in %.3f s",
+            self._source,
+            self._array_path,
+            selection,
+            time.perf_counter() - started,
+        )
+        return value
 
 
 @dataclasses.dataclass
@@ -28,7 +187,7 @@ class TimeSeries:
         return lazynwb.file_io._get_accessor(self._file_path)
 
     @property
-    def data(self) -> h5py.Dataset | zarr.Array:
+    def data(self) -> h5py.Dataset | zarr.Array | _NativeZarrArrayAccessor:
         file = self._file
         data_path = f"{self._table_path}/data"
         try:
@@ -50,7 +209,11 @@ class TimeSeries:
             getattr(data, "shape", None),
             getattr(data, "dtype", None),
         )
-        return data
+        return _native_zarr_array_accessor_if_available(
+            file=file,
+            array_path=data_path,
+            accessor=data,
+        )
 
     @property
     def timestamps(self) -> h5py.Dataset | zarr.Array:

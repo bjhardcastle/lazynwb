@@ -255,32 +255,80 @@ class _ZarrBackendReader:
         normalized_path = _normalize_zarr_metadata_path(exact_array_path)
         client = self._remote_metadata_client
         if client is None:
+            logger.debug(
+                "rejecting native Zarr array selection for %s/%s: "
+                "obstore transport unavailable",
+                self._source,
+                normalized_path,
+            )
             raise RuntimeError("native Zarr array reads require obstore metadata client")
         catalog = await asyncio.to_thread(_ZarrMetadataCatalog, self._source_path, self)
         zarray = catalog.get_zarray(normalized_path)
         if zarray is None:
+            logger.debug(
+                "rejecting native Zarr array selection for %s/%s: missing .zarray",
+                self._source,
+                normalized_path,
+            )
             raise KeyError(exact_array_path)
+        try:
+            spec, plan = zarr_chunk_transfer._plan_zarr_v2_array_selection(
+                array_path=normalized_path,
+                zarray=zarray,
+                selection=selection,
+            )
+        except Exception as exc:
+            logger.debug(
+                "rejecting native Zarr array selection for %s/%s: %r",
+                self._source,
+                normalized_path,
+                exc,
+            )
+            raise
+        logger.debug(
+            "selecting native Zarr v2 array engine for %s/%s "
+            "(selection=%r shape=%s chunks=%s dtype=%s chunk_count=%d)",
+            self._source,
+            normalized_path,
+            selection,
+            spec.shape,
+            spec.chunks,
+            spec.dtype,
+            plan.chunk_count,
+        )
         request_count_before = client.request_count
         fetched_bytes_before = client.bytes_fetched
         started = time.perf_counter()
-        result = await zarr_chunk_transfer._read_zarr_v2_array_selection(
-            client,
-            array_path=normalized_path,
-            zarray=zarray,
-            selection=selection,
-        )
+        try:
+            result = await zarr_chunk_transfer._read_zarr_v2_array_selection_from_plan(
+                client,
+                spec=spec,
+                plan=plan,
+            )
+        except Exception as exc:
+            logger.debug(
+                "native Zarr array selection failed for %s/%s after %.3f s; "
+                "falling back is recommended: %r",
+                self._source,
+                normalized_path,
+                time.perf_counter() - started,
+                exc,
+                exc_info=True,
+            )
+            raise
         chunk_requests = client.request_count - request_count_before
         chunk_bytes = client.bytes_fetched - fetched_bytes_before
         self.chunk_read_count += chunk_requests
         self.chunk_bytes_fetched += chunk_bytes
         logger.debug(
             "read native Zarr array selection for %s/%s in %.3f s "
-            "(selection=%r shape=%s chunk_requests=%d chunk_bytes=%d)",
+            "(selection=%r shape=%s chunk_count=%d chunk_requests=%d chunk_bytes=%d)",
             self._source,
             normalized_path,
             time.perf_counter() - started,
             selection,
             result.shape,
+            plan.chunk_count,
             chunk_requests,
             chunk_bytes,
         )
@@ -1336,6 +1384,16 @@ def _source_uri(source: lazynwb.types_.PathLike) -> str:
 
 def _source_name_has_zarr_suffix(source: lazynwb.types_.PathLike) -> bool:
     return ".zarr" in _source_uri(source).lower()
+
+
+def _source_supports_native_zarr_array_reads(
+    source: lazynwb.types_.PathLike,
+) -> bool:
+    try:
+        parsed = urllib.parse.urlsplit(_source_uri(source))
+    except (TypeError, ValueError):
+        return False
+    return parsed.scheme in _OBSTORE_REMOTE_ZARR_SCHEMES
 
 
 def _is_fast_zarr_candidate(source: lazynwb.types_.PathLike) -> bool:
