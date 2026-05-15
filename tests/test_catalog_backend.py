@@ -5,6 +5,7 @@ import dataclasses
 import logging
 import pathlib
 import shutil
+from collections.abc import Sequence
 
 import h5py
 import numpy as np
@@ -357,6 +358,26 @@ def test_zarr_backend_reader_builds_path_summary(
     assert entries_by_path["/units"].is_group
     assert entries_by_path["/units/spike_times"].is_dataset
     assert entries_by_path["/units/spike_times"].shape is not None
+
+
+def test_zarr_backend_reader_reads_exact_array_selection_with_native_chunks(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    zarr_group = zarr.open(str(local_zarr_path), mode="r")
+    reference_array = zarr_group["units/id"]
+    selection = slice(0, min(3, reference_array.shape[0]))
+    reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),
+    )
+    reader._remote_metadata_client = _LocalZarrObjectClient(local_zarr_path)
+
+    result = asyncio.run(reader.read_array_selection("units/id", selection))
+
+    np.testing.assert_array_equal(result, reference_array[selection])
+    assert reader.chunk_read_count > 0
+    assert reader.chunk_bytes_fetched > 0
 
 
 def test_zarr_catalog_path_summary_filters_metadata_timeseries_and_specifications(
@@ -840,3 +861,29 @@ def _contains_live_accessor(value: object) -> bool:
     if isinstance(value, (tuple, list, set)):
         return any(_contains_live_accessor(item) for item in value)
     return False
+
+
+class _LocalZarrObjectClient:
+    def __init__(self, root: pathlib.Path) -> None:
+        self._root = root
+        self.request_count = 0
+        self.bytes_fetched = 0
+
+    @property
+    def cache_key(self) -> str:
+        return f"local-test:{self._root}"
+
+    def read_consolidated_payload_sync(self) -> None:
+        return None
+
+    async def read_many(self, keys: Sequence[str]) -> dict[str, bytes]:
+        payloads: dict[str, bytes] = {}
+        for key in keys:
+            path = self._root / key
+            if not path.exists():
+                continue
+            payload = path.read_bytes()
+            self.request_count += 1
+            self.bytes_fetched += len(payload)
+            payloads[key] = payload
+        return payloads

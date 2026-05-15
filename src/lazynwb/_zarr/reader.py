@@ -10,7 +10,7 @@ import pathlib
 import threading
 import time
 import urllib.parse
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 
 import numpy as np
 import obstore
@@ -23,6 +23,7 @@ import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
 import lazynwb._config
 import lazynwb._storage_options
+import lazynwb._zarr.chunk_transfer as zarr_chunk_transfer
 import lazynwb.types_
 import lazynwb.utils
 
@@ -115,6 +116,8 @@ class _ZarrBackendReader:
         self._remote_consolidated_payload: _RemoteZarrConsolidatedPayload | None = None
         self.metadata_read_count = 0
         self.metadata_bytes_fetched = 0
+        self.chunk_read_count = 0
+        self.chunk_bytes_fetched = 0
         self.used_consolidated_metadata = False
 
     async def get_source_identity(self) -> catalog_models._SourceIdentity:
@@ -244,13 +247,54 @@ class _ZarrBackendReader:
         )
         return summary
 
+    async def read_array_selection(
+        self,
+        exact_array_path: str,
+        selection: object = None,
+    ) -> np.ndarray:
+        normalized_path = _normalize_zarr_metadata_path(exact_array_path)
+        client = self._remote_metadata_client
+        if client is None:
+            raise RuntimeError("native Zarr array reads require obstore metadata client")
+        catalog = await asyncio.to_thread(_ZarrMetadataCatalog, self._source_path, self)
+        zarray = catalog.get_zarray(normalized_path)
+        if zarray is None:
+            raise KeyError(exact_array_path)
+        request_count_before = client.request_count
+        fetched_bytes_before = client.bytes_fetched
+        started = time.perf_counter()
+        result = await zarr_chunk_transfer._read_zarr_v2_array_selection(
+            client,
+            array_path=normalized_path,
+            zarray=zarray,
+            selection=selection,
+        )
+        chunk_requests = client.request_count - request_count_before
+        chunk_bytes = client.bytes_fetched - fetched_bytes_before
+        self.chunk_read_count += chunk_requests
+        self.chunk_bytes_fetched += chunk_bytes
+        logger.debug(
+            "read native Zarr array selection for %s/%s in %.3f s "
+            "(selection=%r shape=%s chunk_requests=%d chunk_bytes=%d)",
+            self._source,
+            normalized_path,
+            time.perf_counter() - started,
+            selection,
+            result.shape,
+            chunk_requests,
+            chunk_bytes,
+        )
+        return result
+
     async def close(self) -> None:
         logger.debug(
             "closing Zarr backend reader for %s (metadata_reads=%d "
-            "metadata_bytes=%d consolidated=%s)",
+            "metadata_bytes=%d chunk_reads=%d chunk_bytes=%d consolidated=%s)",
             self._source,
             self.metadata_read_count,
             self.metadata_bytes_fetched,
+            self.chunk_read_count,
+            self.chunk_bytes_fetched,
             self.used_consolidated_metadata,
         )
 
@@ -685,18 +729,7 @@ class _ObstoreZarrMetadataClient:
         self,
     ) -> _RemoteZarrConsolidatedPayload | None:
         object_key = _remote_zarr_object_key(self._context.root_prefix, ".zmetadata")
-        started = time.perf_counter()
-        result = await obstore.get_async(self._store, object_key)
-        payload_bytes = _bytes_from_obstore_get_result(result)
-        self.request_count += 1
-        self.bytes_fetched += len(payload_bytes)
-        logger.debug(
-            "read obstore Zarr metadata object %s/%s in %.3f s (%d bytes)",
-            self._context.store_url,
-            object_key,
-            time.perf_counter() - started,
-            len(payload_bytes),
-        )
+        result, payload_bytes = await self._read_obstore_object(object_key)
         payload = json.loads(payload_bytes)
         if not isinstance(payload, Mapping):
             logger.debug("Zarr consolidated metadata payload is not a mapping")
@@ -726,6 +759,54 @@ class _ObstoreZarrMetadataClient:
             metadata=metadata,
             fetched_bytes=len(payload_bytes),
         )
+
+    async def read_object(self, key: str) -> bytes:
+        object_key = _remote_zarr_object_key(self._context.root_prefix, key)
+        _, payload_bytes = await self._read_obstore_object(object_key)
+        return payload_bytes
+
+    async def read_many(self, keys: Sequence[str]) -> dict[str, bytes]:
+        if not keys:
+            return {}
+        started = time.perf_counter()
+        payloads = await asyncio.gather(
+            *(self._read_object_or_none(key) for key in keys)
+        )
+        result = {
+            key: payload
+            for key, payload in zip(keys, payloads, strict=True)
+            if payload is not None
+        }
+        logger.debug(
+            "read %d/%d Zarr objects from obstore prefix %r in %.3f s",
+            len(result),
+            len(keys),
+            self._context.root_prefix,
+            time.perf_counter() - started,
+        )
+        return result
+
+    async def _read_object_or_none(self, key: str) -> bytes | None:
+        try:
+            return await self.read_object(key)
+        except (FileNotFoundError, KeyError, obstore.exceptions.NotFoundError):
+            logger.debug("remote Zarr object missing: %s/%s", self._source_url, key)
+            return None
+
+    async def _read_obstore_object(self, object_key: str) -> tuple[object, bytes]:
+        started = time.perf_counter()
+        result = await obstore.get_async(self._store, object_key)
+        payload_bytes = _bytes_from_obstore_get_result(result)
+        self.request_count += 1
+        self.bytes_fetched += len(payload_bytes)
+        logger.debug(
+            "read obstore Zarr object %s/%s in %.3f s (%d bytes)",
+            self._context.store_url,
+            object_key,
+            time.perf_counter() - started,
+            len(payload_bytes),
+        )
+        return result, payload_bytes
 
 
 def _remote_metadata_client_if_available(
