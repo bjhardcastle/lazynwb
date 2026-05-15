@@ -109,6 +109,8 @@ _OBSTORE_PROTOCOLS = frozenset({"s3", "gs", "gcs", "az", "abfs"})
 
 def _open_zarr(path: upath.UPath) -> zarr.Group:
     key = path.as_posix()
+    if _is_zarr_v3_runtime():
+        return _open_zarr_v3(path, key)
     if config.use_obstore and path.protocol and path.protocol != "file":
         store = obstore.store.from_url(
             key.split("//")[-1].split("/")[0], **_get_obstore_storage_options()
@@ -134,6 +136,35 @@ def _open_zarr(path: upath.UPath) -> zarr.Group:
         return zarr.open_group(mapper, mode="r")
     logger.debug("opening local Zarr store %s", key)
     return zarr.open(key, mode="r")
+
+
+def _open_zarr_v3(path: upath.UPath, key: str) -> zarr.Group:
+    """Open Zarr stores with zarr-python 3 while reading NWB Zarr v2 metadata."""
+    if path.protocol and path.protocol != "file":
+        storage_options = _get_fsspec_storage_options()
+        logger.debug(
+            "opening remote Zarr store %s with zarr v3 fsspec mapper "
+            "without consolidated metadata (options=%s)",
+            key,
+            sorted(str(option) for option in storage_options),
+        )
+        mapper = fsspec.get_mapper(key, **storage_options)
+        return zarr.open_group(mapper, mode="r", use_consolidated=False)
+    logger.debug(
+        "opening local Zarr store %s with zarr v3 without consolidated metadata",
+        key,
+    )
+    return zarr.open_group(key, mode="r", use_consolidated=False)
+
+
+def _is_zarr_v3_runtime() -> bool:
+    """Return whether the active zarr-python runtime is major version 3 or newer."""
+    version = getattr(zarr, "__version__", "2")
+    try:
+        return int(version.split(".", maxsplit=1)[0]) >= 3
+    except ValueError:
+        logger.debug("could not parse zarr runtime version %r", version)
+        return False
 
 
 def _open_hdf5(
@@ -167,6 +198,8 @@ def is_group(accessor) -> bool:
     """
     Check if the given accessor is a group (e.g. h5py.Group or zarr.Group).
     """
+    if isinstance(accessor, _ZarrV3CatalogAccessor):
+        return accessor.dtype is None
     return hasattr(accessor, "keys")
 
 
@@ -346,7 +379,7 @@ class FileAccessor:
             if accessor._hdmf_backend == cls.HDMFBackend.HDF5:
                 accessor._accessor.close()
             elif accessor._hdmf_backend == cls.HDMFBackend.ZARR:
-                accessor._accessor.store.close()
+                _close_zarr_store_if_supported(accessor._accessor.store)
         logger.debug("Clearing FileAccessor cache")
         _accessor_cache.clear()
 
@@ -390,18 +423,54 @@ class FileAccessor:
         return getattr(self._accessor, name)
 
     def get(self, name: str, default: Any = None) -> Any:
-        return self._accessor.get(
-            lazynwb.utils.normalize_internal_file_path(name), default
-        )
+        normalized_name = lazynwb.utils.normalize_internal_file_path(name)
+        try:
+            return self._accessor.get(normalized_name, default)
+        except Exception as exc:
+            fallback = self._get_zarr_v3_catalog_accessor(normalized_name)
+            if fallback is not None:
+                logger.debug(
+                    "returning catalog-backed Zarr accessor for %s after "
+                    "runtime accessor failure: %r",
+                    normalized_name,
+                    exc,
+                )
+                return fallback
+            raise
 
     def __getitem__(self, name) -> Any:
-        return self._accessor[lazynwb.utils.normalize_internal_file_path(name)]
+        normalized_name = lazynwb.utils.normalize_internal_file_path(name)
+        try:
+            return self._accessor[normalized_name]
+        except Exception as exc:
+            fallback = self._get_zarr_v3_catalog_accessor(normalized_name)
+            if fallback is not None:
+                logger.debug(
+                    "returning catalog-backed Zarr accessor for %s after "
+                    "runtime accessor failure: %r",
+                    normalized_name,
+                    exc,
+                )
+                return fallback
+            raise
 
     def __contains__(self, name) -> bool:
         return lazynwb.utils.normalize_internal_file_path(name) in self._accessor
 
+    def keys(self):
+        if self._hdmf_backend == self.HDMFBackend.ZARR and _is_zarr_v3_runtime():
+            keys = _get_zarr_root_child_keys_from_catalog(self._path)
+            if keys is not None:
+                return keys
+        return self._accessor.keys()
+
+    def _get_zarr_v3_catalog_accessor(self, normalized_name: str) -> Any | None:
+        if self._hdmf_backend != self.HDMFBackend.ZARR or not _is_zarr_v3_runtime():
+            return None
+        return _get_zarr_v3_catalog_accessor(self._path, normalized_name)
+
     def __iter__(self):
-        return iter(self._accessor)
+        return iter(self.keys())
 
     def __repr__(self) -> str:
         if self._path is not None:
@@ -416,7 +485,219 @@ class FileAccessor:
             if self._hdmf_backend == self.HDMFBackend.HDF5:
                 self._accessor.close()
             elif self._hdmf_backend == self.HDMFBackend.ZARR:
-                self._accessor.store.close()
+                _close_zarr_store_if_supported(self._accessor.store)
+
+
+def _close_zarr_store_if_supported(store: object) -> None:
+    close = getattr(store, "close", None)
+    if callable(close):
+        close()
+
+
+def _get_zarr_root_child_keys_from_catalog(
+    nwb_path: lazynwb.types_.PathLike,
+) -> tuple[str, ...] | None:
+    summary = _get_catalog_path_summary_if_available(
+        nwb_path,
+        include_child_datasets=True,
+        include_table_columns=True,
+        include_metadata=True,
+        include_specifications=True,
+        parents=True,
+    )
+    if summary is None:
+        return None
+    keys: list[str] = []
+    seen: set[str] = set()
+    for internal_path in summary:
+        root_child = internal_path.strip("/").split("/", maxsplit=1)[0]
+        if not root_child or root_child in seen:
+            continue
+        seen.add(root_child)
+        keys.append(root_child)
+    logger.debug(
+        "resolved %d root Zarr keys from catalog summary for %r",
+        len(keys),
+        nwb_path,
+    )
+    return tuple(keys)
+
+
+class _ZarrV3CatalogAccessor:
+    """Metadata-only fallback for Zarr v2 nodes zarr-python 3 cannot parse."""
+
+    def __init__(
+        self,
+        *,
+        source: lazynwb.types_.PathLike,
+        path: str,
+        zarray: dict[str, object] | None,
+        zattrs: dict[str, object],
+        child_names: tuple[str, ...],
+    ) -> None:
+        self._source = source
+        self._path = path
+        self._zarray = zarray
+        self._data_cache: object | None = None
+        self.name = "/" if path == "" else f"/{path}"
+        self.attrs = zattrs
+        self.shape = _shape_from_zarr_metadata(zarray)
+        self.ndim = None if self.shape is None else len(self.shape)
+        self.dtype = _dtype_from_zarr_metadata(zarray)
+        self.chunks = _chunks_from_zarr_metadata(zarray)
+        self.maxshape = None
+        self.fill_value = None if zarray is None else zarray.get("fill_value")
+        self._child_names = child_names
+
+    def keys(self) -> tuple[str, ...]:
+        return self._child_names
+
+    def get(self, name: str, default: Any = None) -> Any:
+        child_path = f"{self._path}/{name}" if self._path else name
+        return _get_zarr_v3_catalog_accessor(self._source, child_path) or default
+
+    def __getitem__(self, name: object) -> Any:
+        if not isinstance(name, str):
+            return self._read_array()[name]
+        value = self.get(name)
+        if value is None:
+            raise KeyError(name)
+        return value
+
+    def asstr(self) -> _ZarrV3CatalogStringView:
+        return _ZarrV3CatalogStringView(self)
+
+    def _read_array(self) -> Any:
+        if self.dtype is None or self._zarray is None:
+            raise TypeError(f"{type(self).__name__} for {self.name!r} is not an array")
+        if self._data_cache is None:
+            self._data_cache = _read_zarr_v2_catalog_accessor_array(
+                source=self._source,
+                path=self._path,
+                zarray=self._zarray,
+                shape=self.shape or (),
+                dtype=self.dtype,
+            )
+        return self._data_cache
+
+
+class _ZarrV3CatalogStringView:
+    def __init__(self, accessor: _ZarrV3CatalogAccessor) -> None:
+        self._accessor = accessor
+
+    def __getitem__(self, selection: object) -> Any:
+        data = self._accessor[selection]
+        if hasattr(data, "astype"):
+            return data.astype(str)
+        return str(data)
+
+
+def _get_zarr_v3_catalog_accessor(
+    source: lazynwb.types_.PathLike,
+    internal_path: str,
+) -> _ZarrV3CatalogAccessor | None:
+    import lazynwb._zarr.reader as zarr_reader
+
+    if not zarr_reader._is_fast_zarr_candidate(source):
+        return None
+    normalized_path = zarr_reader._normalize_zarr_metadata_path(internal_path)
+    try:
+        catalog = zarr_reader._get_shared_metadata_catalog(source)
+        if not catalog.path_exists(normalized_path):
+            return None
+        zarray = catalog.get_zarray(normalized_path)
+        zattrs = dict(catalog.get_zattrs(normalized_path))
+        child_names = () if zarray is not None else catalog.child_names(normalized_path)
+    except Exception:
+        logger.debug(
+            "catalog-backed Zarr accessor unavailable for %r/%s",
+            source,
+            normalized_path,
+            exc_info=True,
+        )
+        return None
+    return _ZarrV3CatalogAccessor(
+        source=source,
+        path=normalized_path,
+        zarray=dict(zarray) if zarray is not None else None,
+        zattrs=zattrs,
+        child_names=child_names,
+    )
+
+
+def _shape_from_zarr_metadata(
+    zarray: dict[str, object] | None,
+) -> tuple[int, ...] | None:
+    shape = None if zarray is None else zarray.get("shape")
+    if not isinstance(shape, Iterable) or isinstance(shape, (str, bytes, bytearray)):
+        return None
+    return tuple(int(item) for item in shape)
+
+
+def _chunks_from_zarr_metadata(
+    zarray: dict[str, object] | None,
+) -> tuple[int, ...] | None:
+    chunks = None if zarray is None else zarray.get("chunks")
+    if not isinstance(chunks, Iterable) or isinstance(chunks, (str, bytes, bytearray)):
+        return None
+    return tuple(int(item) for item in chunks)
+
+
+def _dtype_from_zarr_metadata(zarray: dict[str, object] | None) -> object | None:
+    if zarray is None:
+        return None
+    import numpy as np
+
+    return np.dtype(str(zarray["dtype"]))
+
+
+def _read_zarr_v2_catalog_accessor_array(
+    *,
+    source: lazynwb.types_.PathLike,
+    path: str,
+    zarray: dict[str, object],
+    shape: tuple[int, ...],
+    dtype: object,
+) -> Any:
+    import numpy as np
+
+    import lazynwb._zarr.chunk_transfer as zarr_chunk_transfer
+
+    source_path = from_pathlike(source).as_posix()
+    mapper = fsspec.get_mapper(source_path, **_get_fsspec_storage_options())
+    chunk_key = _first_zarr_v2_chunk_key(path, shape, zarray)
+    payload = mapper[chunk_key]
+    decoded: object = bytes(payload)
+    compressor = zarr_chunk_transfer._codec_from_config(
+        zarray.get("compressor"),
+        field_name="compressor",
+    )
+    if compressor is not None:
+        decoded = zarr_chunk_transfer._codec_decode(compressor, decoded)
+    for codec in reversed(
+        zarr_chunk_transfer._filters_from_config(zarray.get("filters"))
+    ):
+        decoded = zarr_chunk_transfer._codec_decode(codec, decoded)
+
+    np_dtype = np.dtype(dtype)
+    if isinstance(decoded, (bytes, bytearray, memoryview)) and np_dtype.kind != "O":
+        data = np.frombuffer(decoded, dtype=np_dtype)
+    else:
+        data = np.asarray(decoded)
+    if data.shape != shape:
+        data = data.reshape(shape)
+    return data
+
+
+def _first_zarr_v2_chunk_key(
+    path: str,
+    shape: tuple[int, ...],
+    zarray: dict[str, object],
+) -> str:
+    separator = str(zarray.get("dimension_separator", "."))
+    chunk_rank = max(1, len(shape))
+    chunk_name = separator.join("0" for _ in range(chunk_rank))
+    return f"{path}/{chunk_name}" if path else chunk_name
 
 
 def get_internal_paths(
@@ -586,8 +867,14 @@ def _discover_internal_path_entries(
     )
     file_accessor = _get_accessor(nwb_path)
     _warn_if_remote_hdf5_internal_path_traversal(file_accessor)
+    traversal_root = (
+        file_accessor
+        if file_accessor._hdmf_backend == FileAccessor.HDMFBackend.ZARR
+        and _is_zarr_v3_runtime()
+        else file_accessor._accessor
+    )
     paths_to_accessors = _traverse_internal_paths(
-        file_accessor._accessor,
+        traversal_root,
         include_table_columns=include_table_columns,
         include_child_datasets=include_child_datasets,
         include_metadata=include_metadata,
@@ -917,9 +1204,7 @@ def _is_timeseries_summary_path(
         return True
     if has_timestamps:
         return True
-    return type_says_time_aligned and (
-        has_data or has_rate_starting_time
-    )
+    return type_says_time_aligned and (has_data or has_rate_starting_time)
 
 
 def _is_timeseries_accessor_path(
@@ -944,9 +1229,7 @@ def _is_timeseries_accessor_path(
         return True
     if has_timestamps:
         return True
-    return type_says_time_aligned and (
-        has_data or has_rate_starting_time
-    )
+    return type_says_time_aligned and (has_data or has_rate_starting_time)
 
 
 def _neurodata_type_is_time_aligned(attrs: dict[str, Any]) -> bool:

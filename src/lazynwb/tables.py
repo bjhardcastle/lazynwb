@@ -117,11 +117,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: None = None,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
 ) -> pd.DataFrame | pl.DataFrame: ...
 
 
@@ -143,11 +145,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: Literal[False] = False,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
 ) -> pd.DataFrame: ...
 
 
@@ -167,11 +171,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: Literal[True] = True,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
 ) -> pl.DataFrame: ...
 
 
@@ -193,11 +199,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: bool | None = None,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
 ) -> pd.DataFrame | pl.DataFrame: ...
 
 
@@ -218,11 +226,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: bool | None = None,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
 ) -> pd.DataFrame | pl.DataFrame:
     """ ""Get a DataFrame from one or more NWB files.
 
@@ -441,7 +451,19 @@ def _filter_table_metadata_for_materialization(
 
 
 def _is_string_or_object_dtype(dtype: object | None) -> bool:
-    return getattr(dtype, "kind", None) in ("S", "O", "U") or dtype in ("S", "O", "U")
+    return getattr(dtype, "kind", None) in ("S", "O", "T", "U") or dtype in (
+        "S",
+        "O",
+        "T",
+        "U",
+    )
+
+
+def _coerce_string_array(value: object) -> object:
+    try:
+        return value.astype(str)  # type: ignore[attr-defined]
+    except TypeError:
+        return np.asarray(value, dtype=object).astype(str)
 
 
 def _normalize_column_name_filter(
@@ -1226,7 +1248,7 @@ def _materialize_table_data_from_columns(  # noqa: C901
             try:
                 column_data[column.name] = column.accessor.asstr()[_idx]
             except (AttributeError, TypeError):
-                column_data[column.name] = column.accessor[_idx].astype(str)
+                column_data[column.name] = _coerce_string_array(column.accessor[_idx])
         else:
             column_data[column.name] = column.accessor[_idx]
 
@@ -1501,8 +1523,7 @@ def _get_indexed_column_data(
         )
         full_data = data_column_accessor[:]
         return [
-            full_data[start:end].tolist()
-            for start, end in zip(row_starts, row_ends)
+            full_data[start:end].tolist() for start, end in zip(row_starts, row_ends)
         ]
 
     logger.debug(
@@ -1557,9 +1578,7 @@ def _read_indexed_rows_by_slice(
     row_ends: npt.NDArray[np.intp],
 ) -> list[list[Any]]:
     return [
-        data_column_accessor[int(start) : int(end)].tolist()
-        if end > start
-        else []
+        data_column_accessor[int(start) : int(end)].tolist() if end > start else []
         for start, end in zip(row_starts, row_ends)
     ]
 
@@ -2204,14 +2223,12 @@ def _get_table_schema_with_catalog_snapshots(
     ] = []
     for file_path in file_paths:
         backend_order = _fast_catalog_backend_order(file_path)
-        if (
-            backend_order[0] == "hdf5"
-            and hdf5_reader._is_fast_hdf5_candidate(file_path)
+        if backend_order[0] == "hdf5" and hdf5_reader._is_fast_hdf5_candidate(
+            file_path
         ):
             fast_hdf5_paths.append(file_path)
-        elif (
-            backend_order[0] == "zarr"
-            and zarr_reader._is_fast_zarr_candidate(file_path)
+        elif backend_order[0] == "zarr" and zarr_reader._is_fast_zarr_candidate(
+            file_path
         ):
             fast_zarr_paths.append(file_path)
         else:

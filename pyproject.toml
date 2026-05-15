@@ -8,8 +8,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "h5py>=3.10.0",
-    "zarr>=2.17.0,<3.0",
-    "numcodecs<0.16", # for zarr<3.0 https://github.com/zarr-developers/numcodecs/issues/721
+    "zarr>=2.17.0,<3.0; python_version < '3.11'",
+    "zarr>=3.1.0,<4.0; python_version >= '3.11'",
+    "numcodecs<0.16; python_version < '3.11'", # for zarr<3.0 https://github.com/zarr-developers/numcodecs/issues/721
+    "numcodecs>=0.15.1; python_version >= '3.11'",
     "remfile>=0.1.10",
     "tqdm>=4.66.2",
     "pandas>=2.0.0",
@@ -24,7 +26,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "tomli>=2.0.0; python_version < '3.11'",
 ]
-version = "1.0.0.dev3"
+version = "1.0.0.dev4"
 classifiers = [
     "Development Status :: 3 - Alpha",          # https://pypi.org/classifiers/
     "Programming Language :: Python :: 3",
@@ -55,7 +57,7 @@ task = "poethepoet:main"
 
 [project.optional-dependencies]
 pynwb = [
-    "hdmf-zarr>=0.12.0",
+    "hdmf-zarr>=0.12.0; python_version < '3.11'",
     "pynwb>=3.1.3",
 ]
 

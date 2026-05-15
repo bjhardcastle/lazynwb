@@ -377,18 +377,19 @@ def _get_table_column_accessors(
             f"{table_path!r} is not a group/table (found {type(table).__name__})"
         )
 
+    column_names = _get_table_child_names(file, table, table_path)
     if use_thread_pool:
         future_to_column = {
             lazynwb.utils.get_threadpool_executor().submit(
                 table.get, column_name
             ): column_name
-            for column_name in table.keys()
+            for column_name in column_names
         }
         for future in concurrent.futures.as_completed(future_to_column):
             column_name = future_to_column[future]
             names_to_columns[column_name] = future.result()
     else:
-        for column_name in table:
+        for column_name in column_names:
             names_to_columns[column_name] = table.get(column_name)
 
     if lazynwb.utils.normalize_internal_file_path(table_path) == "general":
@@ -415,6 +416,21 @@ def _get_table_column_accessors(
             "Keeping references is not implemented yet: see https://pynwb.readthedocs.io/en/stable/pynwb.base.html#pynwb.base.TimeSeriesReferenceVectorData"
         )
     return names_to_columns
+
+
+def _get_table_child_names(
+    file: lazynwb.file_io.FileAccessor,
+    table: TableColumnAccessor,
+    table_path: str,
+) -> tuple[str, ...]:
+    if (
+        file._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.ZARR
+        and lazynwb.file_io._is_zarr_v3_runtime()
+    ):
+        catalog_accessor = file._get_zarr_v3_catalog_accessor(table_path)
+        if catalog_accessor is not None:
+            return tuple(catalog_accessor.keys())
+    return tuple(table.keys())
 
 
 def _get_general_metadata_accessors(

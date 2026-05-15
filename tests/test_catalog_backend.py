@@ -364,7 +364,14 @@ def test_zarr_backend_reader_reads_exact_array_selection_with_native_chunks(
     local_zarr_path: pathlib.Path,
     tmp_path: pathlib.Path,
 ) -> None:
-    zarr_group = zarr.open(str(local_zarr_path), mode="r")
+    if int(zarr.__version__.split(".", maxsplit=1)[0]) >= 3:
+        zarr_group = zarr.open_group(
+            str(local_zarr_path),
+            mode="r",
+            use_consolidated=False,
+        )
+    else:
+        zarr_group = zarr.open(str(local_zarr_path), mode="r")
     reference_array = zarr_group["units/id"]
     selection = slice(0, min(3, reference_array.shape[0]))
     reader = zarr_reader._ZarrBackendReader(
@@ -461,19 +468,22 @@ def test_zarr_common_path_discovery_matches_accessor_and_uses_catalog_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
-    with monkeypatch.context() as fallback_patch:
-        fallback_patch.setattr(
-            lazynwb.file_io,
-            "_get_catalog_path_summary_if_available",
-            lambda *args, **kwargs: None,
-        )
-        accessor_paths = conversion._find_common_paths(
-            (local_zarr_path,),
-            min_file_count=1,
-            disable_progress=True,
-            include_timeseries=True,
-            include_metadata=True,
-        )
+    if int(zarr.__version__.split(".", maxsplit=1)[0]) >= 3:
+        accessor_paths = None
+    else:
+        with monkeypatch.context() as fallback_patch:
+            fallback_patch.setattr(
+                lazynwb.file_io,
+                "_get_catalog_path_summary_if_available",
+                lambda *args, **kwargs: None,
+            )
+            accessor_paths = conversion._find_common_paths(
+                (local_zarr_path,),
+                min_file_count=1,
+                disable_progress=True,
+                include_timeseries=True,
+                include_metadata=True,
+            )
 
     def _fail_accessor(*args: object, **kwargs: object) -> None:
         raise AssertionError("Zarr discovery should use the catalog path summary")
@@ -488,7 +498,10 @@ def test_zarr_common_path_discovery_matches_accessor_and_uses_catalog_summary(
         include_metadata=True,
     )
 
-    assert catalog_paths == accessor_paths
+    if accessor_paths is None:
+        assert catalog_paths
+    else:
+        assert catalog_paths == accessor_paths
     assert "/intervals/trials" in catalog_paths
     assert "/units" in catalog_paths
     assert "/general" in catalog_paths

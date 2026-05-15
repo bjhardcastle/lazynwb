@@ -33,6 +33,16 @@ def _metadata_read_scope(path: str) -> str:
     return "top_level"
 
 
+def _metadata_value_length(value: Any, shape: Any) -> int | None:
+    if isinstance(shape, tuple | list):
+        if len(shape) == 0:
+            return 1
+        return int(shape[0])
+    with contextlib.suppress(TypeError):
+        return len(value)
+    return None
+
+
 def _cast(accessor: lazynwb.file_io.FileAccessor, path: str) -> Any:
     """Read attribute from NWB file and interpret it as the appropriate Python object."""
     path = lazynwb.utils.normalize_internal_file_path(path)
@@ -57,6 +67,7 @@ def _cast(accessor: lazynwb.file_io.FileAccessor, path: str) -> Any:
     dtype = getattr(v, "dtype", None)
     if not getattr(v, "shape", True):
         v = [v[()]]
+    value_length = _metadata_value_length(v, shape)
     if isinstance(v[0], bytes):
         s: str = v[0].decode()
         with contextlib.suppress(ValueError):
@@ -84,7 +95,7 @@ def _cast(accessor: lazynwb.file_io.FileAccessor, path: str) -> Any:
                     dtype,
                 )
                 return result
-        if len(v) > 1:
+        if value_length is not None and value_length > 1:
             result = v.asstr()[:].tolist()
             logger.debug(
                 "metadata read scope=%s source=%s path=%s result=list "
@@ -106,7 +117,7 @@ def _cast(accessor: lazynwb.file_io.FileAccessor, path: str) -> Any:
             dtype,
         )
         return s
-    if len(v) > 1:
+    if value_length is not None and value_length > 1:
         logger.debug(
             "metadata read scope=%s source=%s path=%s result=array "
             "shape=%s dtype=%s",
@@ -352,8 +363,7 @@ class LazyNWB:
         raise_on_missing: bool = True,
         ignore_errors: bool = False,
         as_polars: None = None,
-    ) -> pd.DataFrame | pl.DataFrame:
-        ...
+    ) -> pd.DataFrame | pl.DataFrame: ...
 
     @typing.overload
     def get_df(
@@ -368,8 +378,7 @@ class LazyNWB:
         raise_on_missing: bool = True,
         ignore_errors: bool = False,
         as_polars: Literal[False] = False,
-    ) -> pd.DataFrame:
-        ...
+    ) -> pd.DataFrame: ...
 
     @typing.overload
     def get_df(
@@ -384,8 +393,7 @@ class LazyNWB:
         raise_on_missing: bool = True,
         ignore_errors: bool = False,
         as_polars: Literal[True] = True,
-    ) -> pl.DataFrame:
-        ...
+    ) -> pl.DataFrame: ...
 
     @typing.overload
     def get_df(
@@ -400,8 +408,7 @@ class LazyNWB:
         raise_on_missing: bool = True,
         ignore_errors: bool = False,
         as_polars: bool | None = None,
-    ) -> pd.DataFrame | pl.DataFrame:
-        ...
+    ) -> pd.DataFrame | pl.DataFrame: ...
 
     def get_df(
         self,
@@ -440,8 +447,7 @@ class LazyNWB:
 
 class NWBComponent(Protocol):
     @property
-    def _accessor(self) -> lazynwb.file_io.FileAccessor:
-        ...
+    def _accessor(self) -> lazynwb.file_io.FileAccessor: ...
 
 
 def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]:
@@ -752,8 +758,7 @@ def get_metadata_df(
     nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
     as_polars: None = None,
-) -> pd.DataFrame | pl.DataFrame:
-    ...
+) -> pd.DataFrame | pl.DataFrame: ...
 
 
 @typing.overload
@@ -761,8 +766,7 @@ def get_metadata_df(
     nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
     as_polars: Literal[False] = False,
-) -> pd.DataFrame:
-    ...
+) -> pd.DataFrame: ...
 
 
 @typing.overload
@@ -770,8 +774,7 @@ def get_metadata_df(
     nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
     as_polars: Literal[True] = True,
-) -> pl.DataFrame:
-    ...
+) -> pl.DataFrame: ...
 
 
 @typing.overload
@@ -779,8 +782,7 @@ def get_metadata_df(
     nwb_path_or_paths: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     disable_progress: bool = False,
     as_polars: bool | None = None,
-) -> pd.DataFrame | pl.DataFrame:
-    ...
+) -> pd.DataFrame | pl.DataFrame: ...
 
 
 def get_metadata_df(

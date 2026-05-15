@@ -158,6 +158,7 @@ def test_open_file_prefers_zarr_when_zarr_word_is_in_uri(
         calls.append(f"zarr:{path}:{mode}")
         return sentinel
 
+    monkeypatch.setattr(lazynwb.file_io, "_is_zarr_v3_runtime", lambda: False)
     monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _unexpected_hdf5_open)
     monkeypatch.setattr(lazynwb.file_io.zarr, "open", _zarr_open)
 
@@ -184,6 +185,7 @@ def test_open_file_prefers_zarr_for_explicit_zarr_marker(
         calls.append(f"zarr:{path}:{mode}")
         return sentinel
 
+    monkeypatch.setattr(lazynwb.file_io, "_is_zarr_v3_runtime", lambda: False)
     monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _unexpected_hdf5_open)
     monkeypatch.setattr(lazynwb.file_io.zarr, "open", _zarr_open)
 
@@ -224,6 +226,7 @@ def test_open_file_uses_fsspec_mapper_for_remote_zarr_without_zarr_suffix(
     def _unexpected_zarr_open(*args: object, **kwargs: object) -> typing.NoReturn:
         raise AssertionError("remote Zarr stores should open through an fsspec mapper")
 
+    monkeypatch.setattr(lazynwb.file_io, "_is_zarr_v3_runtime", lambda: False)
     monkeypatch.setattr(lazynwb.file_io, "_open_hdf5", _reject_hdf5)
     monkeypatch.setattr(lazynwb.file_io.fsspec, "get_mapper", _get_mapper)
     monkeypatch.setattr(
@@ -245,6 +248,95 @@ def test_open_file_uses_fsspec_mapper_for_remote_zarr_without_zarr_suffix(
     assert calls[1:] == [
         ("mapper", "s3://bucket/example.nwb", {"anon": True, "client": "value"}),
         ("open_consolidated", mapper, "r"),
+    ]
+
+
+def test_open_zarr_v3_uses_unconsolidated_remote_mapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, object, object]] = []
+    mapper = object()
+    sentinel = object()
+    lazynwb.file_io.config.anon = True
+    lazynwb.file_io.config.fsspec_storage_options = {
+        "anon": False,
+        "client": "value",
+    }
+
+    def _get_mapper(path: object, **storage_options: object) -> object:
+        calls.append(("mapper", path, storage_options))
+        return mapper
+
+    def _open_group(
+        store: object,
+        *,
+        mode: str,
+        use_consolidated: bool,
+    ) -> object:
+        calls.append(
+            ("open_group", store, {"mode": mode, "use_consolidated": use_consolidated})
+        )
+        return sentinel
+
+    def _unexpected_open_consolidated(
+        *args: object,
+        **kwargs: object,
+    ) -> typing.NoReturn:
+        raise AssertionError("zarr v3 should not parse consolidated v2 metadata")
+
+    monkeypatch.setattr(lazynwb.file_io, "_is_zarr_v3_runtime", lambda: True)
+    monkeypatch.setattr(lazynwb.file_io.fsspec, "get_mapper", _get_mapper)
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open_group", _open_group)
+    monkeypatch.setattr(
+        lazynwb.file_io.zarr,
+        "open_consolidated",
+        _unexpected_open_consolidated,
+    )
+
+    path = lazynwb.file_io.from_pathlike("s3://bucket/example.nwb.zarr")
+    result = lazynwb.file_io._open_zarr(path)
+
+    assert result is sentinel
+    assert calls == [
+        ("mapper", "s3://bucket/example.nwb.zarr", {"anon": True, "client": "value"}),
+        ("open_group", mapper, {"mode": "r", "use_consolidated": False}),
+    ]
+
+
+def test_open_zarr_v3_uses_unconsolidated_local_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, object, object]] = []
+    sentinel = object()
+
+    def _open_group(
+        store: object,
+        *,
+        mode: str,
+        use_consolidated: bool,
+    ) -> object:
+        calls.append(
+            ("open_group", store, {"mode": mode, "use_consolidated": use_consolidated})
+        )
+        return sentinel
+
+    def _unexpected_zarr_open(*args: object, **kwargs: object) -> typing.NoReturn:
+        raise AssertionError("zarr v3 should open groups explicitly")
+
+    monkeypatch.setattr(lazynwb.file_io, "_is_zarr_v3_runtime", lambda: True)
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open_group", _open_group)
+    monkeypatch.setattr(lazynwb.file_io.zarr, "open", _unexpected_zarr_open)
+
+    path = lazynwb.file_io.from_pathlike("/tmp/example.nwb.zarr")
+    result = lazynwb.file_io._open_zarr(path)
+
+    assert result is sentinel
+    assert calls == [
+        (
+            "open_group",
+            "/tmp/example.nwb.zarr",
+            {"mode": "r", "use_consolidated": False},
+        ),
     ]
 
 
