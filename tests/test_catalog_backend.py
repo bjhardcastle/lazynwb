@@ -220,6 +220,96 @@ def test_zarr_backend_reader_reuses_sqlite_snapshot(
     assert warm_snapshot == cold_snapshot
 
 
+def test_zarr_backend_reader_logs_single_and_multi_table_scan_modes(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="lazynwb._zarr.reader")
+    single_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "single.sqlite"),
+    )
+    asyncio.run(single_reader.read_table_schema_snapshot("intervals/trials"))
+
+    multi_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "multi.sqlite"),
+    )
+    asyncio.run(
+        multi_reader._read_table_schema_snapshots(("intervals/trials", "units"))
+    )
+
+    assert "single-table Zarr schema scan" in caplog.text
+    assert "explicit multi-table Zarr schema scan" in caplog.text
+
+
+def test_zarr_backend_multi_table_helper_reuses_and_warms_schema_cache(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    zarr_reader._clear_shared_metadata_catalog_cache(local_zarr_path)
+    cache_path = tmp_path / "shared-catalog.sqlite"
+    prewarm_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+    cached_units_snapshot = asyncio.run(
+        prewarm_reader.read_table_schema_snapshot("units")
+    )
+    zarr_reader._clear_shared_metadata_catalog_cache(local_zarr_path)
+    batch_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+
+    results = asyncio.run(
+        batch_reader._read_table_schema_snapshots(
+            ("units", "intervals/trials", "units")
+        )
+    )
+    zarr_reader._clear_shared_metadata_catalog_cache(local_zarr_path)
+    warm_trials_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+    warm_trials_snapshot = asyncio.run(
+        warm_trials_reader.read_table_schema_snapshot("intervals/trials")
+    )
+
+    assert set(results) == {"units", "intervals/trials"}
+    assert results["units"].ok
+    assert results["units"].snapshot == cached_units_snapshot
+    assert results["units"].metadata_read_count == 0
+    assert results["intervals/trials"].ok
+    assert results["intervals/trials"].snapshot is not None
+    assert batch_reader.metadata_read_count == 1
+    assert warm_trials_snapshot.table_path == "intervals/trials"
+    assert warm_trials_reader.metadata_read_count == 0
+
+
+def test_zarr_backend_multi_table_helper_reports_missing_table_per_result(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),
+    )
+
+    results = asyncio.run(
+        reader._read_table_schema_snapshots(("intervals/trials", "not_a_table"))
+    )
+
+    assert results["intervals/trials"].ok
+    assert results["not_a_table"].snapshot is None
+    missing_error = results["not_a_table"].error
+    assert isinstance(missing_error, zarr_reader._ZarrTableSchemaScanError)
+    assert missing_error.source_url == local_zarr_path.as_posix()
+    assert missing_error.table_path == "not_a_table"
+    assert missing_error.feature == "missing_table"
+
+
 def test_zarr_backend_reader_uses_targeted_metadata_without_consolidated(
     local_zarr_path: pathlib.Path,
     tmp_path: pathlib.Path,

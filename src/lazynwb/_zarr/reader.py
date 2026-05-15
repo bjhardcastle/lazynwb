@@ -30,6 +30,37 @@ _REMOTE_ZARR_SCHEMES = frozenset({"s3", "gs", "gcs", "az", "abfs", "http", "http
 _ZarrPath = pathlib.Path | upath.UPath
 
 
+@dataclasses.dataclass(slots=True)
+class _ZarrTableSchemaScanError(RuntimeError):
+    """Structured per-table error from an internal multi-table schema scan."""
+
+    source_url: str
+    table_path: str
+    feature: str
+    detail: str
+
+    def __str__(self) -> str:
+        return (
+            f"Zarr table schema scan failed for {self.source_url!r} at "
+            f"{self.table_path!r}: {self.feature}: {self.detail}"
+        )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ZarrTableSchemaScanResult:
+    """Per-table result from a same-source schema scan lifecycle."""
+
+    table_path: str
+    snapshot: catalog_models._TableSchemaSnapshot | None
+    error: Exception | None
+    metadata_read_count: int
+    elapsed_seconds: float
+
+    @property
+    def ok(self) -> bool:
+        return self.snapshot is not None and self.error is None
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class _ZarrConsolidatedMetadataCacheEntry:
     stat_key: tuple[int, int] | None
@@ -62,11 +93,78 @@ class _ZarrBackendReader:
             self._source_identity = await asyncio.to_thread(self._build_source_identity)
         return self._source_identity
 
+    async def _read_table_schema_snapshots(
+        self,
+        exact_table_paths: tuple[str, ...],
+    ) -> dict[str, _ZarrTableSchemaScanResult]:
+        normalized_paths = tuple(dict.fromkeys(exact_table_paths))
+        for exact_table_path in normalized_paths:
+            catalog_backend._require_exact_normalized_path(exact_table_path)
+        logger.debug(
+            "explicit multi-table Zarr schema scan for %s: tables=%d",
+            self._source,
+            len(normalized_paths),
+        )
+        results: dict[str, _ZarrTableSchemaScanResult] = {}
+        for exact_table_path in normalized_paths:
+            metadata_reads_before = self.metadata_read_count
+            started = time.perf_counter()
+            snapshot: catalog_models._TableSchemaSnapshot | None = None
+            error: Exception | None = None
+            try:
+                snapshot = await self.read_table_schema_snapshot(exact_table_path)
+            except KeyError as exc:
+                error = _ZarrTableSchemaScanError(
+                    source_url=self._schema_scan_source_url(),
+                    table_path=exact_table_path,
+                    feature="missing_table",
+                    detail=repr(exc),
+                )
+            except Exception as exc:
+                error = _ZarrTableSchemaScanError(
+                    source_url=self._schema_scan_source_url(),
+                    table_path=exact_table_path,
+                    feature="unexpected_error",
+                    detail=repr(exc),
+                )
+            metadata_read_count = self.metadata_read_count - metadata_reads_before
+            result = _ZarrTableSchemaScanResult(
+                table_path=exact_table_path,
+                snapshot=snapshot,
+                error=error,
+                metadata_read_count=metadata_read_count,
+                elapsed_seconds=time.perf_counter() - started,
+            )
+            results[exact_table_path] = result
+            if error is None:
+                logger.debug(
+                    "same-source Zarr schema scan built %s/%s "
+                    "(metadata_reads=%d elapsed=%.3fs consolidated=%s)",
+                    self._schema_scan_source_url(),
+                    exact_table_path,
+                    metadata_read_count,
+                    result.elapsed_seconds,
+                    self.used_consolidated_metadata,
+                )
+            else:
+                logger.debug(
+                    "same-source Zarr schema scan error for %s/%s: %r",
+                    self._schema_scan_source_url(),
+                    exact_table_path,
+                    error,
+                )
+        return results
+
     async def read_table_schema_snapshot(
         self,
         exact_table_path: str,
     ) -> catalog_models._TableSchemaSnapshot:
         catalog_backend._require_exact_normalized_path(exact_table_path)
+        logger.debug(
+            "single-table Zarr schema scan for %s/%s",
+            self._source,
+            exact_table_path,
+        )
         t0 = time.perf_counter()
         source_identity = await self.get_source_identity()
         if self._cache is not None:
@@ -119,6 +217,11 @@ class _ZarrBackendReader:
 
     async def close(self) -> None:
         logger.debug("closing Zarr backend reader for %s", self._source)
+
+    def _schema_scan_source_url(self) -> str:
+        if self._source_identity is not None:
+            return self._source_identity.source_url
+        return str(self._source)
 
     def _build_source_identity(self) -> catalog_models._SourceIdentity:
         if not self._source_path.exists():
