@@ -167,6 +167,7 @@ cython_debug/
 
 .sandbox.py
 .scratch/
+.autoresearch/
 
 tests/files/
 .github/copilot-instructions.md
