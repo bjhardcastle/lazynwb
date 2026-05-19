@@ -499,7 +499,13 @@ def _safe_internal_paths_for_html(
     file_path: lazynwb.types_.PathLike,
 ) -> list[str]:
     try:
-        return lazynwb.file_io.get_internal_paths(file_path)
+        return lazynwb.file_io.get_internal_paths(
+            file_path,
+            include_child_datasets=True,
+            include_table_columns=True,
+            include_metadata=True,
+            parents=True,
+        )
     except Exception as exc:
         logger.debug(
             "HTML repr path discovery unavailable source=%r error=%r",

@@ -1101,6 +1101,7 @@ def _filter_catalog_path_summary_entries(
         if (
             entry.is_dataset
             and is_scalar
+            and not include_metadata
             and not (is_rate_starting_time and include_child_datasets)
         ):
             continue
@@ -1318,7 +1319,11 @@ def _traverse_internal_paths(
     is_array = shape is not None and not is_scalar
     attrs = dict(getattr(group, "attrs", {}))
     is_rate_starting_time = group.name.endswith("/starting_time") and "rate" in attrs
-    if is_scalar and not (include_child_datasets and is_rate_starting_time):
+    if (
+        is_scalar
+        and not include_metadata
+        and not (include_child_datasets and is_rate_starting_time)
+    ):
         return {}
     neurodata_type = attrs.get("neurodata_type", None)
     is_neurodata = neurodata_type is not None

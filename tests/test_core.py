@@ -63,6 +63,9 @@ def test_repr_html_tolerates_zarr_metadata_read_failure(
     assert "NWB file:" in html
     assert "identifier" in html
     assert "unavailable" in html
+    assert "/identifier" in html
+    assert "/session_start_time" in html
+    assert "/general/subject" in html
     assert "Paths" in html
 
 
