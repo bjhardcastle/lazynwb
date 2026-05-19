@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import datetime
+import html
 import inspect
 import logging
 import typing
@@ -22,6 +23,8 @@ import lazynwb.types_
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
+
+_REPR_HTML_UNAVAILABLE = "unavailable"
 
 
 def _metadata_read_scope(path: str) -> str:
@@ -176,33 +179,35 @@ class LazyNWB:
         return f"LazyNWB({self._file_path!r})"
 
     def _repr_html_(self) -> str:
-        main_info = self._to_dict()
-        subject_info = self.subject._to_dict()
-        paths = self.describe().get("paths", [])
+        main_info = _safe_to_dict(self, context="nwb")
+        subject_info = _safe_to_dict(self.subject, context="subject")
+        paths = _safe_internal_paths_for_html(self._file_path)
 
-        html = f"""
-        <h3>NWB file: {self._file_path}</h3>
+        markup = f"""
+        <h3>NWB file: {_html_escape(self._file_path)}</h3>
         <ul>
         """
         for key, value in main_info.items():
-            if isinstance(value, list):
-                value = ", ".join(map(str, value)) or "[]"
-            html += f"<li><strong>{key}:</strong> {value}</li>"
-        html += "</ul>"
+            markup += (
+                f"<li><strong>{_html_escape(key)}:</strong> "
+                f"{_repr_html_value(value)}</li>"
+            )
+        markup += "</ul>"
 
-        html += "<h4>Subject</h4><ul>"
+        markup += "<h4>Subject</h4><ul>"
         for key, value in subject_info.items():
-            if isinstance(value, list):
-                value = ", ".join(map(str, value))
-            html += f"<li><strong>{key}:</strong> {value}</li>"
-        html += "</ul>"
+            markup += (
+                f"<li><strong>{_html_escape(key)}:</strong> "
+                f"{_repr_html_value(value)}</li>"
+            )
+        markup += "</ul>"
 
-        html += "<h4>Paths</h4><details><summary>Click to expand</summary><ul>"
+        markup += "<h4>Paths</h4><details><summary>Click to expand</summary><ul>"
         for path in paths:
-            html += f"<li>{path}</li>"
-        html += "</ul></details>"
+            markup += f"<li>{_html_escape(path)}</li>"
+        markup += "</ul></details>"
 
-        return html
+        return markup
 
     @property
     def identifier(self) -> str:
@@ -450,19 +455,69 @@ class NWBComponent(Protocol):
     def _accessor(self) -> lazynwb.file_io.FileAccessor: ...
 
 
-def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]:
-    def _get_attr_names(obj: Any) -> list[str]:
-        return [
-            name
-            for name, prop in obj.__class__.__dict__.items()
-            if isinstance(prop, property)
-            and any(t in inspect.signature(prop.fget).return_annotation for t in ("str", "list[str]", "datetime.datetime"))  # type: ignore[arg-type]
-        ]
+def _get_attr_names(obj: object) -> list[str]:
+    return [
+        name
+        for name, prop in obj.__class__.__dict__.items()
+        if isinstance(prop, property)
+        and prop.fget is not None
+        and any(
+            t in inspect.signature(prop.fget).return_annotation
+            for t in ("str", "list[str]", "datetime.datetime")
+        )
+    ]
 
+
+def to_dict(obj: NWBComponent) -> dict[str, str | list[str] | datetime.datetime]:
     results = {}
     for name in _get_attr_names(obj):
         results[name] = getattr(obj, name)
     return results
+
+
+def _safe_to_dict(obj: NWBComponent, *, context: str) -> dict[str, object]:
+    results: dict[str, object] = {}
+    source = getattr(obj, "_file_path", None)
+    for name in _get_attr_names(obj):
+        try:
+            results[name] = getattr(obj, name)
+        except Exception as exc:
+            logger.debug(
+                "HTML repr metadata field unavailable context=%s source=%r "
+                "field=%s error=%r",
+                context,
+                source,
+                name,
+                exc,
+                exc_info=True,
+            )
+            results[name] = _REPR_HTML_UNAVAILABLE
+    return results
+
+
+def _safe_internal_paths_for_html(
+    file_path: lazynwb.types_.PathLike,
+) -> list[str]:
+    try:
+        return lazynwb.file_io.get_internal_paths(file_path)
+    except Exception as exc:
+        logger.debug(
+            "HTML repr path discovery unavailable source=%r error=%r",
+            file_path,
+            exc,
+            exc_info=True,
+        )
+        return []
+
+
+def _repr_html_value(value: object) -> str:
+    if isinstance(value, list):
+        return ", ".join(_html_escape(item) for item in value) or "[]"
+    return _html_escape(value)
+
+
+def _html_escape(value: object) -> str:
+    return html.escape(str(value), quote=True)
 
 
 class Subject:

@@ -1,13 +1,18 @@
+import json
 import logging
+import pathlib
 
+import numcodecs
+import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
+
 import lazynwb
 
 
 def test_import_package():
-    import lazynwb # noqa: F401
+    import lazynwb  # noqa: F401
 
 
 def test_describe(local_hdf5_path):
@@ -31,6 +36,34 @@ def test_describe_zarr(local_zarr_path):
     assert len(result["paths"]) > 0
     assert "session_description" in result
     assert "subject_id" in result
+
+
+def test_repr_html_tolerates_zarr_metadata_read_failure(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    zarr_path = tmp_path / "bad-metadata.nwb.zarr"
+    _write_zarr_group(zarr_path)
+    _write_zarr_group(zarr_path / "general")
+    _write_zarr_group(zarr_path / "general" / "subject")
+    _write_invalid_vlen_bytes_array(zarr_path / "identifier", b"test-id")
+    _write_invalid_vlen_bytes_array(zarr_path / "session_description", b"test session")
+    _write_invalid_vlen_bytes_array(
+        zarr_path / "session_start_time",
+        b"2024-01-02T03:04:05+00:00",
+    )
+    monkeypatch.setattr(
+        lazynwb.file_io,
+        "_get_zarr_v3_catalog_accessor",
+        lambda *args, **kwargs: None,
+    )
+
+    html = lazynwb.LazyNWB(zarr_path)._repr_html_()
+
+    assert "NWB file:" in html
+    assert "identifier" in html
+    assert "unavailable" in html
+    assert "Paths" in html
 
 
 def test_get_metadata_df_single(local_hdf5_path):
@@ -129,6 +162,33 @@ def test_get_metadata_df_zarr(local_zarr_path):
     assert "subject_id" in df.columns
 
 
-if __name__ == '__main__':
+def _write_zarr_group(path: pathlib.Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / ".zgroup").write_text(json.dumps({"zarr_format": 2}))
+    (path / ".zattrs").write_text("{}")
+
+
+def _write_invalid_vlen_bytes_array(path: pathlib.Path, value: bytes) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / ".zarray").write_text(
+        json.dumps(
+            {
+                "zarr_format": 2,
+                "shape": [1],
+                "chunks": [1],
+                "dtype": "|O",
+                "compressor": {"id": "vlen-bytes"},
+                "fill_value": 0,
+                "order": "C",
+                "filters": None,
+            }
+        )
+    )
+    (path / ".zattrs").write_text("{}")
+    chunk = numcodecs.VLenBytes().encode(np.array([value], dtype=object))
+    (path / "0").write_bytes(chunk)
+
+
+if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    pytest.main([__file__, '-v'])
+    pytest.main([__file__, "-v"])
