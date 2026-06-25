@@ -25,7 +25,7 @@ Seamlessly read and concatenate tables across sessions:
 ```python
 import lazynwb
 
-# read the units table from every session into a single DataFrame
+# read the trials table from every session into a single DataFrame
 df = lazynwb.get_df(
     ['session_1.nwb', 'session_2.nwb', 'session_3.nwb'],
     '/intervals/trials',
