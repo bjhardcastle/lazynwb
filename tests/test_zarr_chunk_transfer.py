@@ -38,6 +38,7 @@ def test_reads_uncompressed_1d_selection_across_chunks_with_read_many(
     np.testing.assert_array_equal(result, np.arange(3, 9, dtype="<i4"))
     assert client.read_many_calls == [("data/0", "data/1", "data/2")]
     assert "chunk_count=3" in caplog.text
+    assert "max_concurrency=8" in caplog.text
     assert "fetched_bytes=48" in caplog.text
     assert "decode=" in caplog.text
     assert "assemble=" in caplog.text
@@ -168,6 +169,105 @@ def test_missing_payload_from_client_uses_zarr_default_zero_fill() -> None:
     np.testing.assert_array_equal(result, np.array([10, 11, 0, 0], dtype="<i4"))
 
 
+def test_large_read_many_chunk_batch_is_split_by_configured_concurrency(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="lazynwb._zarr.chunk_transfer")
+    zarray = _zarray(shape=(20,), chunks=(1,), dtype="<i4", compressor=None)
+    objects = {
+        f"values/{chunk_coord}": _encode_chunk(
+            np.array([chunk_coord], dtype="<i4"),
+            zarray=zarray,
+        )
+        for chunk_coord in range(20)
+    }
+    client = _FakeManyClient(objects)
+
+    result = asyncio.run(
+        chunk_transfer._read_zarr_v2_array_selection(
+            client,
+            array_path="values",
+            zarray=zarray,
+            config=chunk_transfer._ZarrChunkTransferConfig(max_concurrency=3),
+        )
+    )
+
+    np.testing.assert_array_equal(result, np.arange(20, dtype="<i4"))
+    assert len(client.read_many_calls) == 7
+    assert max(len(call) for call in client.read_many_calls) == 3
+    assert client.read_many_calls[0] == ("values/0", "values/1", "values/2")
+    assert client.read_many_calls[-1] == ("values/18", "values/19")
+    assert "max_concurrency=3" in caplog.text
+    assert "batches=7" in caplog.text
+
+
+def test_large_read_object_chunk_batch_respects_configured_concurrency() -> None:
+    zarray = _zarray(shape=(24,), chunks=(1,), dtype="<i4", compressor=None)
+    objects = {
+        f"values/{chunk_coord}": _encode_chunk(
+            np.array([chunk_coord], dtype="<i4"),
+            zarray=zarray,
+        )
+        for chunk_coord in range(24)
+    }
+    client = _ConcurrentObjectClient(objects)
+
+    result = asyncio.run(
+        chunk_transfer._read_zarr_v2_array_selection(
+            client,
+            array_path="values",
+            zarray=zarray,
+            config=chunk_transfer._ZarrChunkTransferConfig(max_concurrency=4),
+        )
+    )
+
+    np.testing.assert_array_equal(result, np.arange(24, dtype="<i4"))
+    assert client.max_active == 4
+    assert len(client.read_object_calls) == 24
+
+
+def test_shared_limiter_caps_concurrent_chunk_transfers() -> None:
+    zarray = _zarray(shape=(24,), chunks=(1,), dtype="<i4", compressor=None)
+    objects = {
+        f"values/{chunk_coord}": _encode_chunk(
+            np.array([chunk_coord], dtype="<i4"),
+            zarray=zarray,
+        )
+        for chunk_coord in range(24)
+    }
+    client = _ConcurrentObjectClient(objects)
+    config = chunk_transfer._ZarrChunkTransferConfig(max_concurrency=3)
+
+    async def _read_concurrently() -> tuple[np.ndarray, np.ndarray]:
+        limiter = chunk_transfer._ZarrChunkTransferLimiter(config)
+        first, second = await asyncio.gather(
+            chunk_transfer._read_zarr_v2_array_selection(
+                client,
+                array_path="values",
+                zarray=zarray,
+                selection=slice(0, 12),
+                config=config,
+                limiter=limiter,
+            ),
+            chunk_transfer._read_zarr_v2_array_selection(
+                client,
+                array_path="values",
+                zarray=zarray,
+                selection=slice(12, 24),
+                config=config,
+                limiter=limiter,
+            ),
+        )
+        return first, second
+
+    first_result, second_result = asyncio.run(_read_concurrently())
+
+    np.testing.assert_array_equal(first_result, np.arange(12, dtype="<i4"))
+    np.testing.assert_array_equal(second_result, np.arange(12, 24, dtype="<i4"))
+    assert client.max_active == 3
+    assert len(client.read_object_calls) == 24
+
+
 class _FakeManyClient:
     def __init__(self, objects: Mapping[str, bytes]) -> None:
         self._objects = dict(objects)
@@ -189,6 +289,26 @@ class _FakeObjectClient:
             return self._objects[key]
         except KeyError as exc:
             raise FileNotFoundError(key) from exc
+
+
+class _ConcurrentObjectClient:
+    def __init__(self, objects: Mapping[str, bytes]) -> None:
+        self._objects = dict(objects)
+        self.read_object_calls: list[str] = []
+        self.active = 0
+        self.max_active = 0
+
+    async def read_object(self, key: str) -> bytes:
+        self.read_object_calls.append(key)
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        await asyncio.sleep(0.001)
+        try:
+            return self._objects[key]
+        except KeyError as exc:
+            raise FileNotFoundError(key) from exc
+        finally:
+            self.active -= 1
 
 
 def _zarray(

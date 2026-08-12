@@ -50,6 +50,18 @@ class _ParsedMetadataLookupResult:
         return self.payload is not None
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _MetadataPayloadLookupResult:
+    """Result of a backend metadata payload cache lookup."""
+
+    payload: dict[str, object] | None
+    reason: str
+
+    @property
+    def hit(self) -> bool:
+        return self.payload is not None
+
+
 class _SQLiteSnapshotCache:
     """Async SQLite cache for catalog snapshots."""
 
@@ -340,6 +352,164 @@ class _SQLiteSnapshotCache:
                         source_identity.source_url,
                     )
 
+    async def get_metadata_payload(
+        self,
+        source_identity: catalog_models._SourceIdentity,
+        *,
+        backend: str,
+        payload_version: int,
+        options_key: str,
+    ) -> _MetadataPayloadLookupResult:
+        await self.initialize()
+        if not source_identity.is_persistent:
+            logger.debug(
+                "%s metadata payload cache miss for %s: "
+                "source has no persistent validator",
+                backend,
+                source_identity.source_url,
+            )
+            return _MetadataPayloadLookupResult(
+                payload=None,
+                reason="unreliable_identity",
+            )
+        async with _async_sqlite_lock(self._path):
+            with _SQLITE_LOCK:
+                async with aiosqlite.connect(
+                    self._path,
+                    timeout=_SQLITE_TIMEOUT_SECONDS,
+                ) as db:
+                    db.row_factory = aiosqlite.Row
+                    await self._initialize_connection(db)
+                    source_row = await self._get_source_row(db, source_identity)
+                    if source_row is None:
+                        reason = await self._classify_missing_source(
+                            db, source_identity
+                        )
+                        logger.debug(
+                            "%s metadata payload cache miss for %s: %s",
+                            backend,
+                            source_identity.source_url,
+                            reason,
+                        )
+                        return _MetadataPayloadLookupResult(
+                            payload=None,
+                            reason=reason,
+                        )
+                    payload_row = await self._get_metadata_payload_row(
+                        db,
+                        source_id=int(source_row["source_id"]),
+                        backend=backend,
+                        options_key=options_key,
+                    )
+                    if payload_row is None:
+                        logger.debug(
+                            "%s metadata payload cache miss for %s: no payload row",
+                            backend,
+                            source_identity.source_url,
+                        )
+                        return _MetadataPayloadLookupResult(
+                            payload=None,
+                            reason="metadata_miss",
+                        )
+                    cached_version = int(payload_row["payload_version"])
+                    if cached_version != payload_version:
+                        logger.debug(
+                            "%s metadata payload cache miss for %s: "
+                            "payload version %d != %d",
+                            backend,
+                            source_identity.source_url,
+                            cached_version,
+                            payload_version,
+                        )
+                        return _MetadataPayloadLookupResult(
+                            payload=None,
+                            reason="payload_version_mismatch",
+                        )
+                    payload = json.loads(str(payload_row["payload_json"]))
+                    if not isinstance(payload, dict):
+                        logger.debug(
+                            "%s metadata payload cache miss for %s: "
+                            "payload was not object",
+                            backend,
+                            source_identity.source_url,
+                        )
+                        return _MetadataPayloadLookupResult(
+                            payload=None,
+                            reason="invalid_payload",
+                        )
+                    logger.debug(
+                        "%s metadata payload cache hit for %s",
+                        backend,
+                        source_identity.source_url,
+                    )
+                    return _MetadataPayloadLookupResult(payload=payload, reason="hit")
+
+    async def put_metadata_payload(
+        self,
+        source_identity: catalog_models._SourceIdentity,
+        *,
+        backend: str,
+        payload_version: int,
+        options_key: str,
+        payload: dict[str, object],
+    ) -> None:
+        await self.initialize()
+        if not source_identity.is_persistent:
+            logger.debug(
+                "skipping %s metadata payload cache write for %s: "
+                "source has no persistent validator",
+                backend,
+                source_identity.source_url,
+            )
+            return
+        async with _async_sqlite_lock(self._path):
+            with _SQLITE_LOCK:
+                async with aiosqlite.connect(
+                    self._path,
+                    timeout=_SQLITE_TIMEOUT_SECONDS,
+                ) as db:
+                    await self._initialize_connection(db)
+                    source_id = await self._get_or_create_source_id(db, source_identity)
+                    payload_json = json.dumps(
+                        payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    now = _utc_now()
+                    await db.execute(
+                        """
+                        INSERT INTO metadata_payloads (
+                            source_id,
+                            backend,
+                            options_key,
+                            payload_version,
+                            payload_json,
+                            created_at,
+                            updated_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(source_id, backend, options_key) DO UPDATE SET
+                            payload_version = excluded.payload_version,
+                            payload_json = excluded.payload_json,
+                            updated_at = excluded.updated_at
+                        """,
+                        (
+                            source_id,
+                            backend,
+                            options_key,
+                            payload_version,
+                            payload_json,
+                            now,
+                            now,
+                        ),
+                    )
+                    await db.commit()
+                    logger.debug(
+                        "wrote %s metadata payload cache for %s",
+                        backend,
+                        source_identity.source_url,
+                    )
+
     async def _initialize_connection(self, db: aiosqlite.Connection) -> None:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA foreign_keys=ON")
@@ -358,6 +528,21 @@ class _SQLiteSnapshotCache:
                 created_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
                 UNIQUE(source_url, resolved_url, validator_kind, validator_value)
+            )
+            """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS metadata_payloads (
+                source_id INTEGER NOT NULL,
+                backend TEXT NOT NULL,
+                options_key TEXT NOT NULL,
+                payload_version INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (source_id, backend, options_key),
+                FOREIGN KEY (source_id)
+                    REFERENCES source_identities(source_id)
+                    ON DELETE CASCADE
             )
             """)
         await db.execute("""
@@ -438,6 +623,22 @@ class _SQLiteSnapshotCache:
             WHERE source_id = ? AND options_key = ?
             """,
             (source_id, options_key),
+        )
+        return await cursor.fetchone()
+
+    async def _get_metadata_payload_row(
+        self,
+        db: aiosqlite.Connection,
+        source_id: int,
+        backend: str,
+        options_key: str,
+    ) -> aiosqlite.Row | None:
+        cursor = await db.execute(
+            """
+            SELECT * FROM metadata_payloads
+            WHERE source_id = ? AND backend = ? AND options_key = ?
+            """,
+            (source_id, backend, options_key),
         )
         return await cursor.fetchone()
 

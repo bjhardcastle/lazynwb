@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import contextlib
+import asyncio
 import dataclasses
 import enum
 import importlib.metadata
@@ -8,7 +8,6 @@ import logging
 import os
 import pathlib
 import threading
-import urllib.parse
 import warnings
 from collections.abc import Iterable
 from typing import Any
@@ -20,6 +19,7 @@ import remfile
 import upath
 import zarr
 
+import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
 import lazynwb._storage_options
 import lazynwb.types_
@@ -35,18 +35,43 @@ _cache_lock = threading.RLock()  # RLock allows same thread to acquire multiple 
 
 
 def clear_cache() -> None:
-    """
-    Clear the FileAccessor caches.
+    """Clear lazynwb process-lifetime caches.
 
-    Users can call this to reset cached h5py and zarr accessors.
+    This resets FileAccessor reuse, attrs, HDF5 range-reader, and Zarr metadata
+    process caches. Persistent SQLite catalog caches are not evicted.
+    """
+    _clear_process_caches()
+
+
+def _clear_process_caches() -> None:
+    """Reset lazynwb process-local caches without evicting persistent SQLite.
+
+    Cache ownership is intentionally centralized here for the public
+    ``lazynwb.clear_cache()`` semantics:
+
+    * FileAccessor instances and their open HDF5/Zarr handles are closed.
+    * attrs module process caches are cleared.
+    * HDF5 range-reader process caches are cleared.
+    * Zarr metadata and obstore store process caches are cleared.
+    * SQLite catalog caches remain on disk and are reused when identities match.
+
+    ``config.disable_cache`` only bypasses FileAccessor instance reuse; it does
+    not disable attrs, HDF5 range-reader, Zarr metadata, or SQLite caches.
     """
     import lazynwb._hdf5.range_reader as hdf5_range_reader
     import lazynwb._zarr.reader as zarr_reader
+    import lazynwb.attrs as attrs
 
+    logger.debug(
+        "clearing lazynwb process caches: FileAccessor, attrs, HDF5 range-reader, "
+        "and Zarr metadata; persistent SQLite catalog cache is unchanged"
+    )
     with _cache_lock:
         FileAccessor._clear_cache()
+        attrs._clear_attrs_process_cache()
         hdf5_range_reader._clear_cache()
         zarr_reader._clear_shared_metadata_catalog_cache()
+    logger.debug("cleared lazynwb process caches")
 
 
 def _get_accessor(path: lazynwb.types_.PathLike) -> FileAccessor:
@@ -592,6 +617,17 @@ class _ZarrV3CatalogStringView:
         return str(data)
 
 
+class _FsspecZarrObjectClient:
+    def __init__(self, mapper: Any) -> None:
+        self._mapper = mapper
+
+    async def read_object(self, key: str) -> object:
+        return await asyncio.to_thread(self._read_object_sync, key)
+
+    def _read_object_sync(self, key: str) -> object:
+        return self._mapper[key]
+
+
 def _get_zarr_v3_catalog_accessor(
     source: lazynwb.types_.PathLike,
     internal_path: str,
@@ -665,8 +701,99 @@ def _read_zarr_v2_catalog_accessor_array(
 
     source_path = from_pathlike(source).as_posix()
     mapper = fsspec.get_mapper(source_path, **_get_fsspec_storage_options())
+    object_client = _FsspecZarrObjectClient(mapper)
+    try:
+        spec, plan = zarr_chunk_transfer._plan_zarr_v2_array_selection(
+            array_path=path,
+            zarray=zarray,
+        )
+    except (TypeError, ValueError) as exc:
+        chunk_count = _zarr_v2_array_chunk_count(shape, zarray)
+        if chunk_count == 0:
+            logger.debug(
+                "returning empty catalog-backed Zarr v2 array for %r/%s after "
+                "native chunk transfer rejection: %r",
+                source,
+                path,
+                exc,
+            )
+            return np.empty(shape, dtype=np.dtype(dtype))
+        if chunk_count != 1:
+            logger.debug(
+                "rejecting catalog-backed Zarr v2 array read for %r/%s: "
+                "native chunk transfer rejected metadata and array spans %s chunks "
+                "(shape=%s chunks=%s dtype=%s): %r",
+                source,
+                path,
+                chunk_count,
+                shape,
+                _chunks_from_zarr_metadata(zarray),
+                dtype,
+                exc,
+            )
+            msg = (
+                "catalog-backed Zarr v2 array read requires native chunk transfer "
+                f"for multi-chunk arrays; {path!r} spans {chunk_count} chunks"
+            )
+            raise RuntimeError(msg) from exc
+        logger.debug(
+            "falling back to single-chunk catalog-backed Zarr v2 decode for %r/%s "
+            "after native chunk transfer rejection (shape=%s chunks=%s dtype=%s): %r",
+            source,
+            path,
+            shape,
+            _chunks_from_zarr_metadata(zarray),
+            dtype,
+            exc,
+        )
+        return _read_zarr_v2_catalog_accessor_single_chunk(
+            object_client=object_client,
+            path=path,
+            zarray=zarray,
+            shape=shape,
+            dtype=dtype,
+        )
+    data = lazynwb.utils._run_async_value(
+        zarr_chunk_transfer._read_zarr_v2_array_selection_from_plan(
+            object_client,
+            spec=spec,
+            plan=plan,
+        )
+    )
+    logger.debug(
+        "read catalog-backed Zarr v2 array for %r/%s via native chunk transfer "
+        "(shape=%s chunks=%s dtype=%s planned_chunks=%d)",
+        source,
+        path,
+        getattr(data, "shape", None),
+        _chunks_from_zarr_metadata(zarray),
+        getattr(data, "dtype", None),
+        plan.chunk_count,
+    )
+    return data
+
+
+def _read_zarr_v2_catalog_accessor_single_chunk(
+    *,
+    object_client: _FsspecZarrObjectClient,
+    path: str,
+    zarray: dict[str, object],
+    shape: tuple[int, ...],
+    dtype: object,
+) -> Any:
+    import numpy as np
+
+    import lazynwb._zarr.chunk_transfer as zarr_chunk_transfer
+
+    chunks = _chunks_from_zarr_metadata(zarray)
+    if shape and chunks is not None and tuple(shape) != chunks:
+        msg = (
+            "single-chunk catalog-backed Zarr decode only supports arrays whose "
+            f"shape matches chunk shape; got shape={shape} chunks={chunks}"
+        )
+        raise RuntimeError(msg)
     chunk_key = _first_zarr_v2_chunk_key(path, shape, zarray)
-    payload = mapper[chunk_key]
+    payload = object_client._read_object_sync(chunk_key)
     decoded: object = bytes(payload)
     compressor = zarr_chunk_transfer._codec_from_config(
         zarray.get("compressor"),
@@ -687,6 +814,27 @@ def _read_zarr_v2_catalog_accessor_array(
     if data.shape != shape:
         data = data.reshape(shape)
     return data
+
+
+def _zarr_v2_array_chunk_count(
+    shape: tuple[int, ...],
+    zarray: dict[str, object],
+) -> int | None:
+    chunks = _chunks_from_zarr_metadata(zarray)
+    if chunks is None:
+        return None
+    if not shape:
+        return 1
+    if len(shape) != len(chunks):
+        return None
+    chunk_count = 1
+    for axis_size, chunk_size in zip(shape, chunks):
+        if axis_size < 0 or chunk_size <= 0:
+            return None
+        if axis_size == 0:
+            return 0
+        chunk_count *= (axis_size + chunk_size - 1) // chunk_size
+    return chunk_count
 
 
 def _first_zarr_v2_chunk_key(
@@ -936,142 +1084,28 @@ def _get_catalog_path_summary_if_available(
     include_specifications: bool = False,
     parents: bool = False,
 ) -> dict[str, catalog_models._PathSummaryEntry] | None:
-    import lazynwb._zarr.reader as zarr_reader
-
-    backend_order = (
-        ("zarr", "hdf5")
-        if zarr_reader._source_name_has_zarr_suffix(nwb_path)
-        else ("hdf5", "zarr")
+    read = lazynwb.utils._run_async_value(
+        catalog_backend._read_path_summary_if_available(nwb_path)
+    )
+    if read is None:
+        return None
+    summary = _filter_catalog_path_summary_entries(
+        read.entries,
+        include_child_datasets=include_child_datasets,
+        include_table_columns=include_table_columns,
+        include_metadata=include_metadata,
+        include_specifications=include_specifications,
+        parents=parents,
     )
     logger.debug(
-        "using catalog path summary backend order for %r: %s",
+        "get_internal_paths-compatible discovery used %s catalog summary for %r "
+        "(entries=%d filtered=%d)",
+        read.backend_name,
         nwb_path,
-        " -> ".join(backend_order),
+        len(read.entries),
+        len(summary),
     )
-    for backend_name in backend_order:
-        if backend_name == "hdf5":
-            entries = _get_hdf5_catalog_path_summary_entries_if_available(nwb_path)
-        else:
-            entries = _get_zarr_catalog_path_summary_entries_if_available(nwb_path)
-        if entries is None:
-            continue
-        summary = _filter_catalog_path_summary_entries(
-            entries,
-            include_child_datasets=include_child_datasets,
-            include_table_columns=include_table_columns,
-            include_metadata=include_metadata,
-            include_specifications=include_specifications,
-            parents=parents,
-        )
-        logger.debug(
-            "get_internal_paths-compatible discovery used %s catalog summary for %r "
-            "(entries=%d filtered=%d)",
-            backend_name,
-            nwb_path,
-            len(entries),
-            len(summary),
-        )
-        return summary
-    return None
-
-
-def _get_hdf5_catalog_path_summary_entries_if_available(
-    nwb_path: lazynwb.types_.PathLike,
-) -> tuple[catalog_models._PathSummaryEntry, ...] | None:
-    import lazynwb._hdf5.reader as hdf5_reader
-    import lazynwb.tables
-
-    catalog_source = _hdf5_catalog_source_if_available(nwb_path)
-    if catalog_source is None or not hdf5_reader._is_fast_hdf5_candidate(
-        catalog_source
-    ):
-        return None
-    reader = hdf5_reader._default_hdf5_backend_reader(catalog_source)
-    try:
-        return lazynwb.tables._run_async_value(reader.read_path_summary())
-    except hdf5_reader._NotHDF5Error:
-        logger.debug("catalog path summary rejected non-HDF5 source %r", nwb_path)
-        return None
-    except Exception as exc:
-        logger.debug(
-            "HDF5 catalog path summary unavailable for %r: %r",
-            nwb_path,
-            exc,
-        )
-        return None
-    finally:
-        with contextlib.suppress(Exception):
-            lazynwb.tables._run_async_value(reader.close())
-
-
-def _hdf5_catalog_source_if_available(
-    nwb_path: lazynwb.types_.PathLike,
-) -> lazynwb.types_.PathLike | None:
-    raw_path = _pathlike_to_string(nwb_path)
-    parsed = urllib.parse.urlsplit(raw_path)
-    if parsed.scheme in {"file", "http", "https", "s3", "gs", "gcs", "az", "abfs"}:
-        return raw_path
-    if parsed.scheme and not _has_windows_drive_scheme(raw_path, parsed):
-        logger.debug(
-            "HDF5 catalog path summary skipped unsupported source scheme %r for %r",
-            parsed.scheme,
-            nwb_path,
-        )
-        return None
-    try:
-        local_path = pathlib.Path(os.fsdecode(nwb_path)).expanduser()
-    except TypeError:
-        logger.debug(
-            "HDF5 catalog path summary skipped unsupported path-like source %r",
-            nwb_path,
-        )
-        return None
-    if not local_path.is_file():
-        return None
-    return local_path.resolve().as_uri()
-
-
-def _has_windows_drive_scheme(
-    raw_path: str,
-    parsed: urllib.parse.SplitResult,
-) -> bool:
-    return len(parsed.scheme) == 1 and len(raw_path) >= 2 and raw_path[1] == ":"
-
-
-def _pathlike_to_string(path: lazynwb.types_.PathLike) -> str:
-    as_posix = getattr(path, "as_posix", None)
-    if callable(as_posix):
-        try:
-            return str(as_posix())
-        except Exception:
-            logger.debug("failed to get as_posix() from path %r", path)
-    try:
-        return os.fsdecode(path)
-    except TypeError:
-        return str(path)
-
-
-def _get_zarr_catalog_path_summary_entries_if_available(
-    nwb_path: lazynwb.types_.PathLike,
-) -> tuple[catalog_models._PathSummaryEntry, ...] | None:
-    import lazynwb._zarr.reader as zarr_reader
-    import lazynwb.tables
-
-    if not zarr_reader._is_fast_zarr_candidate(nwb_path):
-        return None
-    reader = zarr_reader._default_zarr_backend_reader(nwb_path)
-    try:
-        return lazynwb.tables._run_async_value(reader.read_path_summary())
-    except Exception as exc:
-        logger.debug(
-            "Zarr catalog path summary unavailable for %r: %r",
-            nwb_path,
-            exc,
-        )
-        return None
-    finally:
-        with contextlib.suppress(Exception):
-            lazynwb.tables._run_async_value(reader.close())
+    return summary
 
 
 def _filter_catalog_path_summary_entries(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import concurrent.futures
-import contextlib
 import logging
 import pathlib
 import re
@@ -14,9 +13,8 @@ from typing import Any, Literal, cast
 import polars as pl
 import tqdm
 
+import lazynwb._catalog.backend as catalog_backend
 import lazynwb._catalog.models as catalog_models
-import lazynwb._hdf5.reader as hdf5_reader
-import lazynwb._zarr.reader as zarr_reader
 import lazynwb.base
 import lazynwb.file_io
 import lazynwb.lazyframe
@@ -174,11 +172,7 @@ def convert_nwb_tables(
         logger.warning("No common table paths found across NWB files")
         return {}
 
-    _warm_hdf5_schema_snapshots_for_sql_context(
-        nwb_sources=nwb_sources,
-        table_paths=common_table_paths,
-    )
-    _warm_zarr_schema_snapshots_for_sql_context(
+    _warm_schema_snapshots_for_sql_context(
         nwb_sources=nwb_sources,
         table_paths=common_table_paths,
     )
@@ -404,11 +398,7 @@ def get_sql_context(
         logger.warning("No common table paths found across NWB files")
         return {}
 
-    _warm_hdf5_schema_snapshots_for_sql_context(
-        nwb_sources=nwb_sources,
-        table_paths=common_table_paths,
-    )
-    _warm_zarr_schema_snapshots_for_sql_context(
+    _warm_schema_snapshots_for_sql_context(
         nwb_sources=nwb_sources,
         table_paths=common_table_paths,
     )
@@ -553,7 +543,7 @@ def _find_common_paths(
     return common_paths
 
 
-def _warm_hdf5_schema_snapshots_for_sql_context(
+def _warm_schema_snapshots_for_sql_context(
     nwb_sources: tuple[lazynwb.types_.PathLike, ...],
     table_paths: Iterable[str],
 ) -> None:
@@ -566,121 +556,45 @@ def _warm_hdf5_schema_snapshots_for_sql_context(
     if not exact_table_paths:
         return
     for nwb_source in nwb_sources:
-        if not hdf5_reader._is_fast_hdf5_candidate(nwb_source):
-            continue
-        reader = hdf5_reader._default_hdf5_backend_reader(nwb_source)
-        request_count_before = int(getattr(reader._range_reader, "request_count", 0))
-        fetched_bytes_before = int(getattr(reader._range_reader, "bytes_fetched", 0))
-        try:
-            results = lazynwb.tables._run_async_value(
-                reader._read_table_schema_snapshots(exact_table_paths)
-            )
-        except hdf5_reader._NotHDF5Error:
-            logger.debug("SQL context HDF5 multi-table scan skipped non-HDF5 %r", nwb_source)
-            continue
-        except Exception as exc:
-            logger.debug(
-                "SQL context HDF5 multi-table scan failed for %r: %r",
+        batch = lazynwb.tables._run_async_value(
+            catalog_backend._read_table_schema_snapshots_if_available(
                 nwb_source,
-                exc,
+                exact_table_paths,
             )
+        )
+        if batch is None:
             continue
-        finally:
-            with contextlib.suppress(Exception):
-                lazynwb.tables._run_async_value(reader.close())
-        ok_count = sum(result.ok for result in results.values())
-        failure_count = len(results) - ok_count
-        request_count = int(getattr(reader._range_reader, "request_count", 0))
-        fetched_bytes = int(getattr(reader._range_reader, "bytes_fetched", 0))
+        ok_count = sum(result.ok for result in batch.results.values())
+        failure_count = len(batch.results) - ok_count
         logger.debug(
-            "SQL context HDF5 multi-table scan for %r: tables=%d ok=%d "
-            "failures=%d requests=%d bytes=%d cache_writes=%d",
+            "SQL context %s multi-table scan for %r: tables=%d ok=%d "
+            "failures=%d %s=%d bytes=%d cache_writes=%d",
+            batch.backend_label,
             nwb_source,
             len(exact_table_paths),
             ok_count,
             failure_count,
-            request_count - request_count_before,
-            fetched_bytes - fetched_bytes_before,
+            batch.request_count_label,
+            batch.request_count_delta,
+            batch.fetched_bytes_delta,
             ok_count,
         )
-        for table_path, result in results.items():
+        for table_path, result in batch.results.items():
             if result.ok:
                 logger.debug(
-                    "SQL context HDF5 multi-table scan cached %r/%s "
-                    "(requests=%d bytes=%d)",
+                    "SQL context %s multi-table scan cached %r/%s (%s)",
+                    batch.backend_label,
                     nwb_source,
                     table_path,
-                    result.request_count,
-                    result.fetched_bytes,
+                    catalog_backend._schema_scan_result_count_detail(
+                        batch.backend_name,
+                        result,
+                    ),
                 )
             else:
                 logger.debug(
-                    "SQL context HDF5 multi-table scan table failure %r/%s: %r",
-                    nwb_source,
-                    table_path,
-                    result.error,
-                )
-
-
-def _warm_zarr_schema_snapshots_for_sql_context(
-    nwb_sources: tuple[lazynwb.types_.PathLike, ...],
-    table_paths: Iterable[str],
-) -> None:
-    exact_table_paths = tuple(
-        dict.fromkeys(
-            lazynwb.utils.normalize_internal_file_path(table_path)
-            for table_path in table_paths
-        )
-    )
-    if not exact_table_paths:
-        return
-    for nwb_source in nwb_sources:
-        if not zarr_reader._is_fast_zarr_candidate(nwb_source):
-            continue
-        reader = zarr_reader._default_zarr_backend_reader(nwb_source)
-        metadata_reads_before = int(getattr(reader, "metadata_read_count", 0))
-        fetched_bytes_before = int(getattr(reader, "metadata_bytes_fetched", 0))
-        try:
-            results = lazynwb.tables._run_async_value(
-                reader._read_table_schema_snapshots(exact_table_paths)
-            )
-        except Exception as exc:
-            logger.debug(
-                "SQL context Zarr multi-table scan failed for %r: %r",
-                nwb_source,
-                exc,
-            )
-            continue
-        finally:
-            with contextlib.suppress(Exception):
-                lazynwb.tables._run_async_value(reader.close())
-        ok_count = sum(result.ok for result in results.values())
-        failure_count = len(results) - ok_count
-        request_count = int(getattr(reader, "metadata_read_count", 0))
-        fetched_bytes = int(getattr(reader, "metadata_bytes_fetched", 0))
-        logger.debug(
-            "SQL context Zarr multi-table scan for %r: tables=%d ok=%d "
-            "failures=%d metadata_reads=%d bytes=%d cache_writes=%d",
-            nwb_source,
-            len(exact_table_paths),
-            ok_count,
-            failure_count,
-            request_count - metadata_reads_before,
-            fetched_bytes - fetched_bytes_before,
-            ok_count,
-        )
-        for table_path, result in results.items():
-            if result.ok:
-                logger.debug(
-                    "SQL context Zarr multi-table scan cached %r/%s "
-                    "(metadata_reads=%d)",
-                    nwb_source,
-                    table_path,
-                    result.metadata_read_count,
-                )
-            else:
-                logger.debug(
-                    "SQL context Zarr multi-table scan table failure %r/%s: %r",
+                    "SQL context %s multi-table scan table failure %r/%s: %r",
+                    batch.backend_label,
                     nwb_source,
                     table_path,
                     result.error,

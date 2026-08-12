@@ -65,8 +65,7 @@ class _HDF5TableSchemaScanResult:
     table_path: str
     snapshot: catalog_models._TableSchemaSnapshot | None
     error: Exception | None
-    request_count: int
-    fetched_bytes: int
+    _scan_metrics: catalog_backend._TableSchemaScanMetrics
     elapsed_seconds: float
 
     @property
@@ -144,8 +143,10 @@ class _HDF5BackendReader:
                 table_path=exact_table_path,
                 snapshot=snapshot,
                 error=error,
-                request_count=request_count,
-                fetched_bytes=fetched_bytes,
+                _scan_metrics=catalog_backend._TableSchemaScanMetrics(
+                    request_count=request_count,
+                    fetched_bytes=fetched_bytes,
+                ),
                 elapsed_seconds=time.perf_counter() - started,
             )
             results[exact_table_path] = result

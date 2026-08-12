@@ -9,6 +9,11 @@ import pytest
 import lazynwb
 import lazynwb._catalog.models as catalog_models
 import lazynwb.tables
+import lazynwb.utils
+
+
+def test_tables_async_bridge_uses_shared_utils_helper() -> None:
+    assert lazynwb.tables._run_async_value is lazynwb.utils._run_async_value
 
 
 @pytest.mark.parametrize(
@@ -177,6 +182,7 @@ def test_direct_zarr_numeric_column_reads_contiguous_row_slice(
         (id_column,),
         table_row_indices=[1, 2],
     )
+    assert [column.name for column in read_plan.regular_columns] == ["id"]
 
     result = lazynwb.tables._materialize_direct_zarr_read_plan(
         "s3://example-bucket/test.nwb.zarr",
@@ -241,8 +247,69 @@ def test_direct_zarr_indexed_column_reads_selected_spans(
     assert result == {"spike_times": [[20.0, 21.0, 22.0], [40.0, 41.0]]}
     assert reader.calls == [
         ("units/spike_times_index", slice(None)),
-        ("units/spike_times", slice(2, 8)),
     ]
+    assert reader.batch_calls == [
+        ("units/spike_times", (slice(2, 8),)),
+    ]
+    assert reader.metadata_setup_count == 2
+    assert reader.closed
+
+
+def test_direct_zarr_indexed_sparse_selection_batches_span_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = _FakeNativeZarrReader(
+        {
+            "units/spike_times": np.asarray(
+                [10, 11, 20, 21, 22, 30, 40, 41],
+                dtype=np.float64,
+            ),
+            "units/spike_times_index": np.asarray([2, 5, 6, 8], dtype=np.uint32),
+        }
+    )
+    monkeypatch.setattr(
+        lazynwb.tables.zarr_reader,
+        "_default_zarr_backend_reader",
+        lambda path: reader,
+    )
+    data_column = _zarr_table_column(
+        name="spike_times",
+        dataset_path="units/spike_times",
+        shape=(8,),
+        chunks=(1,),
+        dtype=np.dtype("float64"),
+        is_nominally_indexed=True,
+        index_column_name="spike_times_index",
+    )
+    index_column = _zarr_table_column(
+        name="spike_times_index",
+        dataset_path="units/spike_times_index",
+        shape=(4,),
+        chunks=(4,),
+        dtype=np.dtype("uint32"),
+        is_index_column=True,
+        data_column_name="spike_times",
+    )
+    read_plan = lazynwb.tables._plan_direct_zarr_table_reads(
+        (data_column, index_column),
+        table_row_indices=[0, 3],
+    )
+
+    result = lazynwb.tables._materialize_direct_zarr_read_plan(
+        "s3://example-bucket/test.nwb.zarr",
+        read_plan,
+        table_row_indices=[0, 3],
+        as_polars=True,
+    )
+
+    assert result == {"spike_times": [[10.0, 11.0], [40.0, 41.0]]}
+    assert reader.calls == [
+        ("units/spike_times_index", slice(None)),
+    ]
+    assert reader.batch_calls == [
+        ("units/spike_times", (slice(0, 2), slice(6, 8))),
+    ]
+    assert reader.metadata_setup_count == 2
     assert reader.closed
 
 
@@ -342,6 +409,8 @@ class _FakeNativeZarrReader:
         self.chunk_read_count = 0
         self.chunk_bytes_fetched = 0
         self.calls: list[tuple[str, object]] = []
+        self.batch_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.metadata_setup_count = 0
         self.closed = False
 
     async def read_array_selection(
@@ -350,10 +419,27 @@ class _FakeNativeZarrReader:
         selection: object = None,
     ) -> np.ndarray:
         self.calls.append((exact_array_path, selection))
+        self.metadata_setup_count += 1
         value = self._arrays[exact_array_path][selection]
         self.chunk_read_count += 1
         self.chunk_bytes_fetched += int(getattr(value, "nbytes", 0))
         return value
+
+    async def _read_array_selections(
+        self,
+        exact_array_path: str,
+        selections: tuple[object, ...],
+    ) -> tuple[np.ndarray, ...]:
+        self.batch_calls.append((exact_array_path, selections))
+        self.metadata_setup_count += 1
+        values = tuple(
+            self._arrays[exact_array_path][selection] for selection in selections
+        )
+        self.chunk_read_count += len(values)
+        self.chunk_bytes_fetched += sum(
+            int(getattr(value, "nbytes", 0)) for value in values
+        )
+        return values
 
     async def close(self) -> None:
         self.closed = True

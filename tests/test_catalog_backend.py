@@ -281,7 +281,7 @@ def test_zarr_backend_multi_table_helper_reuses_and_warms_schema_cache(
     assert set(results) == {"units", "intervals/trials"}
     assert results["units"].ok
     assert results["units"].snapshot == cached_units_snapshot
-    assert results["units"].metadata_read_count == 0
+    assert results["units"]._scan_metrics.request_count == 0
     assert results["intervals/trials"].ok
     assert results["intervals/trials"].snapshot is not None
     assert batch_reader.metadata_read_count == 1
@@ -334,6 +334,51 @@ def test_zarr_backend_reader_uses_targeted_metadata_without_consolidated(
     assert "chunked" in columns_by_name["spike_times"].dataset.read_capabilities
 
 
+def test_remote_zarr_backend_reader_uses_obstore_metadata_without_consolidated(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    copied_zarr = tmp_path / "remote-shaped-without-consolidated.nwb"
+    shutil.copytree(local_zarr_path, copied_zarr)
+    (copied_zarr / ".zmetadata").unlink()
+    remote_source = "s3://bucket/remote-shaped-without-consolidated.nwb"
+    remote_path = _PoisonedRemoteZarrPath(remote_source)
+    client = _LocalZarrObjectClient(copied_zarr)
+    caplog.set_level(logging.DEBUG, logger="lazynwb._zarr.reader")
+    zarr_reader._clear_shared_metadata_catalog_cache()
+    monkeypatch.setattr(zarr_reader, "_source_path", lambda _: remote_path)
+    monkeypatch.setattr(
+        zarr_reader,
+        "_remote_metadata_client_if_available",
+        lambda _: client,
+    )
+    reader = zarr_reader._ZarrBackendReader(
+        remote_source,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),
+    )
+
+    identity = asyncio.run(reader.get_source_identity())
+    snapshot = asyncio.run(reader.read_table_schema_snapshot("units"))
+    columns_by_name = {column.name: column for column in snapshot.columns}
+
+    assert identity.source_url == remote_source
+    assert identity.validator_kind == "in_process"
+    assert not reader.used_consolidated_metadata
+    assert reader.metadata_read_count == client.request_count
+    assert reader.metadata_bytes_fetched == client.bytes_fetched
+    assert reader.metadata_read_count > 1
+    assert reader.metadata_bytes_fetched > 0
+    assert ".zgroup" in client.read_keys
+    assert "units/" in client.list_prefixes
+    assert "units/spike_times/.zarray" in client.read_keys
+    assert columns_by_name["spike_times"].dataset.path == "units/spike_times"
+    assert columns_by_name["spike_times"].dataset.storage_layout == "chunked"
+    assert "read remote non-consolidated Zarr metadata file" in caplog.text
+    assert "listed remote non-consolidated Zarr children" in caplog.text
+
+
 def test_zarr_backend_reader_builds_path_summary(
     local_zarr_path: pathlib.Path,
     tmp_path: pathlib.Path,
@@ -358,6 +403,106 @@ def test_zarr_backend_reader_builds_path_summary(
     assert entries_by_path["/units"].is_group
     assert entries_by_path["/units/spike_times"].is_dataset
     assert entries_by_path["/units/spike_times"].shape is not None
+
+
+def test_zarr_path_summary_reuses_persistent_metadata_after_process_cache_clear(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    zarr_reader._clear_shared_metadata_catalog_cache(local_zarr_path)
+    cache_path = tmp_path / "catalog.sqlite"
+    cold_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+
+    cold_summary = asyncio.run(cold_reader.read_path_summary())
+    zarr_reader._clear_shared_metadata_catalog_cache(local_zarr_path)
+    warm_reader = zarr_reader._ZarrBackendReader(
+        local_zarr_path,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+    warm_summary = asyncio.run(warm_reader.read_path_summary())
+
+    assert cold_reader.metadata_read_count == 1
+    assert warm_reader.metadata_read_count == 0
+    assert warm_summary == cold_summary
+
+
+def test_clear_zarr_process_caches_uses_obstore_store_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _TrackingLock:
+        def __init__(self) -> None:
+            self.enter_count = 0
+            self.inside = False
+
+        def __enter__(self) -> _TrackingLock:
+            self.enter_count += 1
+            self.inside = True
+            return self
+
+        def __exit__(
+            self,
+            exc_type: object,
+            exc: object,
+            traceback: object,
+        ) -> None:
+            self.inside = False
+
+    class _LockCheckingCache(dict[object, object]):
+        def __init__(self, lock: _TrackingLock) -> None:
+            super().__init__({("s3://bucket", ()): object()})
+            self._lock = lock
+            self.cleared_under_lock = False
+
+        def clear(self) -> None:
+            assert self._lock.inside
+            self.cleared_under_lock = True
+            super().clear()
+
+    tracking_lock = _TrackingLock()
+    store_cache = _LockCheckingCache(tracking_lock)
+    monkeypatch.setattr(zarr_reader, "_OBSTORE_STORE_CACHE_LOCK", tracking_lock)
+    monkeypatch.setattr(zarr_reader, "_OBSTORE_STORE_CACHE", store_cache)
+    zarr_reader._ZARR_CONSOLIDATED_METADATA_CACHE["source"] = object()
+    zarr_reader._REMOTE_ZARR_CONSOLIDATED_PAYLOAD_CACHE["remote"] = object()
+
+    zarr_reader._clear_shared_metadata_catalog_cache()
+
+    assert tracking_lock.enter_count == 1
+    assert store_cache.cleared_under_lock
+    assert not store_cache
+    assert not zarr_reader._ZARR_CONSOLIDATED_METADATA_CACHE
+    assert not zarr_reader._REMOTE_ZARR_CONSOLIDATED_PAYLOAD_CACHE
+
+
+def test_zarr_metadata_payload_identity_mismatch_refetches_metadata(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    copied_zarr = tmp_path / "identity-mismatch.nwb.zarr"
+    shutil.copytree(local_zarr_path, copied_zarr)
+    zarr_reader._clear_shared_metadata_catalog_cache(copied_zarr)
+    cache_path = tmp_path / "catalog.sqlite"
+    cold_reader = zarr_reader._ZarrBackendReader(
+        copied_zarr,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+    cold_summary = asyncio.run(cold_reader.read_path_summary())
+    zmetadata_path = copied_zarr / ".zmetadata"
+    zmetadata_path.write_text(f"{zmetadata_path.read_text()}\n")
+    zarr_reader._clear_shared_metadata_catalog_cache(copied_zarr)
+    warm_reader = zarr_reader._ZarrBackendReader(
+        copied_zarr,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+
+    warm_summary = asyncio.run(warm_reader.read_path_summary())
+
+    assert cold_reader.metadata_read_count == 1
+    assert warm_reader.metadata_read_count == 1
+    assert warm_summary == cold_summary
 
 
 def test_zarr_backend_reader_reads_exact_array_selection_with_native_chunks(
@@ -385,6 +530,112 @@ def test_zarr_backend_reader_reads_exact_array_selection_with_native_chunks(
     np.testing.assert_array_equal(result, reference_array[selection])
     assert reader.chunk_read_count > 0
     assert reader.chunk_bytes_fetched > 0
+
+
+def test_fast_backend_reader_protocols_cover_catalog_callers(
+    local_hdf5_path: pathlib.Path,
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    hdf5_backend = hdf5_reader._default_hdf5_backend_reader(local_hdf5_path.as_uri())
+    zarr_backend = zarr_reader._default_zarr_backend_reader(local_zarr_path)
+
+    try:
+        assert isinstance(hdf5_backend, catalog_backend._PathSummaryBackendReader)
+        assert isinstance(hdf5_backend, catalog_backend._BatchTableSchemaBackendReader)
+        assert isinstance(zarr_backend, catalog_backend._PathSummaryBackendReader)
+        assert isinstance(zarr_backend, catalog_backend._BatchTableSchemaBackendReader)
+        assert isinstance(zarr_backend, catalog_backend._ArraySelectionBackendReader)
+    finally:
+        asyncio.run(hdf5_backend.close())
+        asyncio.run(zarr_backend.close())
+
+
+@pytest.mark.parametrize(
+    ("nwb_fixture_name", "expected_backend"),
+    [
+        ("local_hdf5_path", "hdf5"),
+        ("local_zarr_path", "zarr"),
+    ],
+)
+def test_catalog_backend_path_summary_helper_preserves_fast_backends(
+    nwb_fixture_name: str,
+    expected_backend: str,
+    request: pytest.FixtureRequest,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    nwb_path = request.getfixturevalue(nwb_fixture_name)
+    if expected_backend == "zarr":
+        zarr_reader._clear_shared_metadata_catalog_cache(nwb_path)
+
+    read = asyncio.run(catalog_backend._read_path_summary_if_available(nwb_path))
+
+    assert read is not None
+    assert read.backend_name == expected_backend
+    paths = {entry.path for entry in read.entries}
+    assert "/intervals/trials" in paths
+    assert "/units" in paths
+
+
+@pytest.mark.parametrize(
+    ("nwb_fixture_name", "expected_backend"),
+    [
+        ("local_hdf5_path", "hdf5"),
+        ("local_zarr_path", "zarr"),
+    ],
+)
+def test_catalog_backend_schema_batch_helper_preserves_fast_backends(
+    nwb_fixture_name: str,
+    expected_backend: str,
+    request: pytest.FixtureRequest,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    nwb_path = request.getfixturevalue(nwb_fixture_name)
+    source = nwb_path.as_uri() if expected_backend == "hdf5" else nwb_path
+    if expected_backend == "zarr":
+        zarr_reader._clear_shared_metadata_catalog_cache(nwb_path)
+
+    batch = asyncio.run(
+        catalog_backend._read_table_schema_snapshots_if_available(
+            source,
+            ("intervals/trials", "units", "units"),
+        )
+    )
+
+    assert batch is not None
+    assert batch.backend_name == expected_backend
+    assert set(batch.results) == {"intervals/trials", "units"}
+    assert all(result.ok for result in batch.results.values())
+    assert all(
+        result.snapshot is not None and result.snapshot.backend == expected_backend
+        for result in batch.results.values()
+    )
+    assert batch.request_count_label == "requests"
+    assert all(
+        isinstance(result._scan_metrics, catalog_backend._TableSchemaScanMetrics)
+        for result in batch.results.values()
+    )
+    assert all(
+        catalog_backend._schema_scan_result_count_detail(
+            batch.backend_name,
+            result,
+        ).startswith("requests=")
+        for result in batch.results.values()
+    )
+    assert all(
+        " bytes="
+        in catalog_backend._schema_scan_result_count_detail(
+            batch.backend_name,
+            result,
+        )
+        for result in batch.results.values()
+    )
 
 
 def test_zarr_catalog_path_summary_filters_metadata_timeseries_and_specifications(
@@ -440,6 +691,11 @@ def test_zarr_catalog_path_summary_supports_remote_store_without_zarr_suffix(
     monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
     monkeypatch.setattr(hdf5_reader, "_is_fast_hdf5_candidate", lambda _: False)
     monkeypatch.setattr(zarr_reader, "_source_path", lambda _: local_zarr_path)
+    monkeypatch.setattr(
+        zarr_reader,
+        "_remote_metadata_client_if_available",
+        lambda _: None,
+    )
 
     def _fail_accessor(*args: object, **kwargs: object) -> None:
         raise AssertionError("remote Zarr discovery should use the catalog summary")
@@ -561,6 +817,74 @@ def test_zarr_path_summary_uses_targeted_metadata_without_consolidated(
     assert "read targeted Zarr metadata file" in caplog.text
 
 
+def test_zarr_targeted_path_summary_reuses_persistent_metadata_after_clear(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    copied_zarr = tmp_path / "targeted-persistent.nwb.zarr"
+    shutil.copytree(local_zarr_path, copied_zarr)
+    (copied_zarr / ".zmetadata").unlink()
+    zarr_reader._clear_shared_metadata_catalog_cache(copied_zarr)
+    cache_path = tmp_path / "catalog.sqlite"
+    cold_reader = zarr_reader._ZarrBackendReader(
+        copied_zarr,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+
+    cold_summary = asyncio.run(cold_reader.read_path_summary())
+    zarr_reader._clear_shared_metadata_catalog_cache(copied_zarr)
+    warm_reader = zarr_reader._ZarrBackendReader(
+        copied_zarr,
+        cache=cache_sqlite._SQLiteSnapshotCache(cache_path),
+    )
+    warm_summary = asyncio.run(warm_reader.read_path_summary())
+
+    assert cold_reader.metadata_read_count > 1
+    assert not cold_reader.used_consolidated_metadata
+    assert warm_reader.metadata_read_count == 0
+    assert not warm_reader.used_consolidated_metadata
+    assert warm_summary == cold_summary
+
+
+def test_remote_zarr_path_summary_uses_obstore_listing_without_consolidated(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    copied_zarr = tmp_path / "remote-path-summary-without-consolidated.nwb"
+    shutil.copytree(local_zarr_path, copied_zarr)
+    (copied_zarr / ".zmetadata").unlink()
+    remote_source = "s3://bucket/remote-path-summary-without-consolidated.nwb"
+    client = _LocalZarrObjectClient(copied_zarr)
+    zarr_reader._clear_shared_metadata_catalog_cache()
+    monkeypatch.setattr(
+        zarr_reader,
+        "_source_path",
+        lambda _: _PoisonedRemoteZarrPath(remote_source),
+    )
+    monkeypatch.setattr(
+        zarr_reader,
+        "_remote_metadata_client_if_available",
+        lambda _: client,
+    )
+    reader = zarr_reader._ZarrBackendReader(
+        remote_source,
+        cache=cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite"),
+    )
+
+    summary = asyncio.run(reader.read_path_summary())
+    paths = {entry.path for entry in summary}
+
+    assert not reader.used_consolidated_metadata
+    assert reader.metadata_read_count == client.request_count
+    assert reader.metadata_bytes_fetched == client.bytes_fetched
+    assert reader.metadata_read_count > 1
+    assert "units/" in client.list_prefixes
+    assert "processing/behavior/running_speed_with_rate/" in client.list_prefixes
+    assert "/units/spike_times" in paths
+    assert "/processing/behavior/running_speed_with_rate/data" in paths
+
+
 def test_public_get_table_schema_uses_zarr_backend_for_local_store(
     local_zarr_path: pathlib.Path,
     tmp_path: pathlib.Path,
@@ -611,12 +935,41 @@ def test_public_get_table_schema_falls_back_to_zarr_after_hdf5_not_found(
         async def close(self) -> None:
             calls.append("hdf5:close")
 
-    def _zarr_schema_if_available(
-        file_path: lazynwb.types_.PathLike,
-        table_path: str,
-    ) -> pl.Schema:
-        calls.append(f"zarr:{file_path}:{table_path}")
-        return expected_schema
+    class _ZarrReader:
+        async def read_table_schema_snapshot(
+            self,
+            exact_table_path: str,
+        ) -> catalog_models._TableSchemaSnapshot:
+            calls.append(f"zarr:{exact_table_path}")
+            return catalog_models._TableSchemaSnapshot(
+                source_identity=catalog_models._SourceIdentity(
+                    source_url=source,
+                    in_process_token="test-zarr-fallback-schema",
+                ),
+                table_path=exact_table_path,
+                backend="zarr",
+                columns=(
+                    catalog_models._TableColumnSchema(
+                        name="unit_name",
+                        table_path=exact_table_path,
+                        source_path=source,
+                        backend="zarr",
+                        dataset=catalog_models._DatasetSchema(
+                            path="units/unit_name",
+                            dtype=catalog_models._NeutralDType.from_backend_dtype(
+                                np.dtype("S16")
+                            ),
+                            shape=(3,),
+                            ndim=1,
+                            is_dataset=True,
+                        ),
+                    ),
+                ),
+                table_length=3,
+            )
+
+        async def close(self) -> None:
+            calls.append("zarr:close")
 
     monkeypatch.setattr(
         hdf5_reader,
@@ -629,9 +982,14 @@ def test_public_get_table_schema_falls_back_to_zarr_after_hdf5_not_found(
         lambda candidate_source: _MissingHDF5Reader(),
     )
     monkeypatch.setattr(
-        lazynwb.tables,
-        "_get_fast_zarr_table_schema_if_available",
-        _zarr_schema_if_available,
+        zarr_reader,
+        "_is_fast_zarr_candidate",
+        lambda candidate_source: True,
+    )
+    monkeypatch.setattr(
+        zarr_reader,
+        "_default_zarr_backend_reader",
+        lambda candidate_source: _ZarrReader(),
     )
 
     schema = lazynwb.tables.get_table_schema(
@@ -644,7 +1002,8 @@ def test_public_get_table_schema_falls_back_to_zarr_after_hdf5_not_found(
     assert calls == [
         "hdf5:units",
         "hdf5:close",
-        "zarr:s3://bucket/example.nwb:units",
+        "zarr:units",
+        "zarr:close",
     ]
 
 
@@ -881,6 +1240,8 @@ class _LocalZarrObjectClient:
         self._root = root
         self.request_count = 0
         self.bytes_fetched = 0
+        self.read_keys: list[str] = []
+        self.list_prefixes: list[str] = []
 
     @property
     def cache_key(self) -> str:
@@ -898,5 +1259,53 @@ class _LocalZarrObjectClient:
             payload = path.read_bytes()
             self.request_count += 1
             self.bytes_fetched += len(payload)
+            self.read_keys.append(key)
             payloads[key] = payload
         return payloads
+
+    def list_child_names_sync(self, parent_path: str) -> tuple[str, ...]:
+        prefix = f"{parent_path.strip('/')}/" if parent_path.strip("/") else ""
+        self.list_prefixes.append(prefix)
+        self.request_count += 1
+        parent = self._root / parent_path
+        if not parent.exists():
+            return ()
+        return tuple(
+            sorted(
+                child.name
+                for child in parent.iterdir()
+                if child.is_dir() and not child.name.startswith(".")
+            )
+        )
+
+
+class _PoisonedRemoteZarrPath:
+    def __init__(self, source_url: str) -> None:
+        self._source_url = source_url
+
+    def __truediv__(self, _: object) -> _PoisonedRemoteZarrPath:
+        raise AssertionError("remote Zarr metadata should not use path traversal")
+
+    def __str__(self) -> str:
+        return self._source_url
+
+    def as_posix(self) -> str:
+        return self._source_url
+
+    def exists(self) -> bool:
+        raise AssertionError("remote Zarr metadata should not call exists()")
+
+    def iterdir(self) -> tuple[()]:
+        raise AssertionError("remote Zarr metadata should not call iterdir()")
+
+    def read_text(self) -> str:
+        raise AssertionError("remote Zarr metadata should not call read_text()")
+
+    def resolve(self) -> _PoisonedRemoteZarrPath:
+        raise AssertionError("remote Zarr metadata should not call resolve()")
+
+    def rglob(self, _: str) -> tuple[()]:
+        raise AssertionError("remote Zarr metadata should not call rglob()")
+
+    def stat(self) -> object:
+        raise AssertionError("remote Zarr metadata should not call stat()")

@@ -43,10 +43,10 @@ ColumnMetadataType = TypeVar(
     lazynwb.table_metadata.RawTableColumnMetadata,
     catalog_models._TableColumnSchema,
 )
-AsyncValueType = TypeVar("AsyncValueType")
-_FastCatalogBackendName = Literal["hdf5", "zarr"]
+_FastCatalogBackendName = catalog_backend._FastCatalogBackendName
 
 logger = logging.getLogger(__name__)
+_run_async_value = lazynwb.utils._run_async_value
 
 NWB_PATH_COLUMN_NAME = "_nwb_path"
 TABLE_PATH_COLUMN_NAME = "_table_path"
@@ -79,13 +79,13 @@ class _DirectHDF5IndexedColumnReadPlan:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class _DirectHDF5TableReadPlan:
-    scalar_columns: tuple[catalog_models._TableColumnSchema, ...] = ()
+    regular_columns: tuple[catalog_models._TableColumnSchema, ...] = ()
     indexed_columns: tuple[_DirectHDF5IndexedColumnReadPlan, ...] = ()
     fallback_columns: tuple[catalog_models._TableColumnSchema, ...] = ()
 
     @property
     def has_direct_columns(self) -> bool:
-        return bool(self.scalar_columns or self.indexed_columns)
+        return bool(self.regular_columns or self.indexed_columns)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -96,13 +96,13 @@ class _DirectZarrIndexedColumnReadPlan:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class _DirectZarrTableReadPlan:
-    array_columns: tuple[catalog_models._TableColumnSchema, ...] = ()
+    regular_columns: tuple[catalog_models._TableColumnSchema, ...] = ()
     indexed_columns: tuple[_DirectZarrIndexedColumnReadPlan, ...] = ()
     fallback_columns: tuple[catalog_models._TableColumnSchema, ...] = ()
 
     @property
     def has_direct_columns(self) -> bool:
-        return bool(self.array_columns or self.indexed_columns)
+        return bool(self.regular_columns or self.indexed_columns)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -517,99 +517,23 @@ def _only_internal_columns_requested(
     )
 
 
-def _run_async_value(
-    coroutine: typing.Coroutine[object, object, AsyncValueType],
-) -> AsyncValueType:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coroutine)
-    future = lazynwb.utils.get_threadpool_executor().submit(asyncio.run, coroutine)
-    return future.result()
-
-
-async def _read_table_schema_snapshot_and_close(
-    reader: catalog_backend._BackendReader,
-    exact_table_path: str,
-) -> catalog_models._TableSchemaSnapshot:
-    try:
-        return await reader.read_table_schema_snapshot(exact_table_path)
-    finally:
-        await reader.close()
-
-
-def _fast_catalog_backend_order(
-    file_path: lazynwb.types_.PathLike,
-) -> tuple[_FastCatalogBackendName, _FastCatalogBackendName]:
-    if zarr_reader._source_name_has_zarr_suffix(file_path):
-        return ("zarr", "hdf5")
-    return ("hdf5", "zarr")
-
-
-def _get_fast_hdf5_catalog_snapshot_if_available(
-    file_path: lazynwb.types_.PathLike,
-    exact_table_path: str,
-) -> catalog_models._TableSchemaSnapshot | None:
-    if not hdf5_reader._is_fast_hdf5_candidate(file_path):
-        return None
-    reader = hdf5_reader._default_hdf5_backend_reader(file_path)
-    try:
-        logger.debug(
-            "using fast HDF5 catalog snapshot for materialization planning: %r/%s",
-            file_path,
-            exact_table_path,
-        )
-        return _run_async_value(
-            _read_table_schema_snapshot_and_close(reader, exact_table_path)
-        )
-    except hdf5_reader._NotHDF5Error:
-        logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
-        return None
-
-
-def _get_fast_zarr_catalog_snapshot_if_available(
-    file_path: lazynwb.types_.PathLike,
-    exact_table_path: str,
-) -> catalog_models._TableSchemaSnapshot | None:
-    if not zarr_reader._is_fast_zarr_candidate(file_path):
-        return None
-    reader: catalog_backend._BackendReader = zarr_reader._default_zarr_backend_reader(
-        file_path
-    )
-    logger.debug(
-        "using fast Zarr catalog snapshot for materialization planning: %r/%s",
-        file_path,
-        exact_table_path,
-    )
-    return _run_async_value(
-        _read_table_schema_snapshot_and_close(reader, exact_table_path)
-    )
-
-
 def _get_fast_catalog_snapshot_if_available(
     file_path: lazynwb.types_.PathLike,
     exact_table_path: str,
 ) -> catalog_models._TableSchemaSnapshot | None:
-    backend_order = _fast_catalog_backend_order(file_path)
+    backend_order = catalog_backend._fast_catalog_backend_order(file_path)
     logger.debug(
         "using fast catalog backend order for %r: %s",
         file_path,
         " -> ".join(backend_order),
     )
-    for backend_name in backend_order:
-        if backend_name == "hdf5":
-            snapshot = _get_fast_hdf5_catalog_snapshot_if_available(
-                file_path,
-                exact_table_path,
-            )
-        else:
-            snapshot = _get_fast_zarr_catalog_snapshot_if_available(
-                file_path,
-                exact_table_path,
-            )
-        if snapshot is not None:
-            return snapshot
-    return None
+    return _run_async_value(
+        catalog_backend._read_table_schema_snapshot_if_available(
+            file_path,
+            exact_table_path,
+            backend_order=backend_order,
+        )
+    )
 
 
 def _catalog_snapshot_key(file_path: lazynwb.types_.PathLike) -> str:
@@ -756,14 +680,14 @@ def _plan_direct_hdf5_table_reads(
         else:
             fallback_columns.append(column)
     read_plan = _DirectHDF5TableReadPlan(
-        scalar_columns=tuple(direct_columns),
+        regular_columns=tuple(direct_columns),
         indexed_columns=tuple(direct_indexed_columns),
         fallback_columns=tuple(fallback_columns),
     )
     logger.debug(
-        "planned direct HDF5 table reads: scalar_columns=%s indexed_columns=%s "
+        "planned direct HDF5 table reads: regular_columns=%s indexed_columns=%s "
         "fallback_columns=%s",
-        [column.name for column in read_plan.scalar_columns],
+        [column.name for column in read_plan.regular_columns],
         [plan.data_column.name for plan in read_plan.indexed_columns],
         [column.name for column in read_plan.fallback_columns],
     )
@@ -878,14 +802,14 @@ def _plan_direct_zarr_table_reads(
         else:
             fallback_columns.append(column)
     read_plan = _DirectZarrTableReadPlan(
-        array_columns=tuple(direct_columns),
+        regular_columns=tuple(direct_columns),
         indexed_columns=tuple(direct_indexed_columns),
         fallback_columns=tuple(fallback_columns),
     )
     logger.debug(
-        "planned direct Zarr table reads: array_columns=%s indexed_columns=%s "
+        "planned direct Zarr table reads: regular_columns=%s indexed_columns=%s "
         "fallback_columns=%s",
-        [column.name for column in read_plan.array_columns],
+        [column.name for column in read_plan.regular_columns],
         [plan.data_column.name for plan in read_plan.indexed_columns],
         [column.name for column in read_plan.fallback_columns],
     )
@@ -942,10 +866,10 @@ def _materialize_direct_hdf5_read_plan(
     finally:
         _run_async_value(reader.close())
     logger.debug(
-        "direct HDF5 materialization for %r: scalar_columns=%s indexed_columns=%s "
+        "direct HDF5 materialization for %r: regular_columns=%s indexed_columns=%s "
         "requests=%d bytes=%d",
         path,
-        [column.name for column in read_plan.scalar_columns],
+        [column.name for column in read_plan.regular_columns],
         [plan.data_column.name for plan in read_plan.indexed_columns],
         int(getattr(reader._range_reader, "request_count", 0)) - request_count_before,
         int(getattr(reader._range_reader, "bytes_fetched", 0)) - fetched_bytes_before,
@@ -998,11 +922,11 @@ def _materialize_direct_zarr_read_plan(
     finally:
         _run_async_value(reader.close())
     logger.debug(
-        "direct Zarr materialization for %r: array_columns=%s indexed_columns=%s "
+        "direct Zarr materialization for %r: regular_columns=%s indexed_columns=%s "
         "metadata_requests=%d metadata_bytes=%d chunk_requests=%d chunk_bytes=%d "
         "elapsed=%.3f s",
         path,
-        [column.name for column in read_plan.array_columns],
+        [column.name for column in read_plan.regular_columns],
         [plan.data_column.name for plan in read_plan.indexed_columns],
         int(getattr(reader, "metadata_read_count", 0)) - metadata_reads_before,
         int(getattr(reader, "metadata_bytes_fetched", 0)) - metadata_bytes_before,
@@ -1014,14 +938,14 @@ def _materialize_direct_zarr_read_plan(
 
 
 async def _materialize_direct_zarr_read_plan_async(
-    reader: zarr_reader._ZarrBackendReader,
+    reader: catalog_backend._ArraySelectionBackendReader,
     read_plan: _DirectZarrTableReadPlan,
     table_row_indices: Sequence[int] | None,
     *,
     as_polars: bool,
 ) -> dict[str, Any]:
     column_data: dict[str, Any] = {}
-    for column in read_plan.array_columns:
+    for column in read_plan.regular_columns:
         value = await _read_direct_zarr_column_array(
             reader,
             column,
@@ -1042,7 +966,7 @@ async def _materialize_direct_zarr_read_plan_async(
 
 
 async def _read_direct_zarr_column_array(
-    reader: zarr_reader._ZarrBackendReader,
+    reader: catalog_backend._ArraySelectionBackendReader,
     column: catalog_models._TableColumnSchema,
     table_row_indices: Sequence[int] | None,
 ) -> npt.NDArray[Any]:
@@ -1059,7 +983,7 @@ async def _read_direct_zarr_column_array(
 
 
 async def _read_direct_zarr_indexed_column(
-    reader: zarr_reader._ZarrBackendReader,
+    reader: catalog_backend._ArraySelectionBackendReader,
     indexed_plan: _DirectZarrIndexedColumnReadPlan,
     table_row_indices: Sequence[int] | None,
 ) -> list[list[Any]]:
@@ -1128,7 +1052,7 @@ def _get_zarr_indexed_data_coalesce_gap(
 
 
 async def _read_direct_zarr_element_spans(
-    reader: zarr_reader._ZarrBackendReader,
+    reader: catalog_backend._ArraySelectionBackendReader,
     column: catalog_models._TableColumnSchema,
     spans: Sequence[tuple[int, int]],
 ) -> list[npt.NDArray[Any]]:
@@ -1136,12 +1060,25 @@ async def _read_direct_zarr_element_spans(
         return []
     if not column.dataset.path:
         raise ValueError(f"column {column.name!r} is missing a Zarr dataset path")
-    payloads: list[npt.NDArray[Any]] = []
-    for start, end in spans:
-        payloads.append(
-            await reader.read_array_selection(column.dataset.path, slice(start, end))
-        )
-    return payloads
+    selections = tuple(slice(start, end) for start, end in spans)
+    logger.debug(
+        "reading direct Zarr indexed data column %r from %s with %d batched span(s)",
+        column.name,
+        column.dataset.path,
+        len(selections),
+    )
+    read_array_selections = getattr(reader, "_read_array_selections", None)
+    if callable(read_array_selections):
+        return list(await read_array_selections(column.dataset.path, selections))
+    logger.debug(
+        "direct Zarr indexed data column %r reader lacks batch selection support; "
+        "falling back to sequential span reads",
+        column.name,
+    )
+    return [
+        await reader.read_array_selection(column.dataset.path, selection)
+        for selection in selections
+    ]
 
 
 def _native_zarr_table_row_selection(
@@ -1178,7 +1115,7 @@ async def _materialize_direct_hdf5_read_plan_async(
             column,
             table_row_indices,
         )
-        for column in read_plan.scalar_columns
+        for column in read_plan.regular_columns
     }
     for indexed_plan in read_plan.indexed_columns:
         column_data[indexed_plan.data_column.name] = (
@@ -1506,9 +1443,9 @@ def _get_fast_table_data_if_available(
             direct_column_data = direct_zarr_column_data
             fallback_columns = zarr_read_plan.fallback_columns
             logger.debug(
-                "fast Zarr materialization selected direct array columns=%s "
+                "fast Zarr materialization selected direct regular columns=%s "
                 "direct indexed columns=%s fallback columns=%s for %r/%s",
-                [column.name for column in zarr_read_plan.array_columns],
+                [column.name for column in zarr_read_plan.regular_columns],
                 [plan.data_column.name for plan in zarr_read_plan.indexed_columns],
                 [column.name for column in fallback_columns],
                 path,
@@ -1523,9 +1460,9 @@ def _get_fast_table_data_if_available(
         )
         fallback_columns = hdf5_read_plan.fallback_columns
         logger.debug(
-            "fast HDF5 materialization selected direct scalar columns=%s "
+            "fast HDF5 materialization selected direct regular columns=%s "
             "direct indexed columns=%s fallback columns=%s for %r/%s",
-            [column.name for column in hdf5_read_plan.scalar_columns],
+            [column.name for column in hdf5_read_plan.regular_columns],
             [plan.data_column.name for plan in hdf5_read_plan.indexed_columns],
             [column.name for column in fallback_columns],
             path,
@@ -2364,33 +2301,31 @@ def _get_table_schema_helper(
     fast_backend_order: Sequence[_FastCatalogBackendName] | None = None,
 ) -> dict[str, Any] | None:
     normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
-    backend_order = tuple(fast_backend_order or _fast_catalog_backend_order(file_path))
+    backend_order = tuple(
+        fast_backend_order or catalog_backend._fast_catalog_backend_order(file_path)
+    )
     logger.debug(
         "using fast schema backend order for %r: %s",
         file_path,
         " -> ".join(backend_order),
     )
-    for backend_name in backend_order:
-        try:
-            if backend_name == "hdf5":
-                fast_schema = _get_fast_hdf5_table_schema_if_available(
-                    file_path=file_path,
-                    table_path=normalized_table_path,
-                )
-            else:
-                fast_schema = _get_fast_zarr_table_schema_if_available(
-                    file_path=file_path,
-                    table_path=normalized_table_path,
-                )
-        except KeyError:
-            return _handle_missing_schema_table(
-                file_path=file_path,
-                table_path=table_path,
-                raise_on_missing=raise_on_missing,
+    try:
+        snapshot = _run_async_value(
+            catalog_backend._read_table_schema_snapshot_if_available(
+                file_path,
+                normalized_table_path,
+                backend_order=backend_order,
             )
-        else:
-            if fast_schema is not None:
-                return fast_schema
+        )
+    except KeyError:
+        return _handle_missing_schema_table(
+            file_path=file_path,
+            table_path=table_path,
+            raise_on_missing=raise_on_missing,
+        )
+    else:
+        if snapshot is not None:
+            return catalog_polars._snapshot_to_polars_schema(snapshot)
     try:
         columns = lazynwb.table_metadata.get_table_column_metadata(
             file_path, normalized_table_path
@@ -2405,37 +2340,11 @@ def _get_table_schema_helper(
         return get_table_schema_from_metadata(columns)
 
 
-def _run_async_schema_snapshot_batch(
-    coroutine: typing.Coroutine[
-        Any,
-        Any,
-        list[
-            tuple[
-                lazynwb.types_.PathLike,
-                catalog_models._TableSchemaSnapshot | None,
-                bool,
-            ]
-        ],
-    ],
-) -> list[
-    tuple[
-        lazynwb.types_.PathLike,
-        catalog_models._TableSchemaSnapshot | None,
-        bool,
-    ]
-]:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coroutine)
-    future = lazynwb.utils.get_threadpool_executor().submit(asyncio.run, coroutine)
-    return future.result()
-
-
-async def _get_fast_hdf5_table_schema_snapshots(
+async def _get_fast_table_schema_snapshots(
     file_paths: Sequence[lazynwb.types_.PathLike],
     table_path: str,
     raise_on_missing: bool,
+    backend_name: _FastCatalogBackendName,
 ) -> list[
     tuple[
         lazynwb.types_.PathLike,
@@ -2443,17 +2352,15 @@ async def _get_fast_hdf5_table_schema_snapshots(
         bool,
     ]
 ]:
-    readers = [
-        hdf5_reader._default_hdf5_backend_reader(file_path) for file_path in file_paths
-    ]
+    backend_label = "HDF5" if backend_name == "hdf5" else "Zarr"
     logger.debug(
-        "getting fast HDF5 table schema for %r from %d files in one async batch",
+        "getting fast %s table schema for %r from %d files in one async batch",
+        backend_label,
         table_path,
         len(file_paths),
     )
 
     async def _read_schema(
-        reader: hdf5_reader._HDF5BackendReader,
         file_path: lazynwb.types_.PathLike,
     ) -> tuple[
         lazynwb.types_.PathLike,
@@ -2461,72 +2368,11 @@ async def _get_fast_hdf5_table_schema_snapshots(
         bool,
     ]:
         try:
-            snapshot = await reader.read_table_schema_snapshot(table_path)
-        except KeyError:
-            _handle_missing_schema_table(
-                file_path=file_path,
-                table_path=table_path,
-                raise_on_missing=raise_on_missing,
-            )
-            return file_path, None, True
-        except hdf5_reader._NotHDF5Error:
-            logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
-            return file_path, None, False
-        except FileNotFoundError as exc:
-            logger.debug(
-                "fast HDF5 backend could not find single-object source %r: %r",
+            snapshot = await catalog_backend._read_table_schema_snapshot_if_available(
                 file_path,
-                exc,
+                table_path,
+                backend_order=(backend_name,),
             )
-            return file_path, None, False
-        return file_path, snapshot, True
-
-    try:
-        return list(
-            await asyncio.gather(
-                *(
-                    _read_schema(reader, file_path)
-                    for reader, file_path in zip(readers, file_paths, strict=True)
-                )
-            )
-        )
-    finally:
-        await asyncio.gather(
-            *(reader.close() for reader in readers),
-            return_exceptions=True,
-        )
-
-
-async def _get_fast_zarr_table_schema_snapshots(
-    file_paths: Sequence[lazynwb.types_.PathLike],
-    table_path: str,
-    raise_on_missing: bool,
-) -> list[
-    tuple[
-        lazynwb.types_.PathLike,
-        catalog_models._TableSchemaSnapshot | None,
-        bool,
-    ]
-]:
-    readers = [
-        zarr_reader._default_zarr_backend_reader(file_path) for file_path in file_paths
-    ]
-    logger.debug(
-        "getting fast Zarr table schema for %r from %d files in one async batch",
-        table_path,
-        len(file_paths),
-    )
-
-    async def _read_schema(
-        reader: zarr_reader._ZarrBackendReader,
-        file_path: lazynwb.types_.PathLike,
-    ) -> tuple[
-        lazynwb.types_.PathLike,
-        catalog_models._TableSchemaSnapshot | None,
-        bool,
-    ]:
-        try:
-            snapshot = await reader.read_table_schema_snapshot(table_path)
         except KeyError:
             _handle_missing_schema_table(
                 file_path=file_path,
@@ -2535,24 +2381,23 @@ async def _get_fast_zarr_table_schema_snapshots(
             )
             return file_path, None, True
         except Exception as exc:
-            logger.debug("fast Zarr backend rejected source %r: %r", file_path, exc)
+            if backend_name == "hdf5":
+                raise
+            logger.debug(
+                "fast %s backend rejected source %r: %r",
+                backend_label,
+                file_path,
+                exc,
+            )
+            return file_path, None, False
+        if snapshot is None:
+            logger.debug("fast %s backend rejected source %r", backend_label, file_path)
             return file_path, None, False
         return file_path, snapshot, True
 
-    try:
-        return list(
-            await asyncio.gather(
-                *(
-                    _read_schema(reader, file_path)
-                    for reader, file_path in zip(readers, file_paths, strict=True)
-                )
-            )
-        )
-    finally:
-        await asyncio.gather(
-            *(reader.close() for reader in readers),
-            return_exceptions=True,
-        )
+    return list(
+        await asyncio.gather(*(_read_schema(file_path) for file_path in file_paths))
+    )
 
 
 def _handle_missing_schema_table(
@@ -2566,43 +2411,6 @@ def _handle_missing_schema_table(
         ) from None
     logger.info("Table %r not found in %r: skipping", table_path, file_path)
     return None
-
-
-def _get_fast_hdf5_table_schema_if_available(
-    file_path: lazynwb.types_.PathLike,
-    table_path: str,
-) -> pl.Schema | None:
-    if not hdf5_reader._is_fast_hdf5_candidate(file_path):
-        return None
-    reader = hdf5_reader._default_hdf5_backend_reader(file_path)
-    try:
-        snapshot = _run_async_value(
-            _read_table_schema_snapshot_and_close(reader, table_path)
-        )
-    except hdf5_reader._NotHDF5Error:
-        logger.debug("fast HDF5 backend rejected non-HDF5 source %r", file_path)
-        return None
-    except FileNotFoundError as exc:
-        logger.debug(
-            "fast HDF5 backend could not find single-object source %r: %r",
-            file_path,
-            exc,
-        )
-        return None
-    return catalog_polars._snapshot_to_polars_schema(snapshot)
-
-
-def _get_fast_zarr_table_schema_if_available(
-    file_path: lazynwb.types_.PathLike,
-    table_path: str,
-) -> pl.Schema | None:
-    if not zarr_reader._is_fast_zarr_candidate(file_path):
-        return None
-    reader = zarr_reader._default_zarr_backend_reader(file_path)
-    snapshot = _run_async_value(
-        _read_table_schema_snapshot_and_close(reader, table_path)
-    )
-    return catalog_polars._snapshot_to_polars_schema(snapshot)
 
 
 def _get_table_schema_with_catalog_snapshots(
@@ -2621,60 +2429,51 @@ def _get_table_schema_with_catalog_snapshots(
     per_file_schemas: list[dict[str, polars.DataType]] = []
     catalog_snapshots: dict[str, catalog_models._TableSchemaSnapshot] = {}
     normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
-    fast_hdf5_paths: list[lazynwb.types_.PathLike] = []
-    fast_zarr_paths: list[lazynwb.types_.PathLike] = []
+    fast_backend_paths: dict[_FastCatalogBackendName, list[lazynwb.types_.PathLike]] = {
+        "hdf5": [],
+        "zarr": [],
+    }
     fallback_jobs: list[
         tuple[lazynwb.types_.PathLike, Sequence[_FastCatalogBackendName] | None]
     ] = []
     for file_path in file_paths:
-        backend_order = _fast_catalog_backend_order(file_path)
-        if backend_order[0] == "hdf5" and hdf5_reader._is_fast_hdf5_candidate(
-            file_path
+        backend_order = catalog_backend._fast_catalog_backend_order(file_path)
+        primary_backend = backend_order[0]
+        if catalog_backend._fast_backend_is_available(
+            file_path,
+            primary_backend,
         ):
-            fast_hdf5_paths.append(file_path)
-        elif backend_order[0] == "zarr" and zarr_reader._is_fast_zarr_candidate(
-            file_path
-        ):
-            fast_zarr_paths.append(file_path)
+            fast_backend_paths[primary_backend].append(file_path)
         else:
             fallback_jobs.append((file_path, None))
-    if fast_hdf5_paths:
+    for backend_name, fast_paths in fast_backend_paths.items():
+        if not fast_paths:
+            continue
+        backend_label = "HDF5" if backend_name == "hdf5" else "Zarr"
         logger.debug(
-            "using batched fast HDF5 schema path for %d/%d files at %r",
-            len(fast_hdf5_paths),
+            "using batched fast %s schema path for %d/%d files at %r",
+            backend_label,
+            len(fast_paths),
             len(file_paths),
             normalized_table_path,
         )
-        for file_path, snapshot, used_fast_hdf5 in _run_async_schema_snapshot_batch(
-            _get_fast_hdf5_table_schema_snapshots(
-                fast_hdf5_paths,
+        for file_path, snapshot, used_fast_backend in lazynwb.utils._run_async_value(
+            _get_fast_table_schema_snapshots(
+                fast_paths,
                 normalized_table_path,
                 raise_on_missing,
+                backend_name,
             )
         ):
-            if not used_fast_hdf5:
-                fallback_jobs.append((file_path, ("zarr",)))
-                continue
-            if snapshot is not None:
-                file_schema = catalog_polars._snapshot_to_polars_schema(snapshot)
-                per_file_schemas.append(file_schema)
-                catalog_snapshots[_catalog_snapshot_key(file_path)] = snapshot
-    if fast_zarr_paths:
-        logger.debug(
-            "using batched fast Zarr schema path for %d/%d files at %r",
-            len(fast_zarr_paths),
-            len(file_paths),
-            normalized_table_path,
-        )
-        for file_path, snapshot, used_fast_zarr in _run_async_schema_snapshot_batch(
-            _get_fast_zarr_table_schema_snapshots(
-                fast_zarr_paths,
-                normalized_table_path,
-                raise_on_missing,
-            )
-        ):
-            if not used_fast_zarr:
-                fallback_jobs.append((file_path, ("hdf5",)))
+            if not used_fast_backend:
+                fallback_jobs.append(
+                    (
+                        file_path,
+                        catalog_backend._fallback_backend_order_after_rejection(
+                            backend_name
+                        ),
+                    )
+                )
                 continue
             if snapshot is not None:
                 file_schema = catalog_polars._snapshot_to_polars_schema(snapshot)

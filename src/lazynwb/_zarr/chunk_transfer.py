@@ -19,8 +19,48 @@ _SUPPORTED_DTYPE_KINDS = frozenset({"b", "i", "u", "f", "c"})
 _SUPPORTED_ORDERS = frozenset({"C", "F"})
 
 
+_T = typing.TypeVar("_T")
+
+
 class _AsyncObjectClient(typing.Protocol):
     async def read_object(self, key: str) -> object: ...
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ZarrChunkTransferConfig:
+    """Configuration for private native Zarr chunk transfers."""
+
+    max_concurrency: int = 8
+
+
+class _ZarrChunkTransferLimiter:
+    def __init__(self, config: _ZarrChunkTransferConfig) -> None:
+        self._max_concurrency = _max_concurrency(config)
+        self._available = self._max_concurrency
+        self._condition = asyncio.Condition()
+
+    async def _run(
+        self,
+        permits: int,
+        read: typing.Callable[[], typing.Awaitable[_T]],
+    ) -> _T:
+        permit_count = min(max(1, int(permits)), self._max_concurrency)
+        await self._acquire(permit_count)
+        try:
+            return await read()
+        finally:
+            await self._release(permit_count)
+
+    async def _acquire(self, permit_count: int) -> None:
+        async with self._condition:
+            while self._available < permit_count:
+                await self._condition.wait()
+            self._available -= permit_count
+
+    async def _release(self, permit_count: int) -> None:
+        async with self._condition:
+            self._available += permit_count
+            self._condition.notify_all()
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -47,8 +87,13 @@ class _ChunkTransferTimings:
 class _ZarrV2ChunkTransferEngine:
     """Private native Zarr v2 chunk transfer engine for exact array reads."""
 
-    def __init__(self, object_client: _AsyncObjectClient) -> None:
+    def __init__(
+        self,
+        object_client: _AsyncObjectClient,
+        config: _ZarrChunkTransferConfig | None = None,
+    ) -> None:
         self._object_client = object_client
+        self._config = config or _ZarrChunkTransferConfig()
 
     async def _read_array_selection(
         self,
@@ -70,6 +115,7 @@ class _ZarrV2ChunkTransferEngine:
             self._object_client,
             spec=spec,
             plan=plan,
+            config=self._config,
         )
 
 
@@ -81,6 +127,8 @@ async def _read_zarr_v2_array_selection(
     selection: object = None,
     available_chunk_keys: Container[str] | None = None,
     missing_chunk_keys: Container[str] | None = None,
+    config: _ZarrChunkTransferConfig | None = None,
+    limiter: _ZarrChunkTransferLimiter | None = None,
 ) -> np.ndarray:
     spec, plan = _plan_zarr_v2_array_selection(
         array_path=array_path,
@@ -93,6 +141,8 @@ async def _read_zarr_v2_array_selection(
         object_client,
         spec=spec,
         plan=plan,
+        config=config,
+        limiter=limiter,
     )
 
 
@@ -101,8 +151,16 @@ async def _read_zarr_v2_array_selection_from_plan(
     *,
     spec: _ZarrV2ArraySpec,
     plan: chunk_planner._ArrayChunkPlan,
+    config: _ZarrChunkTransferConfig | None = None,
+    limiter: _ZarrChunkTransferLimiter | None = None,
 ) -> np.ndarray:
-    return await _read_planned_chunks(object_client, spec, plan)
+    return await _read_planned_chunks(
+        object_client,
+        spec,
+        plan,
+        config=config,
+        limiter=limiter,
+    )
 
 
 def _plan_zarr_v2_array_selection(
@@ -131,7 +189,13 @@ async def _read_planned_chunks(
     object_client: _AsyncObjectClient,
     spec: _ZarrV2ArraySpec,
     plan: chunk_planner._ArrayChunkPlan,
+    *,
+    config: _ZarrChunkTransferConfig | None = None,
+    limiter: _ZarrChunkTransferLimiter | None = None,
 ) -> np.ndarray:
+    resolved_config = config or _ZarrChunkTransferConfig()
+    transfer_limiter = limiter or _ZarrChunkTransferLimiter(resolved_config)
+    max_concurrency = transfer_limiter._max_concurrency
     started = time.perf_counter()
     output = np.empty(plan.output_shape, dtype=spec.dtype)
     keys_to_fetch = tuple(
@@ -141,16 +205,23 @@ async def _read_planned_chunks(
     )
     logger.debug(
         "starting native Zarr v2 chunk transfer for %r: selection=%r "
-        "output_shape=%s chunk_count=%d planned_missing_chunks=%d",
+        "output_shape=%s chunk_count=%d planned_missing_chunks=%d "
+        "max_concurrency=%d",
         plan.array_path,
         plan.selection,
         plan.output_shape,
         plan.chunk_count,
         plan.missing_chunk_count,
+        max_concurrency,
     )
 
     fetch_started = time.perf_counter()
-    payloads = await _read_chunk_payloads(object_client, keys_to_fetch)
+    payloads = await _read_chunk_payloads(
+        object_client,
+        keys_to_fetch,
+        config=resolved_config,
+        limiter=transfer_limiter,
+    )
     fetch_seconds = time.perf_counter() - fetch_started
     fetched_bytes = sum(_payload_nbytes(payload) for payload in payloads.values())
 
@@ -200,17 +271,28 @@ async def _read_planned_chunks(
 async def _read_chunk_payloads(
     object_client: _AsyncObjectClient,
     keys: tuple[str, ...],
+    *,
+    config: _ZarrChunkTransferConfig | None = None,
+    limiter: _ZarrChunkTransferLimiter | None = None,
 ) -> dict[str, _BytesLike | None]:
     if not keys:
         return {}
+    resolved_config = config or _ZarrChunkTransferConfig()
+    transfer_limiter = limiter or _ZarrChunkTransferLimiter(resolved_config)
+    max_concurrency = transfer_limiter._max_concurrency
     read_many = getattr(object_client, "read_many", None)
     if callable(read_many):
-        response = await read_many(keys)
-        payloads = _normalize_read_many_response(keys, response)
+        payloads = await _read_many_chunk_payloads(
+            read_many,
+            keys,
+            limiter=transfer_limiter,
+        )
         logger.debug(
-            "fetched Zarr v2 chunk batch via read_many: requested=%d returned=%d",
+            "fetched Zarr v2 chunk batch via read_many: requested=%d returned=%d "
+            "max_concurrency=%d",
             len(keys),
             len(payloads),
+            max_concurrency,
         )
         return payloads
 
@@ -218,9 +300,53 @@ async def _read_chunk_payloads(
     if not callable(read_object):
         msg = "Zarr v2 chunk object client must define read_many() or read_object()"
         raise TypeError(msg)
-    results = await asyncio.gather(*(_read_one_object(read_object, key) for key in keys))
-    logger.debug("fetched Zarr v2 chunk batch via read_object: requested=%d", len(keys))
+    results = await _map_async_bounded(
+        keys,
+        read_one=lambda key: _read_one_object(read_object, key),
+        limiter=transfer_limiter,
+    )
+    logger.debug(
+        "fetched Zarr v2 chunk batch via read_object: requested=%d "
+        "max_concurrency=%d",
+        len(keys),
+        max_concurrency,
+    )
     return dict(zip(keys, results))
+
+
+async def _read_many_chunk_payloads(
+    read_many: typing.Callable[[Sequence[str]], typing.Awaitable[object]],
+    keys: tuple[str, ...],
+    *,
+    limiter: _ZarrChunkTransferLimiter,
+) -> dict[str, _BytesLike | None]:
+    payloads: dict[str, _BytesLike | None] = {}
+    max_concurrency = limiter._max_concurrency
+    batches = tuple(_batched(keys, max_concurrency))
+    logger.debug(
+        "fetching Zarr v2 chunks via read_many with bounded batches: "
+        "requested=%d batches=%d max_concurrency=%d",
+        len(keys),
+        len(batches),
+        max_concurrency,
+    )
+    for batch_index, batch_keys in enumerate(batches, start=1):
+        response = await limiter._run(
+            len(batch_keys),
+            lambda batch_keys=batch_keys: read_many(batch_keys),
+        )
+        batch_payloads = _normalize_read_many_response(batch_keys, response)
+        payloads.update(batch_payloads)
+        logger.debug(
+            "fetched Zarr v2 chunk read_many batch %d/%d: requested=%d "
+            "returned=%d max_concurrency=%d",
+            batch_index,
+            len(batches),
+            len(batch_keys),
+            len(batch_payloads),
+            max_concurrency,
+        )
+    return payloads
 
 
 async def _read_one_object(
@@ -233,6 +359,35 @@ async def _read_one_object(
         logger.debug("Zarr v2 chunk object missing: key=%r", key)
         return None
     return _normalize_payload(payload)
+
+
+async def _map_async_bounded(
+    keys: Sequence[str],
+    *,
+    read_one: typing.Callable[[str], typing.Awaitable[_T]],
+    max_concurrency: int | None = None,
+    limiter: _ZarrChunkTransferLimiter | None = None,
+) -> tuple[_T, ...]:
+    if limiter is None:
+        limiter = _ZarrChunkTransferLimiter(
+            _ZarrChunkTransferConfig(
+                max_concurrency=1 if max_concurrency is None else max_concurrency
+            )
+        )
+
+    async def _read_with_slot(key: str) -> _T:
+        return await limiter._run(1, lambda key=key: read_one(key))
+
+    return tuple(await asyncio.gather(*(_read_with_slot(key) for key in keys)))
+
+
+def _batched(keys: tuple[str, ...], batch_size: int) -> tuple[tuple[str, ...], ...]:
+    size = max(1, batch_size)
+    return tuple(keys[index : index + size] for index in range(0, len(keys), size))
+
+
+def _max_concurrency(config: _ZarrChunkTransferConfig) -> int:
+    return max(1, int(config.max_concurrency))
 
 
 def _normalize_read_many_response(

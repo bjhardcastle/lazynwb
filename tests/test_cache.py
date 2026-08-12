@@ -145,6 +145,113 @@ def test_sqlite_table_schema_cache_skips_unvalidated_sources(
     assert result.reason == "unreliable_identity"
 
 
+def test_sqlite_metadata_payload_cache_hit(tmp_path: pathlib.Path) -> None:
+    cache = cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite")
+    identity = catalog_models._SourceIdentity(
+        source_url="s3://bucket/file.nwb.zarr",
+        etag="etag-1",
+    )
+    payload = {
+        "kind": "zarr_metadata_catalog",
+        "origin": "consolidated",
+        "metadata": {".zgroup": {"zarr_format": 2}},
+    }
+
+    asyncio.run(
+        cache.put_metadata_payload(
+            identity,
+            backend="zarr",
+            payload_version=1,
+            options_key='{"format":"test"}',
+            payload=payload,
+        )
+    )
+    result = asyncio.run(
+        cache.get_metadata_payload(
+            identity,
+            backend="zarr",
+            payload_version=1,
+            options_key='{"format":"test"}',
+        )
+    )
+
+    assert result.hit
+    assert result.reason == "hit"
+    assert result.payload == payload
+
+
+def test_sqlite_metadata_payload_cache_identity_mismatch(
+    tmp_path: pathlib.Path,
+) -> None:
+    cache = cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite")
+    identity = catalog_models._SourceIdentity(
+        source_url="s3://bucket/file.nwb.zarr",
+        etag="etag-1",
+    )
+    mismatched_identity = catalog_models._SourceIdentity(
+        source_url="s3://bucket/file.nwb.zarr",
+        etag="etag-2",
+    )
+
+    asyncio.run(
+        cache.put_metadata_payload(
+            identity,
+            backend="zarr",
+            payload_version=1,
+            options_key='{"format":"test"}',
+            payload={
+                "kind": "zarr_metadata_catalog",
+                "metadata": {".zgroup": {"zarr_format": 2}},
+            },
+        )
+    )
+    result = asyncio.run(
+        cache.get_metadata_payload(
+            mismatched_identity,
+            backend="zarr",
+            payload_version=1,
+            options_key='{"format":"test"}',
+        )
+    )
+
+    assert not result.hit
+    assert result.reason == "identity_mismatch"
+
+
+def test_sqlite_metadata_payload_cache_skips_non_persistent_identity(
+    tmp_path: pathlib.Path,
+) -> None:
+    cache = cache_sqlite._SQLiteSnapshotCache(tmp_path / "catalog.sqlite")
+    identity = catalog_models._SourceIdentity(
+        source_url="memory://file.nwb.zarr",
+        in_process_token="token-1",
+    )
+
+    asyncio.run(
+        cache.put_metadata_payload(
+            identity,
+            backend="zarr",
+            payload_version=1,
+            options_key='{"format":"test"}',
+            payload={
+                "kind": "zarr_metadata_catalog",
+                "metadata": {".zgroup": {"zarr_format": 2}},
+            },
+        )
+    )
+    result = asyncio.run(
+        cache.get_metadata_payload(
+            identity,
+            backend="zarr",
+            payload_version=1,
+            options_key='{"format":"test"}',
+        )
+    )
+
+    assert not result.hit
+    assert result.reason == "unreliable_identity"
+
+
 def _snapshot(
     source_url: str,
     version_id: str | None = None,

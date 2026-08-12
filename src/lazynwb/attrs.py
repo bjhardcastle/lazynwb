@@ -8,6 +8,7 @@ These functions expose this metadata in a structured way for summarizing NWB fil
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections.abc import Iterable
@@ -239,6 +240,82 @@ def _get_sub_attrs_from_zarr_catalog(
     )
 
 
+def _get_attrs_from_zarr_reader(
+    file_accessor: lazynwb.file_io.FileAccessor,
+    internal_path: str,
+    cache_key: str,
+    exclude_private: bool,
+    exclude_empty_fields: bool,
+) -> dict[str, Any] | None:
+    reader = zarr_reader._default_zarr_backend_reader(file_accessor._path)
+    try:
+        raw_attrs = zarr_reader._run_remote_metadata_coroutine_sync(
+            reader._read_attrs(internal_path)
+        )
+    except Exception as exc:
+        logger.debug(
+            "Zarr backend attrs reader unavailable for %s/%s: %r",
+            file_accessor._path,
+            internal_path,
+            exc,
+        )
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            zarr_reader._run_remote_metadata_coroutine_sync(reader.close())
+    attrs = dict(raw_attrs)
+    _cache_attrs_for_path(cache_key, internal_path, attrs)
+    return _filter_attrs(
+        attrs,
+        exclude_private=exclude_private,
+        exclude_empty_fields=exclude_empty_fields,
+        exclude_zarr_only=True,
+    )
+
+
+def _get_sub_attrs_from_zarr_reader(
+    file_accessor: lazynwb.file_io.FileAccessor,
+    parent_path: str,
+    cache_key: str,
+    exclude_private: bool,
+    exclude_empty: bool,
+) -> dict[str, dict[str, Any]] | None:
+    reader = zarr_reader._default_zarr_backend_reader(file_accessor._path)
+    try:
+        raw_attrs_tree = {
+            path: dict(attrs)
+            for path, attrs in zarr_reader._run_remote_metadata_coroutine_sync(
+                reader._read_attrs_tree(parent_path)
+            ).items()
+        }
+    except Exception as exc:
+        logger.debug(
+            "Zarr backend attrs-tree reader unavailable for %s/%s: %r",
+            file_accessor._path,
+            parent_path,
+            exc,
+        )
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            zarr_reader._run_remote_metadata_coroutine_sync(reader.close())
+    if not raw_attrs_tree:
+        return {}
+    _cache_zarr_attrs_tree(cache_key, raw_attrs_tree)
+    result = {
+        _sub_attrs_result_key(zarr_path, parent_path): _filter_attrs(
+            attrs,
+            exclude_private=exclude_private,
+            exclude_empty_fields=exclude_empty,
+            exclude_zarr_only=True,
+        )
+        for zarr_path, attrs in raw_attrs_tree.items()
+    }
+    return _post_process_attrs(
+        result, exclude_private=exclude_private, exclude_empty=exclude_empty
+    )
+
+
 def _get_accessor_object(
     file_accessor: lazynwb.file_io.FileAccessor,
     current_path: str,
@@ -400,6 +477,15 @@ def get_attrs(
                 )
 
     if is_zarr:
+        attrs_from_reader = _get_attrs_from_zarr_reader(
+            file_accessor,
+            internal_path,
+            cache_key,
+            exclude_private=exclude_private,
+            exclude_empty_fields=exclude_empty_fields,
+        )
+        if attrs_from_reader is not None:
+            return attrs_from_reader
         catalog = _get_zarr_metadata_catalog(file_accessor)
         if catalog is not None:
             return _get_attrs_from_zarr_catalog(
@@ -520,6 +606,15 @@ def get_sub_attrs(
     is_zarr = _is_zarr_accessor(file_accessor)
 
     if is_zarr:
+        attrs_from_reader = _get_sub_attrs_from_zarr_reader(
+            file_accessor,
+            parent_path,
+            cache_key,
+            exclude_private=exclude_private,
+            exclude_empty=exclude_empty,
+        )
+        if attrs_from_reader is not None:
+            return attrs_from_reader
         catalog = _get_zarr_metadata_catalog(file_accessor)
         if catalog is not None:
             return _get_sub_attrs_from_zarr_catalog(
@@ -703,6 +798,11 @@ def clear_attrs_cache(
     """
     Clear cached attributes for a specific file or all files.
 
+    This clears attrs process caches. For Zarr sources, it also clears the shared
+    Zarr metadata catalog process cache used by attrs/schema readers. It does not
+    close FileAccessor instances or evict persistent SQLite catalog entries; use
+    ``lazynwb.clear_cache()`` for the full process-cache reset.
+
     Parameters
     ----------
     nwb_path : PathLike, optional
@@ -717,17 +817,39 @@ def clear_attrs_cache(
     global _attrs_cache
     if nwb_path is None:
         zarr_reader._clear_shared_metadata_catalog_cache()
-        with _attrs_cache_lock:
-            _attrs_cache.clear()
-        logger.debug("Cleared all attrs and shared Zarr metadata catalog caches")
+        _clear_attrs_process_cache()
+        logger.debug(
+            "Cleared all attrs and shared Zarr metadata process caches; "
+            "persistent SQLite catalog cache is unchanged"
+        )
     else:
         file_accessor = lazynwb.file_io._get_accessor(nwb_path)
         cache_key = _get_cache_key(file_accessor)
         if _is_zarr_accessor(file_accessor):
             zarr_reader._clear_shared_metadata_catalog_cache(file_accessor._path)
-        with _attrs_cache_lock:
-            _attrs_cache.pop(cache_key, None)
-        logger.debug("Cleared attrs cache for %s", cache_key)
+        _clear_attrs_process_cache(cache_key)
+
+
+def _clear_attrs_process_cache(cache_key: str | None = None) -> None:
+    """Clear attrs-only process caches without touching FileAccessor or SQLite."""
+    global _attrs_cache
+    with _attrs_cache_lock:
+        if cache_key is None:
+            file_count = len(_attrs_cache)
+            path_count = sum(len(paths) for paths in _attrs_cache.values())
+            _attrs_cache.clear()
+            logger.debug(
+                "Cleared all attrs process cache entries (files=%d paths=%d)",
+                file_count,
+                path_count,
+            )
+            return
+        removed = _attrs_cache.pop(cache_key, None)
+    logger.debug(
+        "Cleared attrs process cache for %s (paths=%d)",
+        cache_key,
+        len(removed) if removed is not None else 0,
+    )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import dataclasses
 import logging
@@ -19,20 +18,6 @@ import lazynwb.types_
 import lazynwb.utils
 
 logger = logging.getLogger(__name__)
-
-
-AsyncValueType = typing.TypeVar("AsyncValueType")
-
-
-def _run_async_value(
-    coroutine: typing.Coroutine[object, object, AsyncValueType],
-) -> AsyncValueType:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coroutine)
-    future = lazynwb.utils.get_threadpool_executor().submit(asyncio.run, coroutine)
-    return future.result()
 
 
 def _native_zarr_array_accessor_if_available(
@@ -149,7 +134,7 @@ class _NativeZarrArrayAccessor:
         reader = zarr_reader._default_zarr_backend_reader(self._source)
         started = time.perf_counter()
         try:
-            value = _run_async_value(
+            value = lazynwb.utils._run_async_value(
                 reader.read_array_selection(self._array_path, selection)
             )
         except Exception as exc:
@@ -165,7 +150,7 @@ class _NativeZarrArrayAccessor:
             )
             return self._fallback[selection]
         finally:
-            _run_async_value(reader.close())
+            lazynwb.utils._run_async_value(reader.close())
         logger.debug(
             "read TimeSeries Zarr data via native selector for %r/%s "
             "selection=%r in %.3f s",

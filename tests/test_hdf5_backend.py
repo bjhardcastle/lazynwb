@@ -343,9 +343,10 @@ def test_hdf5_backend_reader_scans_multiple_tables_in_one_lifecycle(
     assert results["units"].ok
     assert results["intervals/trials"].snapshot is not None
     assert results["units"].snapshot is not None
-    assert results["intervals/trials"].request_count > 0
+    assert results["intervals/trials"]._scan_metrics.request_count > 0
     assert (
-        results["units"].request_count < cold_units_reader._range_reader.request_count
+        results["units"]._scan_metrics.request_count
+        < cold_units_reader._range_reader.request_count
     )
     assert shared_requests < independent_requests
 
@@ -708,7 +709,7 @@ def test_scan_nwb_predicate_projection_uses_direct_indexed_ranges(
     assert df["spike_times"].to_list() == [[0.2, 0.3]]
     assert df.schema["spike_times"] == pl.List(pl.Float64)
     assert (
-        "planned direct HDF5 table reads: scalar_columns=[] "
+        "planned direct HDF5 table reads: regular_columns=[] "
         "indexed_columns=['spike_times'] fallback_columns=[]"
     ) in caplog.text
     assert "direct HDF5 indexed materialization" in caplog.text

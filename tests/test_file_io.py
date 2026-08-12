@@ -1,7 +1,9 @@
+import logging
 import pathlib
 import typing
 from collections.abc import Iterable
 
+import numpy as np
 import pytest
 
 import lazynwb.file_io
@@ -340,6 +342,62 @@ def test_open_zarr_v3_uses_unconsolidated_local_group(
     ]
 
 
+def test_zarr_v3_catalog_accessor_array_uses_native_engine_for_multi_chunk(
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="lazynwb.file_io")
+    zarr_path = tmp_path / "multi-chunk.nwb.zarr"
+    array_path = zarr_path / "values"
+    array_path.mkdir(parents=True)
+    zarray = _zarray(shape=(5,), chunks=(2,), dtype="<i4", compressor=None)
+    for chunk_index, chunk_values in enumerate(
+        (
+            np.array([0, 1], dtype="<i4"),
+            np.array([2, 3], dtype="<i4"),
+            np.array([4, 0], dtype="<i4"),
+        )
+    ):
+        (array_path / str(chunk_index)).write_bytes(chunk_values.tobytes(order="A"))
+
+    result = lazynwb.file_io._read_zarr_v2_catalog_accessor_array(
+        source=zarr_path,
+        path="values",
+        zarray=zarray,
+        shape=(5,),
+        dtype=np.dtype("<i4"),
+    )
+
+    np.testing.assert_array_equal(result, np.arange(5, dtype="<i4"))
+    assert "via native chunk transfer" in caplog.text
+
+
+def test_zarr_v3_catalog_accessor_rejects_unsupported_multi_chunk_array(
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="lazynwb.file_io")
+    zarr_path = tmp_path / "object-array.nwb.zarr"
+    zarr_path.mkdir()
+    zarray = _zarray(
+        shape=(2,),
+        chunks=(1,),
+        dtype="|O",
+        compressor={"id": "vlen-bytes"},
+    )
+
+    with pytest.raises(RuntimeError, match="multi-chunk arrays"):
+        lazynwb.file_io._read_zarr_v2_catalog_accessor_array(
+            source=zarr_path,
+            path="values",
+            zarray=zarray,
+            shape=(2,),
+            dtype=np.dtype("O"),
+        )
+
+    assert "rejecting catalog-backed Zarr v2 array read" in caplog.text
+
+
 def test_fsspec_storage_options_use_top_level_anon() -> None:
     lazynwb.file_io.config.anon = True
     lazynwb.file_io.config.fsspec_storage_options = {"anon": False, "custom": "value"}
@@ -387,6 +445,26 @@ def test_storage_options_fall_back_to_legacy_anon_setting() -> None:
 def _expected_local_zarr_open_call(path: str) -> str:
     normalized_path = lazynwb.file_io.from_pathlike(path).as_posix()
     return f"zarr:{normalized_path}:r"
+
+
+def _zarray(
+    *,
+    shape: tuple[int, ...],
+    chunks: tuple[int, ...],
+    dtype: str,
+    compressor: dict[str, object] | None,
+) -> dict[str, object]:
+    return {
+        "zarr_format": 2,
+        "shape": shape,
+        "chunks": chunks,
+        "dtype": dtype,
+        "compressor": compressor,
+        "fill_value": 0,
+        "filters": None,
+        "order": "C",
+        "dimension_separator": ".",
+    }
 
 
 if __name__ == "__main__":

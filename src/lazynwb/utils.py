@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import logging
+import multiprocessing
 import os
+import typing
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,7 @@ TABLE_SHORTCUTS = {
 
 thread_pool_executor: concurrent.futures.ThreadPoolExecutor | None = None
 process_pool_executor: concurrent.futures.ProcessPoolExecutor | None = None
+_AsyncValueType = typing.TypeVar("_AsyncValueType")
 
 
 def get_threadpool_executor() -> concurrent.futures.ThreadPoolExecutor:
@@ -35,6 +39,19 @@ def get_processpool_executor() -> concurrent.futures.ProcessPoolExecutor:
             )
         )
     return process_pool_executor
+
+
+def _run_async_value(
+    coroutine: typing.Coroutine[object, object, _AsyncValueType],
+) -> _AsyncValueType:
+    """Run a private async operation from sync APIs, even inside an event loop."""
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+    future = get_threadpool_executor().submit(asyncio.run, coroutine)
+    return future.result()
 
 
 def normalize_internal_file_path(path: str) -> str:

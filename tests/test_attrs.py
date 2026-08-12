@@ -5,6 +5,7 @@ import logging
 import pathlib
 import shutil
 
+import h5py
 import pytest
 
 import lazynwb._zarr.reader as zarr_reader
@@ -264,6 +265,30 @@ def test_clear_attrs_cache_all() -> None:
     assert True
 
 
+def test_file_io_clear_cache_clears_attrs_cache_with_file_accessor(
+    tmp_path: pathlib.Path,
+) -> None:
+    nwb_path = tmp_path / "attrs-cache.nwb"
+    with h5py.File(nwb_path, "w") as h5_file:
+        units = h5_file.create_group("units")
+        units.attrs["status"] = "cold"
+
+    lazynwb.attrs.clear_attrs_cache()
+    cold_attrs = lazynwb.attrs.get_attrs(nwb_path, "/units")
+
+    lazynwb.file_io.FileAccessor._clear_cache()
+    with h5py.File(nwb_path, "r+") as h5_file:
+        h5_file["units"].attrs["status"] = "warm"
+
+    stale_attrs = lazynwb.attrs.get_attrs(nwb_path, "/units")
+    lazynwb.file_io.clear_cache()
+    fresh_attrs = lazynwb.attrs.get_attrs(nwb_path, "/units")
+
+    assert cold_attrs["status"] == "cold"
+    assert stale_attrs["status"] == "cold"
+    assert fresh_attrs["status"] == "warm"
+
+
 @pytest.mark.parametrize("parent_path", ["/", "/units", "/intervals", "/processing"])
 def test_get_sub_attrs_hdf5_zarr_parity(
     local_hdf5_path: pathlib.Path,
@@ -327,9 +352,12 @@ def test_get_attrs_hdf5_zarr_parity(
 
 def test_zarr_attrs_reuse_schema_metadata_catalog(
     local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Schema reads populate the shared Zarr catalog used by attrs reads."""
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
     lazynwb.attrs.clear_attrs_cache()
     caplog.set_level(logging.DEBUG, logger="lazynwb._zarr.reader")
     reader = zarr_reader._ZarrBackendReader(local_zarr_path)
@@ -390,6 +418,43 @@ def test_zarr_attrs_use_targeted_metadata_without_consolidated(
     assert "units/spike_times" in sub_attrs
     assert "zarr_dtype" not in sub_attrs["units/spike_times"]
     assert "read targeted Zarr metadata file" in caplog.text
+
+
+def test_zarr_attrs_reuse_persistent_metadata_after_process_cache_clear(
+    local_zarr_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(tmp_path / "catalog.sqlite"))
+    lazynwb.attrs.clear_attrs_cache()
+
+    cold_attrs = lazynwb.attrs.get_sub_attrs(local_zarr_path, parent_path="/units")
+    lazynwb.attrs.clear_attrs_cache()
+    caplog.set_level(logging.DEBUG)
+    caplog.clear()
+    load_calls: list[pathlib.Path] = []
+
+    def _recording_consolidated_loader(
+        root: pathlib.Path,
+        reader: object,
+        stat_key: tuple[int, int] | None,
+    ) -> None:
+        load_calls.append(root)
+        raise AssertionError("warm attrs should use the persistent metadata payload")
+
+    monkeypatch.setattr(
+        zarr_reader,
+        "_load_consolidated_metadata",
+        _recording_consolidated_loader,
+    )
+
+    warm_attrs = lazynwb.attrs.get_sub_attrs(local_zarr_path, parent_path="/units")
+
+    assert warm_attrs == cold_attrs
+    assert not load_calls
+    assert "Zarr metadata payload cache lookup" in caplog.text
+    assert "hit" in caplog.text
 
 
 def test_get_attrs_normalize_path(local_hdf5_path: pathlib.Path) -> None:
