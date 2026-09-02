@@ -149,6 +149,11 @@ def scan_nwb(
                 table_path,
             )
 
+        predicate_filtered_source = _prune_sources_with_nwb_path_predicates(
+            source,
+            predicate,
+        )
+
         if predicate is not None:
             # - if we have a predicate, we'll fetch the minimal df, apply predicate, then fetch remaining columns in with_columns
             initial_columns = predicate.meta.root_names()
@@ -162,10 +167,20 @@ def scan_nwb(
                 f"Predicate not specified: fetching all requested columns in {table_path!r} ({initial_columns})"
             )
 
+        if not predicate_filtered_source:
+            logger.debug(
+                "Skipping %r table materialization because the pushed %s predicate "
+                "matched no NWB source files",
+                table_path,
+                lazynwb.NWB_PATH_COLUMN_NAME,
+            )
+            yield pl.DataFrame(schema=schema).select(with_columns or schema.keys())
+            return
+
         # TODO use batch_size
-        if n_rows and len(source) > 1:
+        if n_rows and len(predicate_filtered_source) > 1:
             sum_rows = 0
-            for idx, file in enumerate(source):
+            for idx, file in enumerate(predicate_filtered_source):
                 try:
                     sum_rows += lazynwb.tables._get_table_length(
                         file,
@@ -178,15 +193,15 @@ def scan_nwb(
                     continue
                 if sum_rows >= n_rows:
                     break
-            filtered_files = source[: idx + 1]
+            filtered_files = predicate_filtered_source[: idx + 1]
             logger.debug(
                 "Limiting files to %d of %d based on n_rows=%d",
                 len(filtered_files),
-                len(source),
+                len(predicate_filtered_source),
                 n_rows,
             )
         else:
-            filtered_files = source
+            filtered_files = predicate_filtered_source
         nwb_path_to_row_indices = None
         nwb_data_sources = filtered_files
         if predicate is None and n_rows is not None:
@@ -328,6 +343,150 @@ def _remove_polars_dynamic_predicates(
     if not retained_conjuncts:
         return None, dropped_conjunct_count
     return functools.reduce(operator.and_, retained_conjuncts), dropped_conjunct_count
+
+
+def _prune_sources_with_nwb_path_predicates(
+    source: tuple[lazynwb.types_.PathLike, ...],
+    predicate: pl.Expr | None,
+) -> tuple[lazynwb.types_.PathLike, ...]:
+    if (
+        predicate is None
+        or lazynwb.NWB_PATH_COLUMN_NAME not in predicate.meta.root_names()
+    ):
+        return source
+
+    path_predicates: list[pl.Expr] = []
+    for conjunct in _split_conjunctive_predicate(predicate):
+        if set(conjunct.meta.root_names()) != {lazynwb.NWB_PATH_COLUMN_NAME}:
+            continue
+        if not _is_row_local_nwb_path_predicate(conjunct):
+            logger.debug(
+                "Not using non-row-local %s predicate for file pruning: %s",
+                lazynwb.NWB_PATH_COLUMN_NAME,
+                conjunct,
+            )
+            continue
+        path_predicates.append(conjunct)
+
+    if not path_predicates:
+        return source
+
+    path_predicate = functools.reduce(operator.and_, path_predicates)
+    source_paths = tuple(
+        lazynwb.tables._source_path_strings(file)[0] for file in source
+    )
+    source_path_frame = pl.DataFrame(
+        {lazynwb.NWB_PATH_COLUMN_NAME: source_paths},
+        schema={lazynwb.NWB_PATH_COLUMN_NAME: pl.String},
+    )
+    try:
+        selected_source_paths = set(
+            source_path_frame.filter(path_predicate)[
+                lazynwb.NWB_PATH_COLUMN_NAME
+            ].to_list()
+        )
+    except Exception as exc:
+        logger.debug(
+            "Could not evaluate pushed %s predicate against NWB source files; "
+            "continuing without file pruning: %r",
+            lazynwb.NWB_PATH_COLUMN_NAME,
+            exc,
+            exc_info=True,
+        )
+        return source
+
+    filtered_source = tuple(
+        file
+        for file, source_path in zip(source, source_paths, strict=True)
+        if source_path in selected_source_paths
+    )
+    logger.debug(
+        "Pruned %d of %d NWB source files using %d row-local %s predicate "
+        "conjunct(s); %d file(s) remain",
+        len(source) - len(filtered_source),
+        len(source),
+        len(path_predicates),
+        lazynwb.NWB_PATH_COLUMN_NAME,
+        len(filtered_source),
+    )
+    return filtered_source
+
+
+def _is_row_local_nwb_path_predicate(predicate: pl.Expr) -> bool:
+    payload = _predicate_json_payload(predicate)
+    return _is_row_local_nwb_path_predicate_payload(payload)
+
+
+def _is_row_local_nwb_path_predicate_payload(payload: object) -> bool:
+    if not isinstance(payload, dict) or len(payload) != 1:
+        return False
+
+    expression_type, expression = next(iter(payload.items()))
+    if expression_type == "Column":
+        return expression == lazynwb.NWB_PATH_COLUMN_NAME
+    if expression_type == "Literal":
+        return True
+    if expression_type == "BinaryExpr":
+        return isinstance(expression, dict) and all(
+            _is_row_local_nwb_path_predicate_payload(expression.get(operand))
+            for operand in ("left", "right")
+        )
+    if expression_type == "Cast":
+        return isinstance(
+            expression, dict
+        ) and _is_row_local_nwb_path_predicate_payload(expression.get("expr"))
+    if expression_type == "Ternary":
+        return isinstance(expression, dict) and all(
+            _is_row_local_nwb_path_predicate_payload(expression.get(branch))
+            for branch in ("predicate", "truthy", "falsy")
+        )
+    if expression_type != "Function" or not isinstance(expression, dict):
+        return False
+
+    function_inputs = expression.get("input")
+    return (
+        isinstance(function_inputs, list)
+        and all(
+            _is_row_local_nwb_path_predicate_payload(function_input)
+            for function_input in function_inputs
+        )
+        and _is_row_local_nwb_path_function(expression.get("function"))
+    )
+
+
+def _is_row_local_nwb_path_function(function: object) -> bool:
+    if not isinstance(function, dict) or len(function) != 1:
+        return False
+    namespace, operation = next(iter(function.items()))
+    if isinstance(operation, dict) and len(operation) == 1:
+        operation_name = next(iter(operation))
+    elif isinstance(operation, str):
+        operation_name = operation
+    else:
+        return False
+
+    if namespace == "Boolean":
+        return operation_name in {
+            "IsFinite",
+            "IsIn",
+            "IsInfinite",
+            "IsNan",
+            "IsNotNan",
+            "IsNotNull",
+            "IsNull",
+            "Not",
+        }
+    if namespace == "StringExpr":
+        return operation_name in {
+            "Contains",
+            "EndsWith",
+            "LenBytes",
+            "LenChars",
+            "Lowercase",
+            "StartsWith",
+            "Uppercase",
+        }
+    return False
 
 
 def _split_conjunctive_predicate(predicate: pl.Expr) -> list[pl.Expr]:

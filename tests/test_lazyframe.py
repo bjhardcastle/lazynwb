@@ -1,6 +1,7 @@
 import logging
 import pathlib
 import tempfile
+import typing
 import uuid
 from datetime import datetime, timezone
 
@@ -159,6 +160,108 @@ def test_scan_nwb_predicate_pushdown(local_hdf5_path):
         filtered_internal_df[lazynwb.TABLE_INDEX_COLUMN_NAME] == 3
     ).all(), "Predicate pushdown filter on internal column was not applied correctly"
     assert len(filtered_internal_df) == len(lf.collect().filter(internal_expr)), "Filtered DataFrame length does not match length when collecting and filtering separately"
+
+
+def test_scan_nwb_path_predicate_prunes_files_before_materialization(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="lazynwb.lazyframe")
+    lazy_frame = lazynwb.scan_nwb(
+        source=local_hdf5_paths,
+        table_path="/intervals/trials",
+        disable_progress=True,
+    )
+    target_path = local_hdf5_paths[-1].resolve().as_posix()
+    materialized_path_sets: list[set[str]] = []
+    original_get_df = lazynwb.tables.get_df
+
+    def _recording_get_df(*args: object, **kwargs: object) -> object:
+        sources = kwargs.get("nwb_data_sources", args[0] if args else ())
+        if isinstance(sources, (str, pathlib.Path)):
+            sources = (sources,)
+        sources = typing.cast(typing.Iterable[lazynwb.types_.PathLike], sources)
+        materialized_path_sets.append(
+            {lazynwb.tables._source_path_strings(source)[0] for source in sources}
+        )
+        return original_get_df(*args, **kwargs)
+
+    monkeypatch.setattr(lazynwb.tables, "get_df", _recording_get_df)
+
+    result = (
+        lazy_frame.filter(
+            (pl.col(lazynwb.NWB_PATH_COLUMN_NAME) == target_path)
+            & (pl.col(lazynwb.TABLE_INDEX_COLUMN_NAME) > 1)
+        )
+        .head(2)
+        .select(
+            lazynwb.NWB_PATH_COLUMN_NAME,
+            lazynwb.TABLE_INDEX_COLUMN_NAME,
+            "condition",
+        )
+        .collect()
+    )
+
+    assert not result.is_empty()
+    assert len(result) == 2
+    assert result[lazynwb.NWB_PATH_COLUMN_NAME].unique().to_list() == [target_path]
+    assert materialized_path_sets
+    assert all(paths == {target_path} for paths in materialized_path_sets)
+    assert "Pruned 1 of 2 NWB source files using" in caplog.text
+
+
+def test_scan_nwb_unmatched_path_predicate_skips_materialization(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lazy_frame = lazynwb.scan_nwb(
+        source=local_hdf5_paths,
+        table_path="/intervals/trials",
+        disable_progress=True,
+    )
+
+    def _unexpected_get_df(*args: object, **kwargs: object) -> typing.NoReturn:
+        raise AssertionError(
+            "An unmatched path predicate should skip table materialization"
+        )
+
+    monkeypatch.setattr(lazynwb.tables, "get_df", _unexpected_get_df)
+
+    result = (
+        lazy_frame.filter(
+            pl.col(lazynwb.NWB_PATH_COLUMN_NAME) == "/not/a/source/file.nwb"
+        )
+        .select(lazynwb.NWB_PATH_COLUMN_NAME)
+        .collect()
+    )
+
+    assert result.is_empty()
+
+
+def test_scan_nwb_mixed_or_predicate_does_not_prune_files(
+    local_hdf5_paths: list[pathlib.Path],
+) -> None:
+    target_path = local_hdf5_paths[-1].resolve().as_posix()
+    result = (
+        lazynwb.scan_nwb(
+            source=local_hdf5_paths,
+            table_path="/intervals/trials",
+            disable_progress=True,
+        )
+        .filter(
+            (pl.col(lazynwb.NWB_PATH_COLUMN_NAME) == target_path)
+            | (pl.col(lazynwb.TABLE_INDEX_COLUMN_NAME) == 0)
+        )
+        .select(
+            lazynwb.NWB_PATH_COLUMN_NAME,
+            lazynwb.TABLE_INDEX_COLUMN_NAME,
+        )
+        .collect()
+    )
+
+    expected_paths = {path.resolve().as_posix() for path in local_hdf5_paths}
+    assert set(result[lazynwb.NWB_PATH_COLUMN_NAME]) == expected_paths
 
 
 def test_scan_nwb_sort_head_ignores_polars_dynamic_topk_predicate(
