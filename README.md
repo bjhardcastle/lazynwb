@@ -484,7 +484,7 @@ config.use_obstore = True                         # use obstore for S3/GCS/Azure
 config.use_remfile = False                        # use remfile for HTTP byte-range requests (default: True)
 config.anon = True                                # anonymous access across backends
 config.fsspec_storage_options = {"request_payer": True}  # backend-specific extras if needed
-config.disable_cache = False                      # disable FileAccessor caching (default: False)
+config.disable_cache = False                      # disable persistent SQLite catalog caching (default: False)
 ```
 
 For normal AWS S3 buckets, the region belongs to the bucket, not the caller's

@@ -411,5 +411,5 @@ def _default_hdf5_backend_reader(
                 storage_options=lazynwb.file_io._get_obstore_storage_options()
             ),
         ),
-        cache=cache_sqlite._SQLiteSnapshotCache(cache_sqlite._default_cache_path()),
+        cache=cache_sqlite._default_snapshot_cache(),
     )

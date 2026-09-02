@@ -289,7 +289,7 @@ def test_convert_nwb_tables_skips_electrical_series_electrodes_array():
                 disable_progress=True,
             )
         finally:
-            lazynwb.clear_cache()  # release file handles before temp dir cleanup (Windows)
+            lazynwb.clear_cache()  # reset process caches before temp dir cleanup
 
         # The /electrodes table should be converted; the .../electrodes DynamicTableRegion should not
         assert any("electrodes" in k for k in output_paths), (

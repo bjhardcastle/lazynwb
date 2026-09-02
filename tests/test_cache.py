@@ -4,6 +4,9 @@ import asyncio
 import pathlib
 import sqlite3
 
+import pytest
+
+import lazynwb
 import lazynwb._cache.sqlite as cache_sqlite
 import lazynwb._catalog.models as catalog_models
 
@@ -44,6 +47,28 @@ def test_source_identity_validator_order() -> None:
         in_process_token="token-1",
     )
     assert identity.validator_kind == "in_process"
+
+
+@pytest.mark.parametrize(
+    "nwb_fixture_name",
+    ["local_hdf5_path", "local_zarr_path"],
+)
+def test_disable_cache_prevents_default_sqlite_cache_creation(
+    nwb_fixture_name: str,
+    request: pytest.FixtureRequest,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_path = tmp_path / "disabled-cache.sqlite"
+    nwb_path = request.getfixturevalue(nwb_fixture_name)
+    source = nwb_path.as_uri() if nwb_fixture_name == "local_hdf5_path" else nwb_path
+    monkeypatch.setenv("LAZYNWB_CATALOG_CACHE_PATH", str(cache_path))
+    monkeypatch.setattr(lazynwb.config, "disable_cache", True)
+
+    schema = lazynwb.get_table_schema(source, "/intervals/trials")
+
+    assert {"start_time", "stop_time"}.issubset(schema)
+    assert not cache_path.exists()
 
 
 def test_sqlite_table_schema_cache_hit(tmp_path: pathlib.Path) -> None:

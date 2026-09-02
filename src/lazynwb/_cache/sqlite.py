@@ -13,6 +13,7 @@ import weakref
 import aiosqlite
 
 import lazynwb._catalog.models as catalog_models
+import lazynwb._config as config_module
 import lazynwb.types_
 
 logger = logging.getLogger(__name__)
@@ -535,3 +536,13 @@ def _default_cache_path() -> pathlib.Path:
         os.environ.get("XDG_CACHE_HOME", pathlib.Path.home() / ".cache")
     )
     return cache_root / "lazynwb" / "catalog.sqlite"
+
+
+def _default_snapshot_cache() -> _SQLiteSnapshotCache | None:
+    """Return the configured persistent catalog cache, if enabled."""
+    if config_module.config.disable_cache:
+        logger.debug("SQLite catalog cache disabled by global configuration")
+        return None
+    cache_path = _default_cache_path()
+    logger.debug("using SQLite catalog cache at %s", cache_path)
+    return _SQLiteSnapshotCache(cache_path)

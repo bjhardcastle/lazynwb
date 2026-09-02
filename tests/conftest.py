@@ -80,13 +80,6 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Modify the order of tests"""
     _skip_dandi_sample_tests_if_disabled(config, items)
-    # Run this test last because it closes FileAccessor instances reused for the session.
-    cache_clearing_test = next(
-        (i for i in items if i.name == "test_file_accessor_clearing"), None
-    )
-    if cache_clearing_test is not None:
-        items.remove(cache_clearing_test)
-        items[:] = [*items, cache_clearing_test]
 
 
 def _skip_dandi_sample_tests_if_disabled(

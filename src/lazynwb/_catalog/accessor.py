@@ -71,9 +71,10 @@ class _AccessorBackendReader:
 
     async def close(self) -> None:
         logger.debug(
-            "accessor backend reader close requested for %s; FileAccessor cache owns lifetime",
+            "closing accessor backend reader for %s",
             self._source_identity.source_url,
         )
+        self._file._close()
 
     def _build_source_identity(self) -> catalog_models._SourceIdentity:
         path = pathlib.Path(self._file._path.as_posix())

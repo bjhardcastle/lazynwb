@@ -860,5 +860,5 @@ def _default_zarr_backend_reader(
 ) -> _ZarrBackendReader:
     return _ZarrBackendReader(
         source,
-        cache=cache_sqlite._SQLiteSnapshotCache(cache_sqlite._default_cache_path()),
+        cache=cache_sqlite._default_snapshot_cache(),
     )

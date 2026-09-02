@@ -12,12 +12,14 @@ def reset_file_io_config():
     """Keep file I/O config isolated between tests."""
     original_use_polars = lazynwb.file_io.config.use_polars
     original_anon = lazynwb.file_io.config.anon
+    original_disable_cache = lazynwb.file_io.config.disable_cache
     original_storage_options = dict(lazynwb.file_io.config.fsspec_storage_options)
     try:
         yield
     finally:
         lazynwb.file_io.config.use_polars = original_use_polars
         lazynwb.file_io.config.anon = original_anon
+        lazynwb.file_io.config.disable_cache = original_disable_cache
         lazynwb.file_io.config.fsspec_storage_options = original_storage_options
 
 
@@ -57,19 +59,18 @@ def test_file_accessor(nwb_fixture_name, request):
     ), "Accessor should be iterable and yield at least one item"
 
 
-def test_file_accessor_caching(local_hdf5_path: pathlib.Path) -> None:
-    """Test that FileAccessor instances are cached and reused."""
-    file_path = local_hdf5_path
-
-    # Initial access
-    accessor1 = lazynwb.file_io.FileAccessor(file_path)
-    accessor1_id = id(accessor1)
-
-    # Access again, should return the same instance
-    accessor2 = lazynwb.file_io.FileAccessor(file_path)
-    accessor2_id = id(accessor2)
-
-    assert accessor1_id == accessor2_id
+def test_file_accessor_instances_are_independent(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    """FileAccessor opens an independent handle for every instance."""
+    with (
+        lazynwb.file_io.FileAccessor(local_hdf5_path) as accessor1,
+        lazynwb.file_io.FileAccessor(local_hdf5_path) as accessor2,
+    ):
+        assert accessor1 is not accessor2
+        assert accessor1._accessor is not accessor2._accessor
+        assert "units" in accessor1
+        assert "units" in accessor2
 
 
 def test_file_accessor_reinstantiation_after_close(
@@ -78,49 +79,32 @@ def test_file_accessor_reinstantiation_after_close(
     """Test that FileAccessor can be reinstantiated after the underlying HDF5 file is closed."""
     file_path = local_hdf5_path
 
-    # Initial access
     accessor1 = lazynwb.file_io.FileAccessor(file_path)
-    accessor1_id = id(accessor1)
-
-    # Verify it's working initially
     assert "units" in accessor1
     assert accessor1._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.HDF5
 
-    # Close the underlying HDF5 file
-    accessor1._accessor.close()
-
-    # Verify the file is closed
+    accessor1._close()
     assert not bool(accessor1._accessor)
 
-    # Access again - should detect stale cache and return same instance with new accessor
-    accessor2 = lazynwb.file_io.FileAccessor(file_path)
-    accessor2_id = id(accessor2)
-
-    # Should be the same cached instance
-    assert accessor1_id == accessor2_id
-
-    # But should have a fresh, working accessor
-    assert bool(accessor2._accessor)
-    assert "units" in accessor2
-    assert accessor2._hdmf_backend == lazynwb.file_io.FileAccessor.HDMFBackend.HDF5
+    with lazynwb.file_io.FileAccessor(file_path) as accessor2:
+        assert accessor1 is not accessor2
+        assert bool(accessor2._accessor)
+        assert "units" in accessor2
+        assert (
+            accessor2._hdmf_backend
+            == lazynwb.file_io.FileAccessor.HDMFBackend.HDF5
+        )
 
 
-def test_file_accessor_clearing(local_hdf5_path: pathlib.Path) -> None:
-    """Test that FileAccessor cache can be cleared."""
-    file_path = local_hdf5_path
+def test_clear_cache_leaves_live_file_accessors_open(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    """Clearing process caches does not own or close FileAccessor handles."""
+    with lazynwb.file_io.FileAccessor(local_hdf5_path) as accessor:
+        lazynwb.file_io.clear_cache()
 
-    # Initial access
-    accessor1 = lazynwb.file_io.FileAccessor(file_path)
-    accessor1_id = id(accessor1)
-
-    # Clear the cache
-    lazynwb.file_io.clear_cache()
-
-    # Access again, should return a new instance
-    accessor2 = lazynwb.file_io.FileAccessor(file_path)
-    accessor2_id = id(accessor2)
-
-    assert accessor1_id != accessor2_id
+        assert bool(accessor._accessor)
+        assert "units" in accessor
 
 
 def test_open_single_and_multiple(local_hdf5_paths: list[pathlib.Path]) -> None:

@@ -7,7 +7,6 @@ import importlib.metadata
 import logging
 import os
 import pathlib
-import threading
 import urllib.parse
 import warnings
 from collections.abc import Iterable
@@ -29,27 +28,25 @@ from lazynwb._config import config
 logger = logging.getLogger(__name__)
 
 
-# cache for FileAccessor instances by canonical path
-_accessor_cache: dict[str, FileAccessor] = {}
-_cache_lock = threading.RLock()  # RLock allows same thread to acquire multiple times
-
-
 def clear_cache() -> None:
     """
-    Clear the FileAccessor caches.
+    Clear process-lifetime I/O and metadata caches.
 
-    Users can call this to reset cached h5py and zarr accessors.
+    Active FileAccessor instances are independent and remain open.
     """
     import lazynwb._hdf5.range_reader as hdf5_range_reader
     import lazynwb._zarr.reader as zarr_reader
 
-    with _cache_lock:
-        FileAccessor._clear_cache()
-        hdf5_range_reader._clear_cache()
-        zarr_reader._clear_shared_metadata_catalog_cache()
+    logger.debug("clearing process-lifetime range-reader and Zarr metadata caches")
+    hdf5_range_reader._clear_cache()
+    zarr_reader._clear_shared_metadata_catalog_cache()
+    logger.debug("cleared process-lifetime range-reader and Zarr metadata caches")
 
 
 def _get_accessor(path: lazynwb.types_.PathLike) -> FileAccessor:
+    if isinstance(path, FileAccessor):
+        logger.debug("reusing explicitly provided FileAccessor instance")
+        return path
     if isinstance(path, Iterable) and not isinstance(path, str):
         raise ValueError(f"Expected a single path, but received an iterable: {path!r}")
     return FileAccessor(path)
@@ -60,7 +57,7 @@ def _get_accessors(
 ) -> tuple[FileAccessor, ...]:
     if not isinstance(paths, Iterable) or isinstance(paths, str):
         paths = [paths]  # ensure we have an iterable of paths
-    return tuple(FileAccessor(path) for path in paths)
+    return tuple(_get_accessor(path) for path in paths)
 
 
 def _s3_to_http(url: str) -> str:
@@ -230,92 +227,14 @@ class FileAccessor:
         ZARR = "zarr"
 
     _path: upath.UPath
-    _skip_init: bool
     _accessor: h5py.File | h5py.Group | zarr.Group
     _hdmf_backend: HDMFBackend
     """File-type backend used by this instance (e.g. HDF5, ZARR)"""
-
-    def __new__(
-        cls,
-        path: lazynwb.types_.PathLike,
-    ) -> FileAccessor:
-        """
-        Reuse existing FileAccessor for the same path if present in cache.
-        """
-        # be careful not to access attributes created in __init__ before they exist
-
-        # allow passing through if already a FileAccessor
-        if isinstance(path, FileAccessor):
-            logger.debug(
-                "path input is already a FileAccessor instance: returning as-is"
-            )
-            return path
-
-        # skip caching if disabled
-        if config.disable_cache:
-            return super().__new__(cls)
-
-        # normalize path to get cache key
-        # try lightweight version first:
-        if isinstance(path, str):
-            cache_key = path.replace("\\", "/")
-        elif hasattr(path, "as_posix"):
-            cache_key = path.as_posix()
-        else:
-            cache_key = from_pathlike(path, **_get_fsspec_storage_options()).as_posix()
-
-        with _cache_lock:
-            # return cached instance if it exists and is open
-            if cache_key in _accessor_cache:
-                instance = _accessor_cache[cache_key]
-
-                if "_accessor" not in instance.__dict__:
-                    logger.debug(
-                        f"cached instance for {cache_key} is not properly initialized, removing from cache"
-                    )
-                    del _accessor_cache[cache_key]
-                else:
-                    if instance._hdmf_backend == cls.HDMFBackend.ZARR:
-                        if (
-                            _is_open := getattr(
-                                instance._accessor.store, "_is_open", None
-                            )
-                        ) is not None:
-                            # zarr v3
-                            is_readable = _is_open
-                        else:
-                            # zarr v2
-                            is_readable = instance._accessor.store.is_readable()
-
-                    elif instance._hdmf_backend == cls.HDMFBackend.HDF5:
-                        is_readable = bool(instance._accessor)
-                    if is_readable:
-                        logger.debug(f"returning cached instance for {cache_key}")
-                        # mark to skip __init__ for cached instance
-                        instance._skip_init = True
-                    else:
-                        instance._skip_init = False
-                        logger.debug(
-                            f"cached instance for {cache_key} is stale, will recreate"
-                        )
-                    return instance
-
-            # create new instance and cache
-            logger.debug(f"creating new instance for {cache_key}")
-            instance = super().__new__(cls)
-            _accessor_cache[cache_key] = instance
-            return instance
 
     def __init__(
         self,
         path: lazynwb.types_.PathLike,
     ) -> None:
-        # skip init if returned from cache
-        if self.__dict__.get(
-            "_skip_init"
-        ):  # don't check attr directly: __getattr__ is overloaded
-            logger.debug("skipping init for cached instance")
-            return None
         self._path = from_pathlike(path)
         logger.debug(f"opening file {self._path}")
         self._accessor = _open_file(self._path)
@@ -329,31 +248,10 @@ class FileAccessor:
             return self.HDMFBackend.ZARR
         raise NotImplementedError(f"Unknown backend for {self._accessor!r}")
 
-    @classmethod
-    def _clear_cache(cls) -> None:
-        """
-        Clear the FileAccessor cache.
-        This is useful to reset the state of cached accessors.
-        """
-        global _accessor_cache
-        logger.debug("Closing all accessors in FileAccessor cache")
-        for accessor in _accessor_cache.values():
-            if "_accessor" not in accessor.__dict__:
-                logger.debug(
-                    f"FileAccessor {accessor} has no _accessor attribute, skipping close"
-                )
-                continue
-            if accessor._hdmf_backend == cls.HDMFBackend.HDF5:
-                accessor._accessor.close()
-            elif accessor._hdmf_backend == cls.HDMFBackend.ZARR:
-                accessor._accessor.store.close()
-        logger.debug("Clearing FileAccessor cache")
-        _accessor_cache.clear()
-
     def __getstate__(self) -> dict[str, Any]:
         """
         Custom pickle state for multiprocessing compatibility.
-        Only serialize the path, not the accessor or cache references.
+        Only serialize the path, not the live accessor.
         """
         return {
             "path": self._path,
@@ -367,18 +265,18 @@ class FileAccessor:
         """
         self._path = state["path"]
         self._hdmf_backend = state["hdmf_backend"]
+        logger.debug("reopening unpickled FileAccessor for %s", self._path)
+        self._accessor = _open_file(self._path)
 
-        # Check if already cached in new process
-        u_path = upath.UPath(self._path, **_get_fsspec_storage_options())
-        key = u_path.as_posix()
-
-        if key in _accessor_cache:
-            # Reuse existing accessor from cache
-            self._accessor = _accessor_cache[key]._accessor
-        else:
-            # Create new accessor and cache this instance
-            self._accessor = _open_file(self._path)
-            _accessor_cache[key] = self
+    def _close(self) -> None:
+        """Close this accessor's independently owned backend handle."""
+        if self._hdmf_backend == self.HDMFBackend.HDF5:
+            if bool(self._accessor):
+                logger.debug("closing HDF5 FileAccessor for %s", self._path)
+                self._accessor.close()
+            return
+        logger.debug("closing Zarr FileAccessor for %s", self._path)
+        self._accessor.store.close()
 
     def __getattr__(self, name) -> Any:
         if name == "_accessor":
@@ -413,10 +311,7 @@ class FileAccessor:
 
     def __exit__(self, *args, **kwargs) -> None:
         if self._path is not None:
-            if self._hdmf_backend == self.HDMFBackend.HDF5:
-                self._accessor.close()
-            elif self._hdmf_backend == self.HDMFBackend.ZARR:
-                self._accessor.store.close()
+            self._close()
 
 
 def get_internal_paths(
