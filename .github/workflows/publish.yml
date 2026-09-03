@@ -5,7 +5,8 @@ name: Publish Python package
 
 on:
   push:
-    branches: [ "main" ] 
+    branches: [ "main" ]
+    tags: [ "v*" ]
     paths: # pushing any files/folders marked ! will not trigger the workflow (exceptions can be added)
       - '**'
       - '!**.ipynb'
@@ -74,7 +75,7 @@ jobs:
     
   publish:
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions: write-all
 
@@ -88,7 +89,14 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Publish tagged release
+      if: startsWith(github.ref, 'refs/tags/v')
+      run: |
+        uv build
+        uv publish --trusted-publishing always --check-url https://pypi.org/simple
+
     - name: Publish with bump & tag
+      if: github.ref == 'refs/heads/main'
       # actions/checkout 
       run: |
         git config user.name "github-actions[bot]"
