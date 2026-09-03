@@ -447,6 +447,7 @@ def test_https_s3_virtual_host_uses_bucket_region_discovery(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
+    provider = object()
     store = object()
     hdf5_range_reader._clear_cache()
     caplog.set_level(logging.DEBUG, logger="lazynwb._storage_options")
@@ -457,6 +458,11 @@ def test_https_s3_virtual_host_uses_bucket_region_discovery(
         return store
 
     monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(
+        storage_options,
+        "_create_default_s3_credential_provider",
+        lambda: provider,
+    )
     monkeypatch.setattr(
         storage_options,
         "_discover_s3_bucket_region",
@@ -475,6 +481,7 @@ def test_https_s3_virtual_host_uses_bucket_region_discovery(
         store_url, store_kwargs = calls[0]
         assert store_url == "https://dandiarchive.s3.amazonaws.com"
         assert store_kwargs["region"] == "us-east-1"
+        assert store_kwargs["credential_provider"] is provider
         assert "overriding configured S3 region for dandiarchive" in caplog.text
     finally:
         hdf5_range_reader._clear_cache()
@@ -677,6 +684,7 @@ def test_obstore_source_identity_cache_distinguishes_auth_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     head_calls: list[tuple[dict[str, object], str]] = []
+    provider = object()
     hdf5_range_reader._clear_cache()
 
     def _fake_from_url(store_url: str, **kwargs: object) -> dict[str, object]:
@@ -694,6 +702,11 @@ def test_obstore_source_identity_cache_distinguishes_auth_options(
 
     monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
     monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    monkeypatch.setattr(
+        storage_options,
+        "_create_default_s3_credential_provider",
+        lambda: provider,
+    )
     monkeypatch.setattr(
         storage_options,
         "_discover_s3_bucket_region",
@@ -720,6 +733,8 @@ def test_obstore_source_identity_cache_distinguishes_auth_options(
         assert unsigned_identity.version_id == "unsigned-version"
         assert signed_identity.version_id == "signed-version"
         assert len(head_calls) == 2
+        assert "credential_provider" not in head_calls[0][0]
+        assert head_calls[1][0]["credential_provider"] is provider
     finally:
         hdf5_range_reader._clear_cache()
 
