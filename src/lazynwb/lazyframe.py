@@ -357,14 +357,10 @@ def _prune_sources_with_nwb_path_predicates(
 
     path_predicates: list[pl.Expr] = []
     for conjunct in _split_conjunctive_predicate(predicate):
+        # Polars only passes predicates that it has accepted for scan pushdown. After removing
+        # optimizer-only dynamic predicates above, a conjunct rooted solely in the synthetic path
+        # column can be evaluated once per source without reading table data.
         if set(conjunct.meta.root_names()) != {lazynwb.NWB_PATH_COLUMN_NAME}:
-            continue
-        if not _is_row_local_nwb_path_predicate(conjunct):
-            logger.debug(
-                "Not using non-row-local %s predicate for file pruning: %s",
-                lazynwb.NWB_PATH_COLUMN_NAME,
-                conjunct,
-            )
             continue
         path_predicates.append(conjunct)
 
@@ -401,7 +397,7 @@ def _prune_sources_with_nwb_path_predicates(
         if source_path in selected_source_paths
     )
     logger.debug(
-        "Pruned %d of %d NWB source files using %d row-local %s predicate "
+        "Pruned %d of %d NWB source files using %d pushed %s predicate "
         "conjunct(s); %d file(s) remain",
         len(source) - len(filtered_source),
         len(source),
@@ -410,83 +406,6 @@ def _prune_sources_with_nwb_path_predicates(
         len(filtered_source),
     )
     return filtered_source
-
-
-def _is_row_local_nwb_path_predicate(predicate: pl.Expr) -> bool:
-    payload = _predicate_json_payload(predicate)
-    return _is_row_local_nwb_path_predicate_payload(payload)
-
-
-def _is_row_local_nwb_path_predicate_payload(payload: object) -> bool:
-    if not isinstance(payload, dict) or len(payload) != 1:
-        return False
-
-    expression_type, expression = next(iter(payload.items()))
-    if expression_type == "Column":
-        return expression == lazynwb.NWB_PATH_COLUMN_NAME
-    if expression_type == "Literal":
-        return True
-    if expression_type == "BinaryExpr":
-        return isinstance(expression, dict) and all(
-            _is_row_local_nwb_path_predicate_payload(expression.get(operand))
-            for operand in ("left", "right")
-        )
-    if expression_type == "Cast":
-        return isinstance(
-            expression, dict
-        ) and _is_row_local_nwb_path_predicate_payload(expression.get("expr"))
-    if expression_type == "Ternary":
-        return isinstance(expression, dict) and all(
-            _is_row_local_nwb_path_predicate_payload(expression.get(branch))
-            for branch in ("predicate", "truthy", "falsy")
-        )
-    if expression_type != "Function" or not isinstance(expression, dict):
-        return False
-
-    function_inputs = expression.get("input")
-    return (
-        isinstance(function_inputs, list)
-        and all(
-            _is_row_local_nwb_path_predicate_payload(function_input)
-            for function_input in function_inputs
-        )
-        and _is_row_local_nwb_path_function(expression.get("function"))
-    )
-
-
-def _is_row_local_nwb_path_function(function: object) -> bool:
-    if not isinstance(function, dict) or len(function) != 1:
-        return False
-    namespace, operation = next(iter(function.items()))
-    if isinstance(operation, dict) and len(operation) == 1:
-        operation_name = next(iter(operation))
-    elif isinstance(operation, str):
-        operation_name = operation
-    else:
-        return False
-
-    if namespace == "Boolean":
-        return operation_name in {
-            "IsFinite",
-            "IsIn",
-            "IsInfinite",
-            "IsNan",
-            "IsNotNan",
-            "IsNotNull",
-            "IsNull",
-            "Not",
-        }
-    if namespace == "StringExpr":
-        return operation_name in {
-            "Contains",
-            "EndsWith",
-            "LenBytes",
-            "LenChars",
-            "Lowercase",
-            "StartsWith",
-            "Uppercase",
-        }
-    return False
 
 
 def _split_conjunctive_predicate(predicate: pl.Expr) -> list[pl.Expr]:

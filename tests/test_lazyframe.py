@@ -162,7 +162,7 @@ def test_scan_nwb_predicate_pushdown(local_hdf5_path):
     assert len(filtered_internal_df) == len(lf.collect().filter(internal_expr)), "Filtered DataFrame length does not match length when collecting and filtering separately"
 
 
-def test_scan_nwb_path_predicate_prunes_files_before_materialization(
+def test_scan_nwb_derived_path_predicate_prunes_files_before_materialization(
     local_hdf5_paths: list[pathlib.Path],
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -174,6 +174,12 @@ def test_scan_nwb_path_predicate_prunes_files_before_materialization(
         disable_progress=True,
     )
     target_path = local_hdf5_paths[-1].resolve().as_posix()
+    session_id = (
+        pl.col(lazynwb.NWB_PATH_COLUMN_NAME)
+        .str.split("/")
+        .list.last()
+        .str.extract(r"test_hdf5_(\d+)\.nwb$", 1)
+    )
     materialized_path_sets: list[set[str]] = []
     original_get_df = lazynwb.tables.get_df
 
@@ -191,8 +197,7 @@ def test_scan_nwb_path_predicate_prunes_files_before_materialization(
 
     result = (
         lazy_frame.filter(
-            (pl.col(lazynwb.NWB_PATH_COLUMN_NAME) == target_path)
-            & (pl.col(lazynwb.TABLE_INDEX_COLUMN_NAME) > 1)
+            (session_id == "1") & (pl.col(lazynwb.TABLE_INDEX_COLUMN_NAME) > 1)
         )
         .head(2)
         .select(
