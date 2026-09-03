@@ -108,7 +108,8 @@ def _open_zarr(path: upath.UPath) -> zarr.Group:
     key = path.as_posix()
     if config.use_obstore and path.protocol and path.protocol != "file":
         store = obstore.store.from_url(
-            key.split("//")[-1].split("/")[0], **_get_obstore_storage_options()
+            key.split("//")[-1].split("/")[0],
+            **_get_obstore_storage_options(protocol=path.protocol),
         )
         logger.debug("opening remote Zarr store %s with obstore", key)
         return zarr.open(store, mode="r")
@@ -149,7 +150,10 @@ def _open_hdf5(
             )
     if use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
         file = obstore.fsspec.BufferedFile(
-            fs=obstore.fsspec.FsspecStore(path.protocol, **_get_obstore_storage_options()),  # type: ignore[call-overload]
+            fs=obstore.fsspec.FsspecStore(
+                path.protocol,
+                **_get_obstore_storage_options(protocol=path.protocol),
+            ),  # type: ignore[call-overload]
             path=path.as_posix(),
         )
     if file is None and path.protocol in ("http", "https"):
@@ -183,12 +187,15 @@ def _get_fsspec_storage_options() -> dict[str, Any]:
     )
 
 
-def _get_obstore_storage_options() -> dict[str, Any]:
+def _get_obstore_storage_options(*, protocol: str | None = None) -> dict[str, Any]:
     """Return normalized storage options for obstore-backed access."""
-    return lazynwb._storage_options._get_obstore_storage_options(
+    options = lazynwb._storage_options._get_obstore_storage_options(
         config.fsspec_storage_options,
         anon=config.anon,
     )
+    if protocol == "s3":
+        return lazynwb._storage_options._add_default_s3_credential_provider(options)
+    return options
 
 
 class FileAccessor:

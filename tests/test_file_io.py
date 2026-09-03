@@ -255,6 +255,30 @@ def test_obstore_storage_options_translate_anon_to_skip_signature() -> None:
     }
 
 
+def test_obstore_s3_storage_options_add_default_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = object()
+
+    def _add_provider(options: dict[str, object]) -> dict[str, object]:
+        return {**options, "credential_provider": provider}
+
+    monkeypatch.setattr(
+        lazynwb.file_io.lazynwb._storage_options,
+        "_add_default_s3_credential_provider",
+        _add_provider,
+    )
+    lazynwb.file_io.config.anon = False
+    lazynwb.file_io.config.fsspec_storage_options = {"region": "us-west-2"}
+
+    options = lazynwb.file_io._get_obstore_storage_options(protocol="s3")
+
+    assert options == {
+        "region": "us-west-2",
+        "credential_provider": provider,
+    }
+
+
 def test_obstore_storage_options_use_aws_region_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

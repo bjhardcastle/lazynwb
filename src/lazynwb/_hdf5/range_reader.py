@@ -662,6 +662,7 @@ def _clear_cache() -> None:
     _clear_obstore_store_cache()
     _clear_source_identity_cache()
     _clear_s3_region_cache()
+    lazynwb._storage_options._clear_default_s3_credential_provider()
 
 
 def _add_discovered_s3_region(

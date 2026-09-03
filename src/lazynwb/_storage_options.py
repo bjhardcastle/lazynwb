@@ -3,15 +3,35 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import typing
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from typing import Any
 
+if typing.TYPE_CHECKING:
+    import obstore.auth.boto3
+
 logger = logging.getLogger(__name__)
 
 _S3_REGION_CACHE: dict[str, str] = {}
 _S3_REGION_CACHE_LOCK = threading.RLock()
+_DEFAULT_S3_CREDENTIAL_PROVIDER_LOCK = threading.RLock()
+_DEFAULT_S3_CREDENTIAL_PROVIDER: obstore.auth.boto3.Boto3CredentialProvider | None = (
+    None
+)
+_EXPLICIT_S3_AUTH_OPTION_NAMES = frozenset(
+    {
+        "access_key_id",
+        "container_credentials_relative_uri",
+        "credential_provider",
+        "role_arn",
+        "secret_access_key",
+        "session_token",
+        "token",
+        "web_identity_token_file",
+    }
+)
 _CUSTOM_S3_ENDPOINT_OPTION_NAMES = frozenset(
     {
         "aws_endpoint",
@@ -93,12 +113,77 @@ def _get_obstore_range_reader_storage_options(
         include_aws_region=s3_bucket is not None,
     )
     if s3_bucket is not None:
-        return _add_discovered_s3_region(
+        options = _add_discovered_s3_region(
             bucket=s3_bucket,
             storage_options=options,
             discover_bucket_region=discover_bucket_region,
         )
+        return _add_default_s3_credential_provider(options)
     return options
+
+
+def _add_default_s3_credential_provider(
+    storage_options: dict[str, Any],
+) -> dict[str, Any]:
+    """Use boto3's complete credential chain for signed obstore S3 access."""
+    if bool(storage_options.get("skip_signature")) or _aws_skip_signature_from_env():
+        logger.debug(
+            "skipping default boto3 credential provider for unsigned obstore S3 access"
+        )
+        return storage_options
+    explicit_auth_options = sorted(
+        option for option in _EXPLICIT_S3_AUTH_OPTION_NAMES if option in storage_options
+    )
+    if explicit_auth_options:
+        logger.debug(
+            "preserving explicit obstore S3 authentication options: %s",
+            explicit_auth_options,
+        )
+        return storage_options
+    storage_options["credential_provider"] = _get_default_s3_credential_provider()
+    logger.debug(
+        "configured obstore S3 access with the default boto3 credential provider"
+    )
+    return storage_options
+
+
+def _get_default_s3_credential_provider() -> obstore.auth.boto3.Boto3CredentialProvider:
+    global _DEFAULT_S3_CREDENTIAL_PROVIDER
+    with _DEFAULT_S3_CREDENTIAL_PROVIDER_LOCK:
+        if _DEFAULT_S3_CREDENTIAL_PROVIDER is None:
+            _DEFAULT_S3_CREDENTIAL_PROVIDER = _create_default_s3_credential_provider()
+        else:
+            logger.debug("reusing cached default boto3 credential provider")
+        return _DEFAULT_S3_CREDENTIAL_PROVIDER
+
+
+def _create_default_s3_credential_provider() -> (
+    obstore.auth.boto3.Boto3CredentialProvider
+):
+    import boto3
+    import obstore.auth.boto3
+
+    logger.debug("creating default boto3 session for obstore S3 authentication")
+    session = boto3.Session()
+    provider = obstore.auth.boto3.Boto3CredentialProvider(session)
+    logger.debug(
+        "created default boto3 credential provider (method=%r, region=%r)",
+        getattr(provider.credentials, "method", None),
+        session.region_name,
+    )
+    return provider
+
+
+def _aws_skip_signature_from_env() -> bool:
+    value = os.getenv("AWS_SKIP_SIGNATURE")
+    return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _clear_default_s3_credential_provider() -> None:
+    global _DEFAULT_S3_CREDENTIAL_PROVIDER
+    with _DEFAULT_S3_CREDENTIAL_PROVIDER_LOCK:
+        logger.debug("clearing cached default boto3 credential provider")
+        _DEFAULT_S3_CREDENTIAL_PROVIDER = None
 
 
 def _add_configured_aws_region(storage_options: dict[str, Any]) -> None:

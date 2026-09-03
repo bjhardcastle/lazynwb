@@ -297,6 +297,151 @@ def test_obstore_store_cache_reuses_store_for_same_bucket_options(
         hdf5_range_reader._clear_obstore_store_cache()
 
 
+def test_signed_s3_store_uses_default_boto3_credential_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = object()
+    calls: list[tuple[str, dict[str, object]]] = []
+    hdf5_range_reader._clear_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append((store_url, kwargs))
+        return object()
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(
+        storage_options,
+        "_create_default_s3_credential_provider",
+        lambda: provider,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+
+    try:
+        hdf5_range_reader._store_and_path_from_url(
+            "s3://private-bucket/example.nwb",
+            hdf5_range_reader._RangeReaderConfig(),
+        )
+
+        assert len(calls) == 1
+        assert calls[0][1]["credential_provider"] is provider
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_unsigned_s3_store_does_not_create_boto3_credential_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    hdf5_range_reader._clear_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return object()
+
+    def _fail_provider_creation() -> object:
+        raise AssertionError("unsigned S3 access must not resolve credentials")
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(
+        storage_options,
+        "_create_default_s3_credential_provider",
+        _fail_provider_creation,
+    )
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+
+    try:
+        hdf5_range_reader._store_and_path_from_url(
+            "s3://public-bucket/example.nwb",
+            hdf5_range_reader._RangeReaderConfig(
+                storage_options={"skip_signature": True}
+            ),
+        )
+
+        assert len(calls) == 1
+        assert calls[0]["skip_signature"] is True
+        assert "credential_provider" not in calls[0]
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_explicit_s3_credential_provider_overrides_boto3_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    explicit_provider = object()
+    calls: list[dict[str, object]] = []
+    hdf5_range_reader._clear_cache()
+
+    def _fake_from_url(store_url: str, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return object()
+
+    def _fail_provider_creation() -> object:
+        raise AssertionError("explicit S3 credentials must take precedence")
+
+    monkeypatch.setattr(hdf5_range_reader.obstore.store, "from_url", _fake_from_url)
+    monkeypatch.setattr(
+        storage_options,
+        "_create_default_s3_credential_provider",
+        _fail_provider_creation,
+    )
+    monkeypatch.setattr(
+        storage_options,
+        "_discover_s3_bucket_region",
+        lambda bucket: "us-west-2",
+    )
+
+    try:
+        hdf5_range_reader._store_and_path_from_url(
+            "s3://private-bucket/example.nwb",
+            hdf5_range_reader._RangeReaderConfig(
+                storage_options={"credential_provider": explicit_provider}
+            ),
+        )
+
+        assert len(calls) == 1
+        assert calls[0]["credential_provider"] is explicit_provider
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_default_boto3_credential_provider_is_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = object()
+    creation_count = 0
+    hdf5_range_reader._clear_cache()
+
+    def _create_provider() -> object:
+        nonlocal creation_count
+        creation_count += 1
+        return provider
+
+    monkeypatch.setattr(
+        storage_options,
+        "_create_default_s3_credential_provider",
+        _create_provider,
+    )
+
+    try:
+        first_options = storage_options._add_default_s3_credential_provider({})
+        second_options = storage_options._add_default_s3_credential_provider({})
+
+        assert first_options["credential_provider"] is provider
+        assert second_options["credential_provider"] is provider
+        assert creation_count == 1
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
 def test_https_s3_virtual_host_uses_bucket_region_discovery(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,

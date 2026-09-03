@@ -487,6 +487,12 @@ config.fsspec_storage_options = {"request_payer": True}  # backend-specific extr
 config.disable_cache = False                      # disable persistent SQLite catalog caching (default: False)
 ```
 
+Signed S3 access through obstore uses a cached boto3 session by default. This
+keeps AWS environment variables, shared profiles, SSO, `credential_process`,
+and role-based credentials consistent with boto3/s3fs. Set `config.anon = True`
+for public buckets; an explicitly configured `credential_provider` or static
+credentials still takes precedence over the default boto3 session.
+
 For normal AWS S3 buckets, the region belongs to the bucket, not the caller's
 current AWS session. The fast HDF5 range reader discovers and caches bucket
 regions per bucket, so avoid setting a generic `{"region": "..."}` for workflows
