@@ -1,5 +1,6 @@
 import logging
 import pathlib
+import shutil
 import tempfile
 import typing
 import uuid
@@ -214,6 +215,45 @@ def test_scan_nwb_derived_path_predicate_prunes_files_before_materialization(
     assert materialized_path_sets
     assert all(paths == {target_path} for paths in materialized_path_sets)
     assert "Pruned 1 of 2 NWB source files using" in caplog.text
+
+
+def test_scan_nwb_path_filter_null_fills_columns_missing_from_selected_file(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    target_path = tmp_path / "target_without_notes.nwb"
+    other_path = tmp_path / "other_with_notes.nwb"
+    shutil.copyfile(local_hdf5_path, target_path)
+    shutil.copyfile(local_hdf5_path, other_path)
+    with h5py.File(other_path, "r+") as h5_file:
+        h5_file["general"].create_dataset("notes", data="only present in other file")
+
+    target_url = target_path.as_uri()
+    df = (
+        lazynwb.scan_nwb(
+            [target_url, other_path.as_uri()],
+            table_path="session",
+            disable_progress=True,
+        )
+        .filter(pl.col(lazynwb.NWB_PATH_COLUMN_NAME).str.contains(target_path.name))
+        .collect()
+    )
+
+    assert df[lazynwb.NWB_PATH_COLUMN_NAME].to_list() == [target_url]
+    assert df["notes"].to_list() == [None]
+
+    projected = (
+        lazynwb.scan_nwb(
+            [target_url, other_path.as_uri()],
+            table_path="session",
+            disable_progress=True,
+        )
+        .filter(pl.col(lazynwb.NWB_PATH_COLUMN_NAME).str.contains(target_path.name))
+        .select("notes")
+        .collect()
+    )
+
+    assert projected["notes"].to_list() == [None]
 
 
 def test_scan_nwb_unmatched_path_predicate_skips_materialization(

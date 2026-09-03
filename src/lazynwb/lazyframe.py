@@ -20,6 +20,48 @@ logger = logging.getLogger(__name__)
 _POLARS_DYNAMIC_PREDICATE_TOKEN = "dynamic_pred"
 
 
+def _align_frame_to_schema(
+    df: pl.DataFrame,
+    schema: polars._typing.SchemaDict,
+    output_columns: Iterable[str],
+    table_path: str,
+) -> pl.DataFrame:
+    """Align requested DataFrame columns to the merged scan schema."""
+    output_columns = tuple(output_columns)
+    missing_columns = tuple(
+        column for column in output_columns if column not in df.columns
+    )
+    cast_columns = tuple(
+        column
+        for column in output_columns
+        if column in df.columns
+        and column in schema
+        and df.schema[column] != schema[column]
+    )
+    if missing_columns:
+        logger.debug(
+            "Null-filling %d columns absent from the materialized %r frame: %s",
+            len(missing_columns),
+            table_path,
+            missing_columns,
+        )
+    if cast_columns:
+        logger.debug(
+            "Casting %d materialized %r columns to the merged scan schema: %s",
+            len(cast_columns),
+            table_path,
+            cast_columns,
+        )
+    expressions = (
+        *(pl.lit(None, dtype=schema[column]).alias(column) for column in missing_columns),
+        *(
+            pl.col(column).cast(schema[column], strict=False)
+            for column in cast_columns
+        ),
+    )
+    return df.with_columns(expressions) if expressions else df
+
+
 def scan_nwb(
     source: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     table_path: str,
@@ -95,22 +137,6 @@ def scan_nwb(
     schema = pl.Schema(schema) | pl.Schema(
         schema_overrides or {}
     )  # create new object to avoid mutating the original schema
-
-    def _apply_schema(
-        df: pl.DataFrame,
-        schema: polars._typing.SchemaDict,
-    ) -> pl.DataFrame:
-        """
-        Apply the schema to the DataFrame, converting columns to the specified types.
-        Uses strict=False so that NaN values in float columns cast to a nullable integer
-        schema become null rather than raising an error (e.g. brain_region_id stored as
-        f64 with NaN in some files, i64 in others).
-        """
-        return df.with_columns(
-            pl.col(col).cast(schema[col], strict=False)
-            for col in df.columns
-            if col in schema and df.schema[col] != schema[col]
-        )
 
     def source_generator(
         with_columns: list[str] | None,
@@ -237,6 +263,7 @@ def scan_nwb(
             ),
             low_memory=low_memory,
             _catalog_snapshots=scan_catalog_snapshots,
+            _allow_missing_columns=True,
         )
 
         if predicate is None:
@@ -244,7 +271,13 @@ def scan_nwb(
                 f"Yielding {table_path!r} df with {df.height} rows and {df.width} columns"
             )
 
-            df = _apply_schema(df, schema=schema).select(with_columns or schema.keys())
+            output_columns = with_columns or schema.keys()
+            df = _align_frame_to_schema(
+                df,
+                schema=schema,
+                output_columns=output_columns,
+                table_path=table_path,
+            ).select(output_columns)
             yield df[:n_rows] if n_rows is not None and n_rows < df.height else df
 
         else:
@@ -262,9 +295,13 @@ def scan_nwb(
             if not n_rows:
                 n_rows = len(filtered_df)
             if not include_column_names:
-                result_df = _apply_schema(filtered_df, schema=schema).select(
-                    with_columns or schema.keys()
-                )
+                output_columns = with_columns or schema.keys()
+                result_df = _align_frame_to_schema(
+                    filtered_df,
+                    schema=schema,
+                    output_columns=output_columns,
+                    table_path=table_path,
+                ).select(output_columns)
                 yield (
                     result_df[:n_rows]
                     if n_rows is not None and n_rows < result_df.height
@@ -276,8 +313,9 @@ def scan_nwb(
                 nwb_path_to_row_indices = lazynwb.tables._get_path_to_row_indices(
                     filtered_df[i : min(i + batch_size, n_rows)]
                 )
+                output_columns = with_columns or schema.keys()
                 yield (
-                    _apply_schema(
+                    _align_frame_to_schema(
                         filtered_df.join(
                             other=(
                                 lazynwb.tables.get_df(
@@ -292,6 +330,7 @@ def scan_nwb(
                                     ignore_errors=ignore_errors,
                                     low_memory=low_memory,
                                     _catalog_snapshots=scan_catalog_snapshots,
+                                    _allow_missing_columns=True,
                                 )
                             ),
                             on=[
@@ -302,9 +341,11 @@ def scan_nwb(
                             how="inner",
                         ),
                         schema=schema,
-                    ).select(
-                        with_columns or schema.keys()
-                    )  # internals paths are returned if either i) they're explicitly requested, ii) no columns are explicitly requested
+                        output_columns=output_columns,
+                        table_path=table_path,
+                    ).select(output_columns)
+                    # internal paths are returned if either i) they're explicitly requested,
+                    # ii) no columns are explicitly requested
                 )
                 i += batch_size
 

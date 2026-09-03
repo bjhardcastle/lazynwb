@@ -122,6 +122,7 @@ def get_df(
         catalog_models._TableSchemaSnapshot,
     ]
     | None = None,
+    _allow_missing_columns: bool = False,
 ) -> pd.DataFrame | pl.DataFrame: ...
 
 
@@ -148,6 +149,7 @@ def get_df(
         catalog_models._TableSchemaSnapshot,
     ]
     | None = None,
+    _allow_missing_columns: bool = False,
 ) -> pd.DataFrame: ...
 
 
@@ -172,6 +174,7 @@ def get_df(
         catalog_models._TableSchemaSnapshot,
     ]
     | None = None,
+    _allow_missing_columns: bool = False,
 ) -> pl.DataFrame: ...
 
 
@@ -198,6 +201,7 @@ def get_df(
         catalog_models._TableSchemaSnapshot,
     ]
     | None = None,
+    _allow_missing_columns: bool = False,
 ) -> pd.DataFrame | pl.DataFrame: ...
 
 
@@ -223,6 +227,7 @@ def get_df(
         catalog_models._TableSchemaSnapshot,
     ]
     | None = None,
+    _allow_missing_columns: bool = False,
 ) -> pd.DataFrame | pl.DataFrame:
     """ ""Get a DataFrame from one or more NWB files.
 
@@ -310,6 +315,7 @@ def get_df(
                     ),
                     low_memory=low_memory,
                     as_polars=as_polars,
+                    allow_missing_columns=_allow_missing_columns,
                 )
             )
     else:
@@ -343,6 +349,7 @@ def get_df(
                 ),
                 low_memory=low_memory,
                 as_polars=as_polars,
+                allow_missing_columns=_allow_missing_columns,
             )
             future_to_path[future] = path
         futures = concurrent.futures.as_completed(future_to_path)
@@ -1056,6 +1063,7 @@ def _get_fast_table_data_if_available(
     catalog_snapshot: catalog_models._TableSchemaSnapshot | None,
     low_memory: bool,
     as_polars: bool,
+    allow_missing_columns: bool,
 ) -> dict[str, Any] | None:
     if catalog_snapshot is not None and catalog_snapshot.table_path == exact_table_path:
         snapshot = catalog_snapshot
@@ -1137,6 +1145,7 @@ def _get_fast_table_data_if_available(
         as_polars=as_polars,
         table_length_from_metadata=snapshot.table_length,
         prefetched_column_data=direct_column_data,
+        allow_missing_columns=allow_missing_columns,
     )
 
 
@@ -1155,6 +1164,7 @@ def _materialize_table_data_from_columns(  # noqa: C901
     as_polars: bool,
     table_length_from_metadata: int | None = None,
     prefetched_column_data: Mapping[str, Any] | None = None,
+    allow_missing_columns: bool = False,
 ) -> dict[str, Any]:
     all_columns = tuple(all_columns)
     selected_columns = tuple(selected_columns)
@@ -1290,7 +1300,16 @@ def _materialize_table_data_from_columns(  # noqa: C901
     if is_metadata_table:
         column_data = {k: [v] for k, v in column_data.items() if v is not None}
 
-    if only_internal_columns_requested:
+    if only_internal_columns_requested or (
+        allow_missing_columns and include_column_names is not None and not column_data
+    ):
+        if allow_missing_columns and not only_internal_columns_requested:
+            logger.debug(
+                "No requested raw columns exist in %s/%s; emitting identifier-only "
+                "rows for scan schema alignment",
+                log_source_path,
+                normalized_table_path,
+            )
         if table_length is None:
             table_length = lazynwb.table_metadata.get_table_length_from_metadata(
                 typing.cast(
@@ -1333,6 +1352,7 @@ def _get_table_data(
     catalog_snapshot: catalog_models._TableSchemaSnapshot | None = None,
     low_memory: bool = False,
     as_polars: bool = False,
+    allow_missing_columns: bool = False,
 ) -> dict[str, Any]:
     t0 = time.time()
     normalized_search_term = lazynwb.utils.normalize_internal_file_path(search_term)
@@ -1351,6 +1371,7 @@ def _get_table_data(
             catalog_snapshot=catalog_snapshot,
             low_memory=low_memory,
             as_polars=as_polars,
+            allow_missing_columns=allow_missing_columns,
         )
         if fast_data is not None:
             logger.debug(
@@ -1410,6 +1431,7 @@ def _get_table_data(
         exclude_array_columns=exclude_array_columns,
         low_memory=low_memory,
         as_polars=as_polars,
+        allow_missing_columns=allow_missing_columns,
     )
     logger.debug(
         "fetched data for %s/%s via accessor materialization in %.2f s",
