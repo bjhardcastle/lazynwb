@@ -4,7 +4,7 @@ import functools
 import json
 import logging
 import operator
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 
 import polars as pl
 import polars._typing
@@ -62,7 +62,7 @@ def _align_frame_to_schema(
     return df.with_columns(expressions) if expressions else df
 
 
-def scan_nwb(
+def scan_nwb(  # noqa: C901
     source: lazynwb.types_.PathLike | Iterable[lazynwb.types_.PathLike],
     table_path: str,
     raise_on_missing: bool = False,
@@ -99,10 +99,11 @@ def scan_nwb(
     infer_schema_length : int, None, default None
         The number of files to read to infer the table schema. If None, all files will be read.
     exclude_array_columns : bool, default False
-        If True, columns containing list or array-like data will be excluded from the schema and any
-        resulting DataFrame.
+        If True, columns containing list or array-like data will be excluded from the schema
+        and any resulting DataFrame.
     low_memory : bool, default False
-        If True, the data will be read in smaller chunks to reduce memory usage, at the cost of speed.
+        If True, the data will be read in smaller chunks to reduce memory usage, at the cost
+        of speed.
     schema : dict[str, pl.DataType], default None
         User-defined schema for the table. If None, the schema will be generated using the stored
         dtypes for columns in each file. Conflicts are signalled to the user via a warning.
@@ -138,7 +139,7 @@ def scan_nwb(
         schema_overrides or {}
     )  # create new object to avoid mutating the original schema
 
-    def source_generator(
+    def source_generator(  # noqa: C901
         with_columns: list[str] | None,
         predicate: pl.Expr | None,
         n_rows: int | None,
@@ -152,17 +153,21 @@ def scan_nwb(
         Work is split into multiple parts if we have a predicate:
         1) fetch all data for columns in the predicate,
         2) filter the data with the predicate,
-        3) join with values from the remaining columns in with_columns, by reading only the relevant files/rows.
+        3) join with values from the remaining columns in with_columns, reading only the
+           relevant files and rows.
 
         Without a predicate, we fetch all data for all columns.
         """
         if batch_size is None:
             batch_size = 1_000
             logger.debug(
-                f"Batch size not specified: using default of {batch_size} rows per batch"
+                "Batch size not specified: using default of %d rows per batch",
+                batch_size,
             )
         else:
-            logger.debug(f"Batch size set to {batch_size} rows per batch")
+            logger.debug("Batch size set to %d rows per batch", batch_size)
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {batch_size}")
 
         predicate, dynamic_predicate_count = _remove_polars_dynamic_predicates(
             predicate
@@ -181,16 +186,20 @@ def scan_nwb(
         )
 
         if predicate is not None:
-            # - if we have a predicate, we'll fetch the minimal df, apply predicate, then fetch remaining columns in with_columns
+            # Fetch predicate columns, apply the predicate, then fetch remaining columns.
             initial_columns = predicate.meta.root_names()
             logger.debug(
-                f"Predicate specified: fetching initial columns in {table_path!r}: {initial_columns}"
+                "Predicate specified: fetching initial columns in %r: %s",
+                table_path,
+                initial_columns,
             )
         else:
             # - if we don't have a predicate, we'll fetch all required columns in the initial df
             initial_columns = with_columns or []
             logger.debug(
-                f"Predicate not specified: fetching all requested columns in {table_path!r} ({initial_columns})"
+                "Predicate not specified: fetching all requested columns in %r: %s",
+                table_path,
+                initial_columns,
             )
 
         if not predicate_filtered_source:
@@ -203,151 +212,145 @@ def scan_nwb(
             yield pl.DataFrame(schema=schema).select(with_columns or schema.keys())
             return
 
-        # TODO use batch_size
-        if n_rows and len(predicate_filtered_source) > 1:
-            sum_rows = 0
-            for idx, file in enumerate(predicate_filtered_source):
-                try:
-                    sum_rows += lazynwb.tables._get_table_length(
-                        file,
-                        table_path,
-                        catalog_snapshot=scan_catalog_snapshots.get(
-                            lazynwb.tables._catalog_snapshot_key(file)
-                        ),
-                    )
-                except KeyError:
-                    continue
-                if sum_rows >= n_rows:
-                    break
-            filtered_files = predicate_filtered_source[: idx + 1]
-            logger.debug(
-                "Limiting files to %d of %d based on n_rows=%d",
-                len(filtered_files),
-                len(predicate_filtered_source),
-                n_rows,
-            )
+        output_columns = tuple(with_columns or schema.keys())
+        if predicate is None:
+            include_column_names: set[str] = set()
         else:
-            filtered_files = predicate_filtered_source
-        nwb_path_to_row_indices = None
-        nwb_data_sources = filtered_files
-        if predicate is None and n_rows is not None:
-            nwb_path_to_row_indices = _get_limited_path_to_row_indices(
-                source=filtered_files,
-                table_path=table_path,
-                n_rows=n_rows,
-                catalog_snapshots=scan_catalog_snapshots,
-            )
-            nwb_data_sources = tuple(nwb_path_to_row_indices)
+            include_column_names = set(output_columns) - set(initial_columns)
             logger.debug(
-                "Limiting initial %r materialization to %d rows across %d files",
+                "Fetching additional columns from %r after predicate filtering: %s",
                 table_path,
-                n_rows,
+                sorted(include_column_names),
+            )
+
+        input_row_limit = n_rows if predicate is None else None
+        output_rows_yielded = 0
+        for batch_index, nwb_path_to_row_indices in enumerate(
+            _iter_path_to_row_index_batches(
+                source=predicate_filtered_source,
+                table_path=table_path,
+                batch_size=batch_size,
+                n_rows=input_row_limit,
+                catalog_snapshots=scan_catalog_snapshots,
+                ignore_errors=ignore_errors,
+            ),
+            start=1,
+        ):
+            requested_row_count = sum(
+                len(row_indices) for row_indices in nwb_path_to_row_indices.values()
+            )
+            logger.debug(
+                "Fetching %r input batch %d with %d rows from %d NWB sources",
+                table_path,
+                batch_index,
+                requested_row_count,
                 len(nwb_path_to_row_indices),
             )
-
-        df = lazynwb.tables.get_df(
-            nwb_data_sources=nwb_data_sources,
-            search_term=table_path,
-            exact_path=True,
-            include_column_names=initial_columns or None,
-            nwb_path_to_row_indices=nwb_path_to_row_indices,
-            disable_progress=disable_progress,
-            ignore_errors=ignore_errors,
-            as_polars=True,
-            exclude_array_columns=(
-                False
-                if initial_columns
-                else exclude_array_columns
-                # if array columns were requested specifically, they will be returned regardless of
-                # this setting. Otherwise, use the user setting.
-            ),
-            low_memory=low_memory,
-            _catalog_snapshots=scan_catalog_snapshots,
-            _allow_missing_columns=True,
-        )
-
-        if predicate is None:
-            logger.debug(
-                f"Yielding {table_path!r} df with {df.height} rows and {df.width} columns"
+            initial_df = lazynwb.tables.get_df(
+                nwb_data_sources=nwb_path_to_row_indices.keys(),
+                search_term=table_path,
+                exact_path=True,
+                include_column_names=initial_columns or None,
+                nwb_path_to_row_indices=nwb_path_to_row_indices,
+                disable_progress=disable_progress,
+                ignore_errors=ignore_errors,
+                as_polars=True,
+                exclude_array_columns=(
+                    False
+                    if initial_columns
+                    else exclude_array_columns
+                    # Explicitly requested array columns override the exclusion setting.
+                ),
+                low_memory=low_memory,
+                _catalog_snapshots=scan_catalog_snapshots,
+                _allow_missing_columns=True,
+            )
+            initial_df = _order_frame_by_source(
+                initial_df,
+                source_paths=nwb_path_to_row_indices,
             )
 
-            output_columns = with_columns or schema.keys()
-            df = _align_frame_to_schema(
-                df,
+            if predicate is None:
+                result_df = initial_df
+            else:
+                result_df = initial_df.filter(predicate)
+                logger.debug(
+                    "Filtered %r input batch %d from %d to %d rows",
+                    table_path,
+                    batch_index,
+                    initial_df.height,
+                    result_df.height,
+                )
+                if result_df.is_empty():
+                    continue
+
+                if n_rows is not None:
+                    remaining_output_rows = n_rows - output_rows_yielded
+                    if remaining_output_rows <= 0:
+                        break
+                    result_df = result_df.head(remaining_output_rows)
+
+                if include_column_names:
+                    filtered_path_to_row_indices = (
+                        lazynwb.tables._get_path_to_row_indices(result_df)
+                    )
+                    logger.debug(
+                        "Fetching %d projected columns for %d rows in %r output batch %d",
+                        len(include_column_names),
+                        result_df.height,
+                        table_path,
+                        batch_index,
+                    )
+                    additional_df = lazynwb.tables.get_df(
+                        nwb_data_sources=filtered_path_to_row_indices.keys(),
+                        search_term=table_path,
+                        exact_path=True,
+                        include_column_names=include_column_names,
+                        nwb_path_to_row_indices=filtered_path_to_row_indices,
+                        disable_progress=disable_progress,
+                        use_process_pool=False,
+                        as_polars=True,
+                        ignore_errors=ignore_errors,
+                        low_memory=low_memory,
+                        _catalog_snapshots=scan_catalog_snapshots,
+                        _allow_missing_columns=True,
+                    )
+                    result_df = result_df.join(
+                        other=additional_df,
+                        on=[
+                            lazynwb.NWB_PATH_COLUMN_NAME,
+                            lazynwb.TABLE_PATH_COLUMN_NAME,
+                            lazynwb.TABLE_INDEX_COLUMN_NAME,
+                        ],
+                        how="inner",
+                    )
+
+            result_df = _align_frame_to_schema(
+                result_df,
                 schema=schema,
                 output_columns=output_columns,
                 table_path=table_path,
             ).select(output_columns)
-            yield df[:n_rows] if n_rows is not None and n_rows < df.height else df
+            if result_df.is_empty():
+                continue
 
-        else:
-            filtered_df = df.filter(predicate)
             logger.debug(
-                f"Initial {table_path!r} df filtered with predicate: {df.height} rows reduced to {filtered_df.height}"
+                "Yielding %r output batch %d with %d rows and %d columns",
+                table_path,
+                batch_index,
+                result_df.height,
+                result_df.width,
             )
-            if with_columns:
-                include_column_names = set(with_columns) - set(initial_columns)
-            else:
-                include_column_names = set(schema.keys()) - set(initial_columns)
-            logger.debug(
-                f"Fetching additional columns from {table_path!r}: {sorted(include_column_names)}"
-            )
-            if not n_rows:
-                n_rows = len(filtered_df)
-            if not include_column_names:
-                output_columns = with_columns or schema.keys()
-                result_df = _align_frame_to_schema(
-                    filtered_df,
-                    schema=schema,
-                    output_columns=output_columns,
-                    table_path=table_path,
-                ).select(output_columns)
-                yield (
-                    result_df[:n_rows]
-                    if n_rows is not None and n_rows < result_df.height
-                    else result_df
+            output_rows_yielded += result_df.height
+            yield result_df
+
+            if n_rows is not None and output_rows_yielded >= n_rows:
+                logger.debug(
+                    "Stopped %r materialization after satisfying n_rows=%d",
+                    table_path,
+                    n_rows,
                 )
-                return
-            i = 0
-            while i < n_rows:
-                nwb_path_to_row_indices = lazynwb.tables._get_path_to_row_indices(
-                    filtered_df[i : min(i + batch_size, n_rows)]
-                )
-                output_columns = with_columns or schema.keys()
-                yield (
-                    _align_frame_to_schema(
-                        filtered_df.join(
-                            other=(
-                                lazynwb.tables.get_df(
-                                    nwb_data_sources=nwb_path_to_row_indices.keys(),
-                                    search_term=table_path,
-                                    exact_path=True,
-                                    include_column_names=include_column_names,
-                                    nwb_path_to_row_indices=nwb_path_to_row_indices,
-                                    disable_progress=disable_progress,
-                                    use_process_pool=False,  # no speed gain, cannot use from top-level of scripts
-                                    as_polars=True,
-                                    ignore_errors=ignore_errors,
-                                    low_memory=low_memory,
-                                    _catalog_snapshots=scan_catalog_snapshots,
-                                    _allow_missing_columns=True,
-                                )
-                            ),
-                            on=[
-                                lazynwb.NWB_PATH_COLUMN_NAME,
-                                lazynwb.TABLE_PATH_COLUMN_NAME,
-                                lazynwb.TABLE_INDEX_COLUMN_NAME,
-                            ],
-                            how="inner",
-                        ),
-                        schema=schema,
-                        output_columns=output_columns,
-                        table_path=table_path,
-                    ).select(output_columns)
-                    # internal paths are returned if either i) they're explicitly requested,
-                    # ii) no columns are explicitly requested
-                )
-                i += batch_size
+                break
 
     return polars.io.plugins.register_io_source(
         io_source=source_generator, schema=schema
@@ -547,20 +550,28 @@ def _is_polars_panic_exception(exc: BaseException) -> bool:
     return type(exc).__name__ == "PanicException"
 
 
-def _get_limited_path_to_row_indices(
+def _iter_path_to_row_index_batches(  # noqa: C901
     source: Iterable[lazynwb.types_.PathLike],
     table_path: str,
-    n_rows: int,
-    catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
-) -> dict[str, list[int]]:
+    batch_size: int,
+    n_rows: int | None,
+    catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
+    ignore_errors: bool = False,
+) -> Iterator[dict[str, Sequence[int]]]:
+    """Yield bounded, source-ordered table row selections."""
     remaining_rows = n_rows
-    path_to_row_indices: dict[str, list[int]] = {}
+    path_to_row_indices: dict[str, Sequence[int]] = {}
+    rows_in_batch = 0
+    table_found = False
+    missing_table_error: KeyError | None = None
     for file in source:
-        if remaining_rows <= 0:
+        if remaining_rows is not None and remaining_rows <= 0:
             break
         try:
             table_length = lazynwb.tables._get_table_length(
@@ -572,15 +583,79 @@ def _get_limited_path_to_row_indices(
                     else None
                 ),
             )
-        except KeyError:
+        except KeyError as exc:
+            logger.debug("Skipping %r because table %r is missing", file, table_path)
+            missing_table_error = exc
             continue
-        row_count = min(remaining_rows, table_length)
-        if row_count > 0:
-            path_to_row_indices[
-                lazynwb.file_io.from_pathlike(file).as_posix()
-            ] = list(range(row_count))
-        remaining_rows -= row_count
-    return path_to_row_indices
+        except Exception:
+            if not ignore_errors:
+                raise
+            logger.debug(
+                "Skipping %r after table-length lookup failed for %r",
+                file,
+                table_path,
+                exc_info=True,
+            )
+            continue
+
+        table_found = True
+        source_path = lazynwb.file_io.from_pathlike(file).as_posix()
+        if source_path in path_to_row_indices:
+            logger.debug(
+                "Yielding an early %r batch to preserve duplicate source %r",
+                table_path,
+                source_path,
+            )
+            yield path_to_row_indices
+            path_to_row_indices = {}
+            rows_in_batch = 0
+
+        row_start = 0
+        while row_start < table_length:
+            if remaining_rows is not None and remaining_rows <= 0:
+                break
+            available_rows = table_length - row_start
+            available_batch_rows = batch_size - rows_in_batch
+            row_count = min(available_rows, available_batch_rows)
+            if remaining_rows is not None:
+                row_count = min(row_count, remaining_rows)
+            row_stop = row_start + row_count
+            path_to_row_indices[source_path] = list(range(row_start, row_stop))
+            rows_in_batch += row_count
+            row_start = row_stop
+            if remaining_rows is not None:
+                remaining_rows -= row_count
+
+            if rows_in_batch == batch_size:
+                yield path_to_row_indices
+                path_to_row_indices = {}
+                rows_in_batch = 0
+
+    if path_to_row_indices:
+        yield path_to_row_indices
+    if not table_found and missing_table_error is not None:
+        raise missing_table_error
+
+
+def _order_frame_by_source(
+    df: pl.DataFrame,
+    source_paths: Iterable[str],
+) -> pl.DataFrame:
+    """Restore source order after parallel multi-file materialization."""
+    source_paths = tuple(source_paths)
+    if len(source_paths) < 2 or df.is_empty():
+        return df
+    source_order = {
+        lazynwb.tables._source_path_strings(path)[0]: index
+        for index, path in enumerate(source_paths)
+    }
+    return df.sort(
+        pl.col(lazynwb.NWB_PATH_COLUMN_NAME).replace_strict(
+            source_order,
+            return_dtype=pl.UInt32,
+        ),
+        pl.col(lazynwb.TABLE_INDEX_COLUMN_NAME),
+    )
 
 
 def read_nwb(
@@ -616,10 +691,11 @@ def read_nwb(
     infer_schema_length : int, None, default None
         The number of files to read to infer the table schema. If None, all files will be read.
     exclude_array_columns : bool, default False
-        If True, columns containing list or array-like data will be excluded from the schema and any
-        resulting DataFrame.
+        If True, columns containing list or array-like data will be excluded from the schema
+        and any resulting DataFrame.
     low_memory : bool, default False
-        If True, the data will be read in smaller chunks to reduce memory usage, at the cost of speed.
+        If True, the data will be read in smaller chunks to reduce memory usage, at the cost
+        of speed.
     schema : dict[str, pl.DataType], default None
         User-defined schema for the table. If None, the schema will be generated using the stored
         dtypes for columns in each file. Conflicts are signalled to the user via a warning.

@@ -16,6 +16,56 @@ import lazynwb
 import lazynwb.tables
 
 
+def _capture_scan_io_source(
+    monkeypatch: pytest.MonkeyPatch,
+    source: list[pathlib.Path],
+) -> typing.Callable[..., typing.Iterator[pl.DataFrame]]:
+    registered_source: dict[
+        str, typing.Callable[..., typing.Iterator[pl.DataFrame]]
+    ] = {}
+
+    def _capture_io_source(
+        *,
+        io_source: typing.Callable[..., typing.Iterator[pl.DataFrame]],
+        schema: object,
+    ) -> pl.LazyFrame:
+        registered_source["io_source"] = io_source
+        return pl.LazyFrame(schema=schema)
+
+    monkeypatch.setattr(
+        "polars.io.plugins.register_io_source",
+        _capture_io_source,
+    )
+    lazynwb.scan_nwb(
+        source=source,
+        table_path="/intervals/trials",
+        disable_progress=True,
+    )
+    return registered_source["io_source"]
+
+
+def _record_row_batch_fetches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[dict[str, list[int]] | None]:
+    requested_row_batches: list[dict[str, list[int]] | None] = []
+    original_get_df = lazynwb.tables.get_df
+
+    def _recording_get_df(*args: object, **kwargs: object) -> object:
+        row_indices = typing.cast(
+            typing.Mapping[str, typing.Sequence[int]] | None,
+            kwargs.get("nwb_path_to_row_indices"),
+        )
+        requested_row_batches.append(
+            None
+            if row_indices is None
+            else {path: list(indices) for path, indices in row_indices.items()}
+        )
+        return original_get_df(*args, **kwargs)
+
+    monkeypatch.setattr(lazynwb.tables, "get_df", _recording_get_df)
+    return requested_row_batches
+
+
 def test_polars_dtype_inference(local_hdf5_path):
     schema = lazynwb.tables.get_table_schema(
         local_hdf5_path,
@@ -52,6 +102,86 @@ def test_scan_nwb_sources(nwb_fixture_name, request):
     # Test that all expected internal columns are present
     for col in lazynwb.INTERNAL_COLUMN_NAMES:
         assert col in df.columns, f"Internal column {col!r} not found"
+
+
+@pytest.mark.parametrize(
+    ("n_rows", "expected_batch_sizes"),
+    [(None, [4, 4, 4]), (7, [4, 3])],
+)
+def test_scan_nwb_fetches_unfiltered_rows_in_requested_batches(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+    n_rows: int | None,
+    expected_batch_sizes: list[int],
+) -> None:
+    io_source = _capture_scan_io_source(monkeypatch, local_hdf5_paths)
+    requested_row_batches = _record_row_batch_fetches(monkeypatch)
+    batches = list(
+        io_source(
+            with_columns=[
+                lazynwb.NWB_PATH_COLUMN_NAME,
+                lazynwb.TABLE_INDEX_COLUMN_NAME,
+                "condition",
+            ],
+            predicate=None,
+            n_rows=n_rows,
+            batch_size=4,
+        )
+    )
+
+    assert [batch.height for batch in batches] == expected_batch_sizes
+    assert all(row_batch is not None for row_batch in requested_row_batches)
+    assert [
+        sum(
+            len(indices)
+            for indices in typing.cast(dict[str, list[int]], row_batch).values()
+        )
+        for row_batch in requested_row_batches
+    ] == expected_batch_sizes
+
+    result = pl.concat(batches)
+    expected_indices = [*range(6), *range(6)]
+    expected_paths = [
+        *(local_hdf5_paths[0].resolve().as_posix() for _ in range(6)),
+        *(local_hdf5_paths[1].resolve().as_posix() for _ in range(6)),
+    ]
+    assert (
+        result[lazynwb.TABLE_INDEX_COLUMN_NAME].to_list() == expected_indices[:n_rows]
+    )
+    assert result[lazynwb.NWB_PATH_COLUMN_NAME].to_list() == expected_paths[:n_rows]
+
+
+def test_scan_nwb_fetches_predicate_columns_in_requested_batches(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    io_source = _capture_scan_io_source(monkeypatch, local_hdf5_paths)
+    requested_row_batches = _record_row_batch_fetches(monkeypatch)
+    batches = list(
+        io_source(
+            with_columns=[
+                lazynwb.NWB_PATH_COLUMN_NAME,
+                lazynwb.TABLE_INDEX_COLUMN_NAME,
+                "condition",
+            ],
+            predicate=pl.col("start_time") >= 4.0,
+            n_rows=5,
+            batch_size=4,
+        )
+    )
+
+    assert [batch.height for batch in batches] == [2, 2, 1]
+    assert all(row_batch is not None for row_batch in requested_row_batches)
+    assert all(
+        sum(
+            len(indices)
+            for indices in typing.cast(dict[str, list[int]], row_batch).values()
+        )
+        <= 4
+        for row_batch in requested_row_batches
+    )
+    result = pl.concat(batches)
+    assert result[lazynwb.TABLE_INDEX_COLUMN_NAME].to_list() == [2, 3, 4, 5, 2]
 
 
 def test_scan_nwb_exclude_array_columns(local_hdf5_path):
