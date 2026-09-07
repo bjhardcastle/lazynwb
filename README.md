@@ -439,11 +439,18 @@ Configure cloud access via `lazynwb.file_io.config`:
 ```python
 from lazynwb.file_io import config
 
-config.use_obstore = True                          # use obstore for S3/GCS/Azure (default: True)
-config.use_remfile = False                         # use remfile for HTTP byte-range requests (default: False)
+config.use_obstore = True                          # use obstore for cloud and HTTP paths (default: False)
+config.use_remfile = False                         # force remfile instead of obstore (default: False)
 config.fsspec_storage_options = {"anon": True}     # e.g. anonymous S3 access
 config.disable_cache = False                       # disable FileAccessor caching (default: False)
 ```
+
+When obstore is enabled, AWS S3 HTTP/HTTPS URLs are converted to native `s3://`
+paths. Regions absent from the URL are discovered once per bucket and cached.
+Common fsspec options such as `anon`, `key`, `secret`, `token`, `requester_pays`,
+and `client_kwargs` are translated to their obstore equivalents. Plain S3 HTTPS
+URLs remain anonymous unless authentication options are supplied. HTTP reads
+fall back to remfile if obstore cannot open the file.
 
 ---
 

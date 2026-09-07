@@ -6,7 +6,9 @@ import importlib.metadata
 import logging
 import os
 import pathlib
+import re
 import threading
+import urllib.parse
 from collections.abc import Iterable
 from typing import Any
 
@@ -14,6 +16,7 @@ import h5py
 import obstore.fsspec
 import pydantic_settings
 import remfile
+import requests
 import upath
 import zarr
 
@@ -33,9 +36,7 @@ class FileIOConfig(pydantic_settings.BaseSettings):
     )
     use_remfile: bool = False
     use_obstore: bool = False
-    fsspec_storage_options: dict[str, Any] = {
-        "anon": False,
-    }
+    fsspec_storage_options: dict[str, Any] = {}
     disable_cache: bool = False
 
 
@@ -105,7 +106,204 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
 
 
-_OBSTORE_PROTOCOLS = frozenset({"s3", "gs", "gcs", "az", "abfs"})
+_OBSTORE_PROTOCOLS = frozenset(
+    {
+        "s3",
+        "s3a",
+        "gs",
+        "gcs",
+        "az",
+        "adl",
+        "azure",
+        "abfs",
+        "abfss",
+        "http",
+        "https",
+    }
+)
+
+_S3_VIRTUAL_HOST_RE = re.compile(
+    r"^(?P<bucket>.+)\.s3(?:[.-](?:dualstack\.)?(?P<region>[a-z0-9-]+))?"
+    r"\.amazonaws\.com(?:\.cn)?$"
+)
+_S3_PATH_HOST_RE = re.compile(
+    r"^s3(?:[.-](?:dualstack\.)?(?P<region>[a-z0-9-]+))?" r"\.amazonaws\.com(?:\.cn)?$"
+)
+_S3_REGION_CACHE: dict[str, str | None] = {}
+_S3_REGION_CACHE_LOCK = threading.Lock()
+
+_S3_OPTION_ALIASES = {
+    "anon": "skip_signature",
+    "key": "access_key_id",
+    "secret": "secret_access_key",
+    "token": "session_token",
+    "endpoint_url": "endpoint",
+    "region_name": "region",
+    "requester_pays": "request_payer",
+}
+_S3_AUTH_OPTIONS = frozenset(
+    {
+        "anon",
+        "skip_signature",
+        "key",
+        "access_key_id",
+        "secret",
+        "secret_access_key",
+        "token",
+        "session_token",
+    }
+)
+_OBSTORE_S3_OPTIONS = frozenset(
+    {
+        "access_key_id",
+        "conditional_put",
+        "container_credentials_relative_uri",
+        "copy_if_not_exists",
+        "default_region",
+        "disable_tagging",
+        "endpoint",
+        "imdsv1_fallback",
+        "metadata_endpoint",
+        "region",
+        "request_payer",
+        "secret_access_key",
+        "session_token",
+        "skip_signature",
+        "unsigned_payload",
+        "virtual_hosted_style_request",
+    }
+)
+
+
+def _parse_s3_http_url(url: str) -> tuple[str, str, str | None] | None:
+    """Return bucket, decoded object key, and optional region for an AWS S3 URL."""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https") or parsed.query or parsed.fragment:
+        # Query strings may contain presigned credentials and cannot be represented by
+        # an s3:// URL without changing their meaning.
+        return None
+    host = parsed.hostname or ""
+    path_parts = parsed.path.lstrip("/").split("/", 1)
+
+    if match := _S3_VIRTUAL_HOST_RE.match(host):
+        bucket = match.group("bucket")
+        object_key = parsed.path.lstrip("/")
+        region = match.group("region")
+    elif match := _S3_PATH_HOST_RE.match(host):
+        if len(path_parts) != 2:
+            return None
+        bucket, object_key = path_parts
+        region = match.group("region")
+    else:
+        return None
+
+    # These are endpoint variants, not AWS regions.
+    if region in ("accelerate", "external-1"):
+        region = None
+    return bucket, urllib.parse.unquote(object_key), region
+
+
+def _discover_s3_region(bucket: str) -> str | None:
+    """Discover and cache the AWS region for a bucket using the global endpoint."""
+    with _S3_REGION_CACHE_LOCK:
+        if bucket in _S3_REGION_CACHE:
+            return _S3_REGION_CACHE[bucket]
+        try:
+            response = requests.head(
+                f"https://s3.amazonaws.com/{urllib.parse.quote(bucket, safe='')}",
+                allow_redirects=False,
+                timeout=10,
+            )
+            region = response.headers.get("x-amz-bucket-region")
+        except requests.RequestException as exc:
+            logger.warning(f"Failed to discover S3 region for {bucket!r}: {exc!r}")
+            region = None
+        _S3_REGION_CACHE[bucket] = region
+        return region
+
+
+def _get_obstore_client_options(
+    storage_options: dict[str, Any],
+) -> dict[str, Any]:
+    """Translate common fsspec HTTP client options to obstore names."""
+    client_options = dict(storage_options.get("client_options") or {})
+    client_kwargs = dict(storage_options.get("client_kwargs") or {})
+    config_kwargs = dict(storage_options.get("config_kwargs") or {})
+
+    headers = storage_options.get("headers") or client_kwargs.get("headers")
+    if headers:
+        client_options.setdefault("default_headers", headers)
+    if (proxy := storage_options.get("proxy")) is not None:
+        client_options.setdefault("proxy_url", proxy)
+    if client_kwargs.get("verify") is False:
+        client_options.setdefault("allow_invalid_certificates", True)
+    if (timeout := config_kwargs.get("connect_timeout")) is not None:
+        client_options.setdefault("connect_timeout", timeout)
+    if (timeout := config_kwargs.get("read_timeout")) is not None:
+        client_options.setdefault("timeout", timeout)
+    if (max_connections := config_kwargs.get("max_pool_connections")) is not None:
+        client_options.setdefault("pool_max_idle_per_host", str(max_connections))
+    return client_options
+
+
+def _translate_s3_storage_options(
+    storage_options: dict[str, Any],
+) -> dict[str, Any]:
+    """Translate common s3fs-style storage options to obstore configuration."""
+    translated = {
+        key: value
+        for key, value in storage_options.items()
+        if key in _OBSTORE_S3_OPTIONS and value is not None
+    }
+    for key, value in storage_options.items():
+        if value is not None and (translated_key := _S3_OPTION_ALIASES.get(key)):
+            translated.setdefault(translated_key, value)
+
+    client_kwargs = dict(storage_options.get("client_kwargs") or {})
+    if (region := client_kwargs.get("region_name")) is not None:
+        translated.setdefault("region", region)
+    if (endpoint := client_kwargs.get("endpoint_url")) is not None:
+        translated.setdefault("endpoint", endpoint)
+
+    config_kwargs = dict(storage_options.get("config_kwargs") or {})
+    if str(config_kwargs.get("signature_version", "")).lower() == "unsigned":
+        translated.setdefault("skip_signature", True)
+
+    client_options = _get_obstore_client_options(storage_options)
+    if client_options:
+        translated["client_options"] = client_options
+    return translated
+
+
+def _get_obstore_location(
+    path: upath.UPath,
+) -> tuple[str, str, dict[str, Any]]:
+    """Get the protocol, path, and translated options for an obstore HDF5 read."""
+    protocol = path.protocol
+    url = path.as_posix()
+    storage_options = dict(config.fsspec_storage_options)
+
+    if protocol in ("http", "https"):
+        if s3_location := _parse_s3_http_url(url):
+            bucket, object_key, url_region = s3_location
+            options = _translate_s3_storage_options(storage_options)
+            if not (_S3_AUTH_OPTIONS & storage_options.keys()):
+                # A plain S3 HTTPS URL previously went through an unsigned HTTP
+                # reader. Preserve that behavior after converting it to s3://.
+                options["skip_signature"] = True
+            if "region" not in options and "default_region" not in options:
+                region = url_region or _discover_s3_region(bucket)
+                if region is not None:
+                    options["region"] = region
+            return "s3", f"s3://{bucket}/{object_key}", options
+
+        client_options = _get_obstore_client_options(storage_options)
+        options = {"client_options": client_options} if client_options else {}
+        return protocol, url, options
+
+    if protocol in ("s3", "s3a"):
+        return protocol, url, _translate_s3_storage_options(storage_options)
+    return protocol, url, storage_options
 
 
 def _open_hdf5(
@@ -122,13 +320,24 @@ def _open_hdf5(
             logger.warning(
                 f"remfile failed to open {path}, falling back to fsspec: {exc!r}"
             )
-    if use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
-        file = obstore.fsspec.BufferedFile(
-            fs=obstore.fsspec.FsspecStore(path.protocol, **config.fsspec_storage_options),  # type: ignore[call-overload]
-            path=path.as_posix(),
-        )
+    if file is None and use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
+        try:
+            protocol, obstore_path, storage_options = _get_obstore_location(path)
+            file = obstore.fsspec.BufferedFile(
+                fs=obstore.fsspec.FsspecStore(protocol, **storage_options),  # type: ignore[call-overload]
+                path=obstore_path,
+            )
+            return h5py.File(file, mode="r")
+        except Exception as exc:
+            logger.warning(
+                f"obstore failed to open {path}, falling back to a compatible reader: {exc!r}"
+            )
+            if file is not None:
+                with contextlib.suppress(Exception):
+                    file.close()
+                file = None
     if file is None and path.protocol in ("http", "https"):
-        # obstore doesn't support http/https; remfile handles byte-range requests well for these
+        # remfile handles HTTP byte-range requests well when obstore is disabled or unavailable
         file = remfile.File(url=path.as_posix())
     if file is None:
         file = path.open(mode="rb", cache_type="first")
