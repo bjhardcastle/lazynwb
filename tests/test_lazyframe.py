@@ -19,6 +19,8 @@ import lazynwb.tables
 def _capture_scan_io_source(
     monkeypatch: pytest.MonkeyPatch,
     source: list[pathlib.Path],
+    table_path: str = "/intervals/trials",
+    single_file_batches: bool = False,
 ) -> typing.Callable[..., typing.Iterator[pl.DataFrame]]:
     registered_source: dict[
         str, typing.Callable[..., typing.Iterator[pl.DataFrame]]
@@ -38,7 +40,8 @@ def _capture_scan_io_source(
     )
     lazynwb.scan_nwb(
         source=source,
-        table_path="/intervals/trials",
+        table_path=table_path,
+        single_file_batches=single_file_batches,
         disable_progress=True,
     )
     return registered_source["io_source"]
@@ -182,6 +185,81 @@ def test_scan_nwb_fetches_predicate_columns_in_requested_batches(
     )
     result = pl.concat(batches)
     assert result[lazynwb.TABLE_INDEX_COLUMN_NAME].to_list() == [2, 3, 4, 5, 2]
+
+
+@pytest.mark.parametrize(
+    ("single_file_batches", "expected_batch_sizes", "expected_source_counts"),
+    [
+        (False, [3, 3, 2], [1, 2, 1]),
+        (True, [3, 1, 3, 1], [1, 1, 1, 1]),
+    ],
+)
+def test_scan_nwb_single_file_batches_are_opt_in(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+    single_file_batches: bool,
+    expected_batch_sizes: list[int],
+    expected_source_counts: list[int],
+) -> None:
+    io_source = _capture_scan_io_source(
+        monkeypatch,
+        local_hdf5_paths,
+        table_path="/units",
+        single_file_batches=single_file_batches,
+    )
+    requested_row_batches = _record_row_batch_fetches(monkeypatch)
+    batches = list(
+        io_source(
+            with_columns=[
+                lazynwb.NWB_PATH_COLUMN_NAME,
+                lazynwb.TABLE_INDEX_COLUMN_NAME,
+                "spike_times",
+            ],
+            predicate=None,
+            n_rows=None,
+            batch_size=3,
+        )
+    )
+
+    assert [batch.height for batch in batches] == expected_batch_sizes
+    assert [
+        len(typing.cast(dict[str, list[int]], row_batch))
+        for row_batch in requested_row_batches
+    ] == expected_source_counts
+
+
+def test_scan_nwb_single_file_batches_apply_after_predicate(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    io_source = _capture_scan_io_source(
+        monkeypatch,
+        local_hdf5_paths,
+        table_path="/units",
+        single_file_batches=True,
+    )
+    requested_row_batches = _record_row_batch_fetches(monkeypatch)
+    batches = list(
+        io_source(
+            with_columns=[
+                lazynwb.NWB_PATH_COLUMN_NAME,
+                lazynwb.TABLE_INDEX_COLUMN_NAME,
+                "spike_times",
+            ],
+            predicate=pl.col("id") >= 2,
+            n_rows=None,
+            batch_size=2,
+        )
+    )
+
+    assert [batch.height for batch in batches] == [2, 2]
+    assert all(
+        len(typing.cast(dict[str, list[int]], row_batch)) == 1
+        for row_batch in requested_row_batches
+    )
+    assert all(
+        batch[lazynwb.NWB_PATH_COLUMN_NAME].n_unique() == 1 for batch in batches
+    )
 
 
 def test_scan_nwb_exclude_array_columns(local_hdf5_path):

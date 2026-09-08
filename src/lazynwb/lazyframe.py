@@ -70,6 +70,7 @@ def scan_nwb(  # noqa: C901
     infer_schema_length: int | None = None,
     exclude_array_columns: bool = False,
     low_memory: bool = False,
+    single_file_batches: bool = False,
     schema: polars._typing.SchemaDict | None = None,
     schema_overrides: polars._typing.SchemaDict | None = None,
     disable_progress: bool = False,
@@ -104,6 +105,10 @@ def scan_nwb(  # noqa: C901
     low_memory : bool, default False
         If True, the data will be read in smaller chunks to reduce memory usage, at the cost
         of speed.
+    single_file_batches : bool, default False
+        If True, each materialization batch contains rows from only one NWB file. This can
+        reduce peak memory for large list or array columns, at the cost of cross-file
+        parallelism.
     schema : dict[str, pl.DataType], default None
         User-defined schema for the table. If None, the schema will be generated using the stored
         dtypes for columns in each file. Conflicts are signalled to the user via a warning.
@@ -233,6 +238,7 @@ def scan_nwb(  # noqa: C901
                 n_rows=input_row_limit,
                 catalog_snapshots=scan_catalog_snapshots,
                 ignore_errors=ignore_errors,
+                single_file_batches=single_file_batches,
             ),
             start=1,
         ):
@@ -563,6 +569,7 @@ def _iter_path_to_row_index_batches(  # noqa: C901
         | None
     ) = None,
     ignore_errors: bool = False,
+    single_file_batches: bool = False,
 ) -> Iterator[dict[str, Sequence[int]]]:
     """Yield bounded, source-ordered table row selections."""
     remaining_rows = n_rows
@@ -631,6 +638,11 @@ def _iter_path_to_row_index_batches(  # noqa: C901
                 path_to_row_indices = {}
                 rows_in_batch = 0
 
+        if single_file_batches and path_to_row_indices:
+            yield path_to_row_indices
+            path_to_row_indices = {}
+            rows_in_batch = 0
+
     if path_to_row_indices:
         yield path_to_row_indices
     if not table_found and missing_table_error is not None:
@@ -666,6 +678,7 @@ def read_nwb(
     infer_schema_length: int | None = None,
     exclude_array_columns: bool = False,
     low_memory: bool = False,
+    single_file_batches: bool = False,
     schema: polars._typing.SchemaDict | None = None,
     schema_overrides: polars._typing.SchemaDict | None = None,
     disable_progress: bool = False,
@@ -696,6 +709,10 @@ def read_nwb(
     low_memory : bool, default False
         If True, the data will be read in smaller chunks to reduce memory usage, at the cost
         of speed.
+    single_file_batches : bool, default False
+        If True, each materialization batch contains rows from only one NWB file. This can
+        reduce peak memory for large list or array columns, at the cost of cross-file
+        parallelism.
     schema : dict[str, pl.DataType], default None
         User-defined schema for the table. If None, the schema will be generated using the stored
         dtypes for columns in each file. Conflicts are signalled to the user via a warning.
@@ -716,6 +733,7 @@ def read_nwb(
         infer_schema_length=infer_schema_length,
         exclude_array_columns=exclude_array_columns,
         low_memory=low_memory,
+        single_file_batches=single_file_batches,
         schema=schema,
         schema_overrides=schema_overrides,
         disable_progress=disable_progress,

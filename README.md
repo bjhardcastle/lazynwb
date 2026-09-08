@@ -254,6 +254,18 @@ df = (
 )
 ```
 
+For very large list or array columns, such as `spike_times` across many sessions,
+opt into batches that never span more than one file:
+```python
+lf = lazynwb.scan_nwb(
+    nwb_paths,
+    '/units',
+    single_file_batches=True,
+)
+```
+The default remains `False` so smaller columns retain the existing multi-file batching
+performance.
+
 Control schema inference when files have slightly different column types:
 ```python
 lf = lazynwb.scan_nwb(
