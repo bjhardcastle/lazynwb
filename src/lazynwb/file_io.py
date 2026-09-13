@@ -29,6 +29,8 @@ from lazynwb._config import config
 logger = logging.getLogger(__name__)
 
 
+_LAZYNWB_SOURCE_PATH_ATTR = "_lazynwb_source_path"
+
 # cache for FileAccessor instances by canonical path
 _accessor_cache: dict[str, FileAccessor] = {}
 _cache_lock = threading.RLock()  # RLock allows same thread to acquire multiple times
@@ -101,6 +103,24 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
         logger.debug("failed to open %s as Zarr: %r", key, exc, exc_info=True)
         raise ValueError(f"Failed to open {u} as HDF5 or Zarr") from (
             exc if hdf5_error is None else hdf5_error
+        )
+
+
+def _set_lazynwb_source_path(accessor: object, path: lazynwb.types_.PathLike) -> None:
+    source_path = from_pathlike(path).as_posix()
+    try:
+        setattr(accessor, _LAZYNWB_SOURCE_PATH_ATTR, source_path)
+        logger.debug(
+            "attached lazynwb source path to %s: %r",
+            type(accessor).__name__,
+            source_path,
+        )
+    except Exception as exc:
+        logger.debug(
+            "could not attach lazynwb source path to %s: %r",
+            type(accessor).__name__,
+            exc,
+            exc_info=True,
         )
 
 
@@ -315,10 +335,12 @@ class FileAccessor:
             "_skip_init"
         ):  # don't check attr directly: __getattr__ is overloaded
             logger.debug("skipping init for cached instance")
+            _set_lazynwb_source_path(self._accessor, self._path)
             return None
         self._path = from_pathlike(path)
         logger.debug(f"opening file {self._path}")
         self._accessor = _open_file(self._path)
+        _set_lazynwb_source_path(self._accessor, self._path)
         self._hdmf_backend = self.get_hdmf_backend()
         logger.debug(f"initialized with backend {self._hdmf_backend}")
 
@@ -375,9 +397,11 @@ class FileAccessor:
         if key in _accessor_cache:
             # Reuse existing accessor from cache
             self._accessor = _accessor_cache[key]._accessor
+            _set_lazynwb_source_path(self._accessor, self._path)
         else:
             # Create new accessor and cache this instance
             self._accessor = _open_file(self._path)
+            _set_lazynwb_source_path(self._accessor, self._path)
             _accessor_cache[key] = self
 
     def __getattr__(self, name) -> Any:

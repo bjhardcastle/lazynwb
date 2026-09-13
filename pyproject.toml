@@ -60,6 +60,7 @@ pynwb = [
 ]
 
 [dependency-groups]
+nb = ["ipykernel", "graphviz"]
 task_runner = ["poethepoet>=0.33.1"]
 linting = ["black>=25.1.0", "isort>=6.0.1", "ruff>=0.11.2"]
 testing = ["pytest>=7.4.0", "mypy>=1.4.1", "pytest-cov>=4.1.0", "lazynwb[pynwb]"]
