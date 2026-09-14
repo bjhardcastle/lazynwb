@@ -1571,13 +1571,16 @@ async def _read_direct_hdf5_indexed_column(
     index_column = indexed_plan.index_column
     request_count_before = int(getattr(range_reader, "request_count", 0))
     fetched_bytes_before = int(getattr(range_reader, "bytes_fetched", 0))
-    index_values = np.asarray(
-        await _read_direct_hdf5_column_array(range_reader, index_column, None),
-        dtype=np.intp,
+    row_indices, row_starts, row_ends = await _read_direct_hdf5_index_bounds(
+        range_reader,
+        index_column,
+        table_row_indices,
     )
     range_plan = _plan_direct_hdf5_indexed_column_ranges(
-        index_values=index_values,
-        table_row_indices=table_row_indices,
+        row_indices=row_indices,
+        row_starts=row_starts,
+        row_ends=row_ends,
+        full_element_count=int((data_column.shape or (0,))[0]),
     )
     if range_plan.row_indices.size == 0:
         logger.debug(
@@ -1621,22 +1624,90 @@ async def _read_direct_hdf5_indexed_column(
     return column_data
 
 
+async def _read_direct_hdf5_index_bounds(
+    range_reader: hdf5_range_reader._RangeReader,
+    index_column: catalog_models._TableColumnSchema,
+    table_row_indices: Sequence[int] | None,
+) -> tuple[
+    npt.NDArray[np.intp],
+    npt.NDArray[np.intp],
+    npt.NDArray[np.intp],
+]:
+    row_count = int((index_column.shape or (0,))[0])
+    if table_row_indices is None:
+        row_indices = np.arange(row_count, dtype=np.intp)
+        index_values = np.asarray(
+            await _read_direct_hdf5_column_array(range_reader, index_column, None),
+            dtype=np.intp,
+        )
+        row_starts = np.empty(row_count, dtype=np.intp)
+        if row_count:
+            row_starts[0] = 0
+            row_starts[1:] = index_values[:-1]
+        logger.debug(
+            "read complete HDF5 ragged index %r: rows=%d index_values=%d",
+            index_column.name,
+            row_count,
+            index_values.size,
+        )
+        return row_indices, row_starts, index_values
+
+    row_indices = _normalize_indexed_table_row_indices(
+        table_row_indices,
+        row_count=row_count,
+    )
+    if row_indices.size == 0:
+        empty_bounds = np.asarray([], dtype=np.intp)
+        logger.debug(
+            "skipped HDF5 ragged index %r for an empty row selection",
+            index_column.name,
+        )
+        return row_indices, empty_bounds, empty_bounds
+
+    predecessor_indices = row_indices[row_indices > 0] - 1
+    boundary_indices = np.unique(np.concatenate((row_indices, predecessor_indices)))
+    boundary_values = np.asarray(
+        await _read_direct_hdf5_column_array(
+            range_reader,
+            index_column,
+            boundary_indices.tolist(),
+        ),
+        dtype=np.intp,
+    )
+    boundary_value_by_index = dict(
+        zip(boundary_indices.tolist(), boundary_values.tolist(), strict=True)
+    )
+    row_starts = np.fromiter(
+        (
+            0 if row_index == 0 else boundary_value_by_index[int(row_index) - 1]
+            for row_index in row_indices
+        ),
+        dtype=np.intp,
+        count=row_indices.size,
+    )
+    row_ends = np.fromiter(
+        (boundary_value_by_index[int(row_index)] for row_index in row_indices),
+        dtype=np.intp,
+        count=row_indices.size,
+    )
+    logger.debug(
+        "read sparse HDF5 ragged index %r: selected_rows=%d unique_boundaries=%d "
+        "total_rows=%d",
+        index_column.name,
+        row_indices.size,
+        boundary_indices.size,
+        row_count,
+    )
+    return row_indices, row_starts, row_ends
+
+
 def _plan_direct_hdf5_indexed_column_ranges(
     *,
-    index_values: npt.NDArray[Any],
-    table_row_indices: Sequence[int] | None,
+    row_indices: npt.NDArray[np.intp],
+    row_starts: npt.NDArray[np.intp],
+    row_ends: npt.NDArray[np.intp],
+    full_element_count: int,
 ) -> _DirectHDF5IndexedRangeReadPlan:
-    index_values = np.asarray(index_values, dtype=np.intp)
-    index_array = np.empty(index_values.size + 1, dtype=np.intp)
-    index_array[0] = 0
-    index_array[1:] = index_values
-    if table_row_indices is None:
-        row_indices = np.arange(index_values.size, dtype=np.intp)
-    else:
-        row_indices = _normalize_indexed_table_row_indices(
-            table_row_indices,
-            row_count=index_values.size,
-        )
     if row_indices.size == 0:
         empty_bounds = np.asarray([], dtype=np.intp)
         return _DirectHDF5IndexedRangeReadPlan(
@@ -1646,11 +1717,9 @@ def _plan_direct_hdf5_indexed_column_ranges(
             spans=(),
             requested_element_count=0,
             spanned_element_count=0,
-            full_element_count=int(index_array[-1]),
+            full_element_count=full_element_count,
         )
 
-    row_starts = index_array[row_indices]
-    row_ends = index_array[row_indices + 1]
     row_lengths = row_ends - row_starts
     requested_element_count = int(row_lengths.sum())
     spans = tuple(
@@ -1660,7 +1729,6 @@ def _plan_direct_hdf5_indexed_column_ranges(
             max_gap=0,
         )
     )
-    full_element_count = int(index_array[-1])
     spanned_element_count = sum(end - start for start, end in spans)
     materialized_spans = spans
     if _should_read_full_indexed_data(

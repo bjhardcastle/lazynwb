@@ -729,6 +729,62 @@ def test_hdf5_direct_contiguous_indexed_reads_preserve_element_spans(
     assert "spans=2 elements=65000 logical_ranges=2" in caplog.text
 
 
+def test_hdf5_direct_sparse_indexed_read_fetches_only_required_index_bounds(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    nwb_path = tmp_path / "sparse-index-bounds.nwb"
+    row_count = 100_000
+    values = np.arange(row_count, dtype=np.float64)
+    with h5py.File(nwb_path, "w") as h5_file:
+        group = h5_file.create_group("units")
+        group.create_dataset("spike_times", data=values)
+        group.create_dataset(
+            "spike_times_index",
+            data=np.arange(1, row_count + 1, dtype=np.uint64),
+        )
+
+    catalog_reader = _buffer_hdf5_reader(
+        nwb_path,
+        tmp_path / "sparse-index-bounds-catalog.sqlite",
+    )
+    snapshot = asyncio.run(catalog_reader.read_table_schema_snapshot("units"))
+    columns_by_name = {column.name: column for column in snapshot.columns}
+    indexed_plan = lazynwb.tables._DirectHDF5IndexedColumnReadPlan(
+        data_column=columns_by_name["spike_times"],
+        index_column=columns_by_name["spike_times_index"],
+    )
+    direct_reader = hdf5_range_reader._BufferRangeReader(nwb_path.read_bytes())
+    logical_ranges: list[tuple[hdf5_range_reader._ByteRange, ...]] = []
+    original_read_ranges = direct_reader.read_ranges
+
+    async def _track_logical_ranges(
+        ranges: collections.abc.Iterable[hdf5_range_reader._ByteRange],
+    ) -> dict[hdf5_range_reader._ByteRange, bytes]:
+        requested_ranges = tuple(ranges)
+        logical_ranges.append(requested_ranges)
+        return await original_read_ranges(requested_ranges)
+
+    monkeypatch.setattr(direct_reader, "read_ranges", _track_logical_ranges)
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+
+    result = asyncio.run(
+        lazynwb.tables._read_direct_hdf5_indexed_column(
+            direct_reader,
+            indexed_plan,
+            [50_000, 0, 50_000],
+        )
+    )
+
+    assert result == [[50_000.0], [0.0], [50_000.0]]
+    logical_byte_counts = [
+        sum(byte_range.length for byte_range in ranges) for ranges in logical_ranges
+    ]
+    assert logical_byte_counts == [24, 16]
+    assert "selected_rows=3 unique_boundaries=3 total_rows=100000" in caplog.text
+
+
 def test_scan_nwb_predicate_projection_uses_direct_indexed_ranges(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
