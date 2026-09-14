@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import collections
 import concurrent.futures
 import dataclasses
 import difflib
+import itertools
 import logging
 import math
+import threading
 import time
 import typing
 import urllib.parse
@@ -68,6 +71,7 @@ UNITS_TABLE_INDEX_COLUMN_NAME = "_units" + TABLE_INDEX_COLUMN_NAME
 _INDEXED_COLUMN_FULL_READ_MIN_COVERAGE = 0.8
 _INDEXED_COLUMN_MAX_COALESCE_GAP_ELEMENTS = 1_048_576
 _SUPPORTED_DIRECT_HDF5_FILTER_IDS = frozenset({1, 2, 3, 32001, 32015})
+_DIRECT_HDF5_CHUNK_RECORD_CACHE_MAX_ENTRIES = 65_536
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -110,6 +114,34 @@ class _HDF5ChunkRecord:
     stored_size: int
     filter_mask: int
     offsets: tuple[int, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _HDF5V1ChunkTreeEntry:
+    stored_size: int
+    filter_mask: int
+    offsets: tuple[int, ...]
+    child_address: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _HDF5V1ChunkTreeNode:
+    level: int
+    entries: tuple[_HDF5V1ChunkTreeEntry, ...]
+    terminal_offsets: tuple[int, ...]
+
+
+_HDF5ChunkRecordCacheKey = tuple[
+    catalog_models._SourceIdentity,
+    int,
+    int,
+    tuple[int, ...],
+]
+_DIRECT_HDF5_CHUNK_RECORD_CACHE_LOCK = threading.RLock()
+_DIRECT_HDF5_CHUNK_RECORD_CACHE: collections.OrderedDict[
+    _HDF5ChunkRecordCacheKey,
+    _HDF5ChunkRecord | None,
+] = collections.OrderedDict()
 
 
 class _DirectHDF5ReadError(RuntimeError):
@@ -1257,8 +1289,29 @@ async def _read_direct_hdf5_chunked_array(
     if row_indices.size == 0:
         return _empty_direct_hdf5_array(column, leading_size=0)
 
-    records = await _read_direct_hdf5_v1_chunk_index(range_reader, column)
     needed_first_offsets = {int(row // chunks[0]) * chunks[0] for row in row_indices}
+    all_first_offset_count = math.ceil(shape[0] / chunks[0])
+    if table_row_indices is None or len(needed_first_offsets) == all_first_offset_count:
+        target_chunk_offsets = None
+    else:
+        target_chunk_offsets = frozenset(
+            itertools.product(
+                sorted(needed_first_offsets),
+                *(
+                    range(0, dimension, chunk_size)
+                    for dimension, chunk_size in zip(
+                        shape[1:],
+                        chunks[1:],
+                        strict=True,
+                    )
+                ),
+            )
+        )
+    records = await _read_direct_hdf5_v1_chunk_index(
+        range_reader,
+        column,
+        target_chunk_offsets=target_chunk_offsets,
+    )
     needed_records = tuple(
         record
         for record in records
@@ -1407,9 +1460,11 @@ def _direct_hdf5_fill_value(
     return value.item() if isinstance(value, np.generic) else value
 
 
-async def _read_direct_hdf5_v1_chunk_index(
+async def _read_direct_hdf5_v1_chunk_index(  # noqa: C901
     range_reader: hdf5_range_reader._RangeReader,
     column: catalog_models._TableColumnSchema,
+    *,
+    target_chunk_offsets: frozenset[tuple[int, ...]] | None = None,
 ) -> tuple[_HDF5ChunkRecord, ...]:
     dataset = column.dataset
     root_offset = dataset.hdf5_chunk_index_offset
@@ -1422,13 +1477,37 @@ async def _read_direct_hdf5_v1_chunk_index(
     key_size = 8 + (chunk_rank * 8)
     source_identity = await range_reader.get_source_identity()
     content_length = source_identity.content_length
-    pending: tuple[int, ...] = (root_offset,)
+    cached_records: tuple[_HDF5ChunkRecord, ...] = ()
+    cache_hit_count = 0
+    if target_chunk_offsets is not None:
+        cached_records, target_chunk_offsets, cache_hit_count = (
+            _get_cached_direct_hdf5_chunk_records(
+                source_identity=source_identity,
+                root_offset=root_offset,
+                chunk_rank=chunk_rank,
+                target_chunk_offsets=target_chunk_offsets,
+            )
+        )
+        if not target_chunk_offsets:
+            logger.debug(
+                "resolved HDF5 v1 chunk index for %r entirely from cache: "
+                "targets=%d records=%d",
+                column.name,
+                cache_hit_count,
+                len(cached_records),
+            )
+            return cached_records
+
+    pending: dict[int, frozenset[tuple[int, ...]] | None] = {
+        root_offset: target_chunk_offsets
+    }
     seen: set[int] = set()
     records: list[_HDF5ChunkRecord] = []
     while pending:
         level_addresses = tuple(address for address in pending if address not in seen)
         if not level_addresses:
             break
+        level_targets = {address: pending[address] for address in level_addresses}
         seen.update(level_addresses)
         probe_ranges = tuple(
             hdf5_range_reader._ByteRange(
@@ -1440,7 +1519,7 @@ async def _read_direct_hdf5_v1_chunk_index(
             for address in level_addresses
         )
         probes = await range_reader.read_ranges(probe_ranges)
-        node_facts: list[tuple[int, int, int]] = []
+        node_facts: list[tuple[int, int]] = []
         oversized_node_ranges: list[hdf5_range_reader._ByteRange] = []
         node_payloads: dict[int, bytes] = {}
         for address, byte_range in zip(level_addresses, probe_ranges, strict=True):
@@ -1450,11 +1529,10 @@ async def _read_direct_hdf5_v1_chunk_index(
                     column.name,
                     f"unsupported chunk index at byte {address}: {header[:5]!r}",
                 )
-            level = header[5]
             entries_used = int.from_bytes(header[6:8], "little")
             node_size = node_header_size + (entries_used * (key_size + offset_size))
             node_size += key_size
-            node_facts.append((address, level, entries_used))
+            node_facts.append((address, entries_used))
             if node_size <= len(header):
                 node_payloads[address] = header[:node_size]
             else:
@@ -1465,42 +1543,199 @@ async def _read_direct_hdf5_v1_chunk_index(
         node_payloads.update(
             {byte_range.start: payload for byte_range, payload in oversized_nodes.items()}
         )
-        next_pending: list[int] = []
-        for address, level, entries_used in node_facts:
-            node = node_payloads[address]
-            cursor = node_header_size
-            for _ in range(entries_used):
-                key = node[cursor : cursor + key_size]
-                cursor += key_size
-                child_address = int.from_bytes(
-                    node[cursor : cursor + offset_size], "little"
-                )
-                cursor += offset_size
-                if level:
-                    next_pending.append(base_address + child_address)
+        next_pending: dict[int, set[tuple[int, ...]] | None] = {}
+        for address, entries_used in node_facts:
+            tree_node = _parse_direct_hdf5_v1_chunk_tree_node(
+                node_payloads[address],
+                entries_used=entries_used,
+                offset_size=offset_size,
+                chunk_rank=chunk_rank,
+                base_address=base_address,
+            )
+            requested_offsets = level_targets[address]
+            selected_entries = _select_direct_hdf5_v1_chunk_tree_entries(
+                tree_node,
+                target_chunk_offsets=requested_offsets,
+            )
+            for entry, entry_targets in selected_entries:
+                if tree_node.level:
+                    existing_targets = next_pending.get(entry.child_address)
+                    if entry_targets is None or existing_targets is None:
+                        next_pending[entry.child_address] = entry_targets
+                    else:
+                        existing_targets.update(entry_targets)
+                    continue
+                if entry_targets is not None and entry.offsets[:-1] not in entry_targets:
                     continue
                 records.append(
                     _HDF5ChunkRecord(
-                        address=base_address + child_address,
-                        stored_size=int.from_bytes(key[:4], "little"),
-                        filter_mask=int.from_bytes(key[4:8], "little"),
-                        offsets=tuple(
-                            int.from_bytes(
-                                key[8 + (index * 8) : 16 + (index * 8)],
-                                "little",
-                            )
-                            for index in range(chunk_rank - 1)
-                        ),
+                        address=entry.child_address,
+                        stored_size=entry.stored_size,
+                        filter_mask=entry.filter_mask,
+                        offsets=entry.offsets[:-1],
                     )
                 )
-        pending = tuple(next_pending)
+        pending = {
+            address: None if targets is None else frozenset(targets)
+            for address, targets in next_pending.items()
+        }
+    if target_chunk_offsets is not None:
+        _put_cached_direct_hdf5_chunk_records(
+            source_identity=source_identity,
+            root_offset=root_offset,
+            chunk_rank=chunk_rank,
+            target_chunk_offsets=target_chunk_offsets,
+            records=records,
+        )
     logger.debug(
-        "resolved HDF5 v1 chunk index for %r: nodes=%d records=%d",
+        "resolved HDF5 v1 chunk index for %r: targets=%s cache_hits=%d "
+        "nodes=%d records=%d",
         column.name,
+        "all" if target_chunk_offsets is None else len(target_chunk_offsets),
+        cache_hit_count,
         len(seen),
-        len(records),
+        len(cached_records) + len(records),
     )
-    return tuple(records)
+    return (*cached_records, *records)
+
+
+def _parse_direct_hdf5_v1_chunk_tree_node(
+    payload: bytes,
+    *,
+    entries_used: int,
+    offset_size: int,
+    chunk_rank: int,
+    base_address: int,
+) -> _HDF5V1ChunkTreeNode:
+    node_header_size = 8 + (2 * offset_size)
+    key_size = 8 + (chunk_rank * 8)
+    cursor = node_header_size
+    entries: list[_HDF5V1ChunkTreeEntry] = []
+    for _ in range(entries_used):
+        key = payload[cursor : cursor + key_size]
+        cursor += key_size
+        child_address = int.from_bytes(payload[cursor : cursor + offset_size], "little")
+        cursor += offset_size
+        entries.append(
+            _HDF5V1ChunkTreeEntry(
+                stored_size=int.from_bytes(key[:4], "little"),
+                filter_mask=int.from_bytes(key[4:8], "little"),
+                offsets=_direct_hdf5_v1_chunk_key_offsets(key, chunk_rank),
+                child_address=base_address + child_address,
+            )
+        )
+    terminal_key = payload[cursor : cursor + key_size]
+    return _HDF5V1ChunkTreeNode(
+        level=payload[5],
+        entries=tuple(entries),
+        terminal_offsets=_direct_hdf5_v1_chunk_key_offsets(
+            terminal_key,
+            chunk_rank,
+        ),
+    )
+
+
+def _direct_hdf5_v1_chunk_key_offsets(
+    key: bytes,
+    chunk_rank: int,
+) -> tuple[int, ...]:
+    return tuple(
+        int.from_bytes(
+            key[8 + (index * 8) : 16 + (index * 8)],
+            "little",
+        )
+        for index in range(chunk_rank)
+    )
+
+
+def _select_direct_hdf5_v1_chunk_tree_entries(
+    tree_node: _HDF5V1ChunkTreeNode,
+    *,
+    target_chunk_offsets: frozenset[tuple[int, ...]] | None,
+) -> tuple[
+    tuple[_HDF5V1ChunkTreeEntry, frozenset[tuple[int, ...]] | None],
+    ...,
+]:
+    if target_chunk_offsets is None:
+        return tuple((entry, None) for entry in tree_node.entries)
+    keys = (
+        *(entry.offsets for entry in tree_node.entries),
+        tree_node.terminal_offsets,
+    )
+    targets_by_entry: dict[int, set[tuple[int, ...]]] = {}
+    for target_offsets in target_chunk_offsets:
+        stored_target_offsets = (*target_offsets, 0)
+        entry_index = bisect.bisect_right(keys, stored_target_offsets) - 1
+        if 0 <= entry_index < len(tree_node.entries):
+            targets_by_entry.setdefault(entry_index, set()).add(target_offsets)
+    return tuple(
+        (tree_node.entries[index], frozenset(targets))
+        for index, targets in targets_by_entry.items()
+    )
+
+
+def _get_cached_direct_hdf5_chunk_records(
+    *,
+    source_identity: catalog_models._SourceIdentity,
+    root_offset: int,
+    chunk_rank: int,
+    target_chunk_offsets: frozenset[tuple[int, ...]],
+) -> tuple[
+    tuple[_HDF5ChunkRecord, ...],
+    frozenset[tuple[int, ...]],
+    int,
+]:
+    records: list[_HDF5ChunkRecord] = []
+    uncached: set[tuple[int, ...]] = set()
+    with _DIRECT_HDF5_CHUNK_RECORD_CACHE_LOCK:
+        for target_offsets in target_chunk_offsets:
+            cache_key = (source_identity, root_offset, chunk_rank, target_offsets)
+            if cache_key not in _DIRECT_HDF5_CHUNK_RECORD_CACHE:
+                uncached.add(target_offsets)
+                continue
+            record = _DIRECT_HDF5_CHUNK_RECORD_CACHE[cache_key]
+            _DIRECT_HDF5_CHUNK_RECORD_CACHE.move_to_end(cache_key)
+            if record is not None:
+                records.append(record)
+    return tuple(records), frozenset(uncached), len(target_chunk_offsets) - len(uncached)
+
+
+def _put_cached_direct_hdf5_chunk_records(
+    *,
+    source_identity: catalog_models._SourceIdentity,
+    root_offset: int,
+    chunk_rank: int,
+    target_chunk_offsets: frozenset[tuple[int, ...]],
+    records: Sequence[_HDF5ChunkRecord],
+) -> None:
+    record_by_offsets = {record.offsets: record for record in records}
+    with _DIRECT_HDF5_CHUNK_RECORD_CACHE_LOCK:
+        for target_offsets in target_chunk_offsets:
+            cache_key = (source_identity, root_offset, chunk_rank, target_offsets)
+            _DIRECT_HDF5_CHUNK_RECORD_CACHE[cache_key] = record_by_offsets.get(
+                target_offsets
+            )
+            _DIRECT_HDF5_CHUNK_RECORD_CACHE.move_to_end(cache_key)
+        while (
+            len(_DIRECT_HDF5_CHUNK_RECORD_CACHE)
+            > _DIRECT_HDF5_CHUNK_RECORD_CACHE_MAX_ENTRIES
+        ):
+            _DIRECT_HDF5_CHUNK_RECORD_CACHE.popitem(last=False)
+    logger.debug(
+        "cached %d HDF5 chunk-index target results (%d allocated, %d total cached)",
+        len(target_chunk_offsets),
+        len(records),
+        len(_DIRECT_HDF5_CHUNK_RECORD_CACHE),
+    )
+
+
+def _clear_direct_hdf5_chunk_record_cache() -> None:
+    with _DIRECT_HDF5_CHUNK_RECORD_CACHE_LOCK:
+        logger.debug(
+            "clearing direct HDF5 chunk-record cache with %d entries",
+            len(_DIRECT_HDF5_CHUNK_RECORD_CACHE),
+        )
+        _DIRECT_HDF5_CHUNK_RECORD_CACHE.clear()
 
 
 def _decode_direct_hdf5_chunk_filters(

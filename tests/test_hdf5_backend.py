@@ -1228,6 +1228,78 @@ def test_direct_hdf5_chunked_compressed_columns_match_h5py_without_accessor(
     assert frame["vlen"].to_list() == ["value-9", "value-0", "value-5", "value-5"]
 
 
+def test_sparse_chunk_index_lookup_reads_one_branch_and_caches_record(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nwb_path = tmp_path / "deep-chunk-index.nwb"
+    row_count = 20_000
+    target_row = row_count - 1
+    with h5py.File(nwb_path, "w") as h5_file:
+        dataset = h5_file.create_dataset(
+            "table/value",
+            data=np.arange(row_count, dtype=np.int32),
+            chunks=(1,),
+            compression="gzip",
+        )
+        expected_chunk = dataset.id.get_chunk_info_by_coord((target_row,))
+
+    catalog_reader = _buffer_hdf5_reader(
+        nwb_path,
+        tmp_path / "deep-chunk-index-catalog.sqlite",
+    )
+    snapshot = asyncio.run(catalog_reader.read_table_schema_snapshot("table"))
+    value_column = next(column for column in snapshot.columns if column.name == "value")
+    source_bytes = nwb_path.read_bytes()
+    first_reader = hdf5_range_reader._BufferRangeReader(source_bytes)
+    second_reader = hdf5_range_reader._BufferRangeReader(source_bytes)
+    parsed_node_count = 0
+    original_parse_node = lazynwb.tables._parse_direct_hdf5_v1_chunk_tree_node
+
+    def _track_parsed_node(
+        *args: object,
+        **kwargs: object,
+    ) -> lazynwb.tables._HDF5V1ChunkTreeNode:
+        nonlocal parsed_node_count
+        parsed_node_count += 1
+        return original_parse_node(*args, **kwargs)
+
+    monkeypatch.setattr(
+        lazynwb.tables,
+        "_parse_direct_hdf5_v1_chunk_tree_node",
+        _track_parsed_node,
+    )
+    lazynwb.tables._clear_direct_hdf5_chunk_record_cache()
+    try:
+        records = asyncio.run(
+            lazynwb.tables._read_direct_hdf5_v1_chunk_index(
+                first_reader,
+                value_column,
+                target_chunk_offsets=frozenset({(target_row,)}),
+            )
+        )
+        first_parsed_node_count = parsed_node_count
+        cached_records = asyncio.run(
+            lazynwb.tables._read_direct_hdf5_v1_chunk_index(
+                second_reader,
+                value_column,
+                target_chunk_offsets=frozenset({(target_row,)}),
+            )
+        )
+
+        assert len(records) == 1
+        assert records[0].offsets == (target_row,)
+        assert records[0].address == expected_chunk.byte_offset
+        assert records[0].stored_size == expected_chunk.size
+        assert records[0].filter_mask == expected_chunk.filter_mask
+        assert first_parsed_node_count <= 4
+        assert parsed_node_count == first_parsed_node_count
+        assert cached_records == records
+        assert second_reader.request_count == 0
+    finally:
+        lazynwb.tables._clear_direct_hdf5_chunk_record_cache()
+
+
 def test_rate_timeseries_and_large_array_merge_use_range_reader(
     local_hdf5_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,

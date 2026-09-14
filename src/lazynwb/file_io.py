@@ -36,9 +36,11 @@ def clear_cache() -> None:
     """
     import lazynwb._hdf5.range_reader as hdf5_range_reader
     import lazynwb._zarr.reader as zarr_reader
+    import lazynwb.tables
 
     logger.debug("clearing process-lifetime range-reader and Zarr metadata caches")
     hdf5_range_reader._clear_cache()
+    lazynwb.tables._clear_direct_hdf5_chunk_record_cache()
     zarr_reader._clear_shared_metadata_catalog_cache()
     logger.debug("cleared process-lifetime range-reader and Zarr metadata caches")
 
