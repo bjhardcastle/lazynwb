@@ -33,6 +33,15 @@ _PARSED_ATTRIBUTE_VALUE_NAMES = frozenset(
         "resolution",
     }
 )
+_TIMESERIES_ATTRIBUTE_VALUE_NAMES = _PARSED_ATTRIBUTE_VALUE_NAMES | {
+    "comments",
+    "description",
+    "interval",
+    "namespace",
+    "object_id",
+    "timestamps_unit",
+    "unit",
+}
 _DEFAULT_BOOTSTRAP_BYTES = int(os.getenv("LAZYNWB_HDF5_BOOTSTRAP_BYTES", 16 * 1024))
 _DEFAULT_MAX_BOOTSTRAP_BYTES = int(
     os.getenv("LAZYNWB_HDF5_MAX_BOOTSTRAP_BYTES", 64 * 1024)
@@ -386,6 +395,7 @@ class _HDF5MetadataScanner:
         alignment: int = _DEFAULT_ALIGNMENT,
         merge_gap: int = _DEFAULT_MERGE_GAP,
         resolve_vlen_attributes: bool = False,
+        attribute_value_names: frozenset[str] | None = _PARSED_ATTRIBUTE_VALUE_NAMES,
     ) -> None:
         self.source_url = source_url
         self.reader = reader
@@ -394,6 +404,7 @@ class _HDF5MetadataScanner:
         self.max_bootstrap_bytes = max(max_bootstrap_bytes, bootstrap_bytes)
         self.object_header_bootstrap_bytes = object_header_bootstrap_bytes
         self.resolve_vlen_attributes = resolve_vlen_attributes
+        self.attribute_value_names = attribute_value_names
         self.window_cache = _RangeWindowCache(
             reader,
             source_url=source_url,
@@ -1206,7 +1217,7 @@ class _HDF5MetadataScanner:
                         payload,
                         self.superblock.length_size,
                         offset_size=self.superblock.offset_size,
-                        wanted_names=_PARSED_ATTRIBUTE_VALUE_NAMES,
+                        wanted_names=self.attribute_value_names,
                     )
                     if value is not _ATTRIBUTE_SKIPPED:
                         info.attributes[name] = value

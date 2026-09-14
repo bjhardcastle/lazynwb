@@ -344,8 +344,8 @@ Get a single time series by searching for a name:
 ```python
 ts = lazynwb.get_timeseries('my_file.nwb', search_term='running_speed')
 
-ts.data          # h5py.Dataset or zarr.Array (lazy - not loaded until sliced)
-ts.timestamps    # h5py.Dataset or zarr.Array
+ts.data          # lazy dataset-like object (not loaded until sliced)
+ts.timestamps    # lazy stored or rate-derived timestamps
 ts.unit          # e.g. 'cm/s'
 ts.rate          # sampling rate, if available
 ts.description
@@ -598,9 +598,11 @@ NWB files:
 - `scan_nwb` lets Polars push down `.select(...)` projections and `.filter(...)`
   predicates before `.collect()`, which is the preferred path for large remote
   tables.
-- TimeSeries data and timestamps are returned as backend arrays. Slice bounded
-  ranges such as `ts.data[:1000]`; avoid `ts.data[:]` unless you intend to read
-  the full remote array.
+- Remote HDF5 TimeSeries data, timestamps, and child datasets use range-backed
+  dataset-like objects; Zarr sources retain backend arrays. Slice bounded ranges
+  such as `ts.data[:1000]`; avoid `ts.data[:]` unless you intend to read the full
+  remote array. Rate-derived timestamps are also generated only for the requested
+  slice.
 - Metadata and internal-path discovery use bounded catalog reads where possible,
   so they should not require broad raw data traversal on supported remote HDF5
   sources.

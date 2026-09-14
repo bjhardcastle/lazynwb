@@ -18,6 +18,9 @@ import lazynwb.types_
 logger = logging.getLogger(__name__)
 
 _PARSED_METADATA_OPTIONS_KEY = '{"resolve_vlen_attributes":false}'
+_RESOLVED_ATTRS_METADATA_OPTIONS_KEY = (
+    '{"attribute_profile":"timeseries","resolve_vlen_attributes":true}'
+)
 
 
 @dataclasses.dataclass(slots=True)
@@ -82,12 +85,15 @@ class _HDF5BackendReader:
         source: lazynwb.types_.PathLike,
         range_reader: hdf5_range_reader._RangeReader | None = None,
         cache: cache_sqlite._SQLiteSnapshotCache | None = None,
+        *,
+        resolve_vlen_attributes: bool = False,
     ) -> None:
         self._source_url = str(source)
         self._range_reader = range_reader or hdf5_range_reader._ObstoreRangeReader(
             self._source_url
         )
         self._cache = cache
+        self._resolve_vlen_attributes = resolve_vlen_attributes
         self._source_identity: catalog_models._SourceIdentity | None = None
         self._scanner: hdf5_parser._HDF5MetadataScanner | None = None
         self._parsed_metadata_loaded = False
@@ -181,7 +187,7 @@ class _HDF5BackendReader:
         phase_started = started
         source_identity = await self.get_source_identity()
         identity_seconds = time.perf_counter() - phase_started
-        if self._cache is not None:
+        if self._cache is not None and not self._resolve_vlen_attributes:
             phase_started = time.perf_counter()
             cached = await self._cache.get_table_schema_snapshot(
                 source_identity,
@@ -211,7 +217,7 @@ class _HDF5BackendReader:
             parsed_lookup = await self._cache.get_parsed_hdf5_metadata(
                 source_identity,
                 payload_version=hdf5_parser._PARSED_METADATA_PAYLOAD_VERSION,
-                options_key=_PARSED_METADATA_OPTIONS_KEY,
+                options_key=self._parsed_metadata_options_key,
             )
             parsed_cache_seconds = time.perf_counter() - phase_started
             if parsed_lookup.payload is not None:
@@ -267,7 +273,7 @@ class _HDF5BackendReader:
             await self._cache.put_parsed_hdf5_metadata(
                 source_identity,
                 payload_version=hdf5_parser._PARSED_METADATA_PAYLOAD_VERSION,
-                options_key=_PARSED_METADATA_OPTIONS_KEY,
+                options_key=self._parsed_metadata_options_key,
                 payload=scanner.export_metadata(),
             )
             cache_write_seconds = time.perf_counter() - phase_started
@@ -306,7 +312,7 @@ class _HDF5BackendReader:
             parsed_lookup = await self._cache.get_parsed_hdf5_metadata(
                 source_identity,
                 payload_version=hdf5_parser._PARSED_METADATA_PAYLOAD_VERSION,
-                options_key=_PARSED_METADATA_OPTIONS_KEY,
+                options_key=self._parsed_metadata_options_key,
             )
             if parsed_lookup.payload is not None:
                 scanner.import_metadata(parsed_lookup.payload)
@@ -343,7 +349,7 @@ class _HDF5BackendReader:
             await self._cache.put_parsed_hdf5_metadata(
                 source_identity,
                 payload_version=hdf5_parser._PARSED_METADATA_PAYLOAD_VERSION,
-                options_key=_PARSED_METADATA_OPTIONS_KEY,
+                options_key=self._parsed_metadata_options_key,
                 payload=scanner.export_metadata(),
             )
         logger.debug(
@@ -369,8 +375,20 @@ class _HDF5BackendReader:
                 self._source_url,
                 self._range_reader,
                 content_length=content_length,
+                resolve_vlen_attributes=self._resolve_vlen_attributes,
+                attribute_value_names=(
+                    hdf5_parser._TIMESERIES_ATTRIBUTE_VALUE_NAMES
+                    if self._resolve_vlen_attributes
+                    else hdf5_parser._PARSED_ATTRIBUTE_VALUE_NAMES
+                ),
             )
         return self._scanner
+
+    @property
+    def _parsed_metadata_options_key(self) -> str:
+        if self._resolve_vlen_attributes:
+            return _RESOLVED_ATTRS_METADATA_OPTIONS_KEY
+        return _PARSED_METADATA_OPTIONS_KEY
 
 
 def _get_table_length_from_columns(
@@ -402,6 +420,8 @@ def _is_fast_hdf5_candidate(source: lazynwb.types_.PathLike) -> bool:
 
 def _default_hdf5_backend_reader(
     source: lazynwb.types_.PathLike,
+    *,
+    resolve_vlen_attributes: bool = False,
 ) -> _HDF5BackendReader:
     return _HDF5BackendReader(
         source,
@@ -412,4 +432,5 @@ def _default_hdf5_backend_reader(
             ),
         ),
         cache=cache_sqlite._default_snapshot_cache(),
+        resolve_vlen_attributes=resolve_vlen_attributes,
     )

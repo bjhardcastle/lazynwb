@@ -33,6 +33,7 @@ def test_dandi_001637_timeseries_discovery_exact_lookup_and_bounded_reads(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(lazynwb.config, "anon", True)
     _capture_timeseries_debug_logs(caplog)
     resolved_asset, timeseries_path = _discover_first_timeseries_path(
         dandi_001637_resolved_sample_assets,
@@ -40,6 +41,7 @@ def test_dandi_001637_timeseries_discovery_exact_lookup_and_bounded_reads(
     )
     source_url = resolved_asset.source_url
     sanitized_source_url = dandi_sample._sanitize_source_url_for_logging(source_url)
+    monkeypatch.setattr(file_io, "_get_accessor", _fail_accessor_traversal)
 
     timeseries = lazynwb.get_timeseries(
         source_url,
@@ -93,7 +95,6 @@ def test_dandi_001637_timeseries_discovery_exact_lookup_and_bounded_reads(
 
     timestamp_values = _read_bounded_timestamps_or_rate_derived(
         timeseries,
-        source_url=source_url,
         sanitized_source_url=sanitized_source_url,
         timeseries_path=timeseries_path,
         bounded_sample_count=data_values.shape[0],
@@ -108,6 +109,7 @@ def test_dandi_001637_timeseries_discovery_exact_lookup_and_bounded_reads(
     assert "bounded_read_size=" in log_text
     assert "bounded_read_bytes=" in log_text
     assert "built HDF5 path summary" in log_text
+    assert "range-backed TimeSeries dataset read" in log_text
     assert "internal path discovery falling back to accessor traversal" not in log_text
 
 
@@ -169,61 +171,27 @@ def _candidate_timeseries_paths(
 def _read_bounded_timestamps_or_rate_derived(
     timeseries: lazynwb.TimeSeries,
     *,
-    source_url: str,
     sanitized_source_url: str,
     timeseries_path: str,
     bounded_sample_count: int,
     max_bounded_read_bytes: int,
 ) -> np.ndarray:
-    file_accessor = file_io._get_accessor(source_url)
-    timestamps_path = f"{timeseries_path}/timestamps"
-    if timestamps_path in file_accessor:
-        timestamps = timeseries.timestamps
-        timestamp_values, timestamp_slice = _read_bounded_array(
-            timestamps,
-            max_bounded_read_bytes,
-        )
-        _LOGGER.debug(
-            "bounded TimeSeries timestamps read: source_url=%s "
-            "exact_timeseries_path=%s timestamps_shape=%s bounded_slice=%s "
-            "bounded_read_shape=%s bounded_read_size=%d bounded_read_bytes=%d "
-            "max_bounded_read_bytes=%d",
-            sanitized_source_url,
-            timeseries_path,
-            _shape_tuple(timestamps.shape),
-            timestamp_slice,
-            timestamp_values.shape,
-            timestamp_values.size,
-            timestamp_values.nbytes,
-            max_bounded_read_bytes,
-        )
-        return timestamp_values
-
-    starting_time = timeseries._starting_time
-    assert starting_time is not None
-    rate = timeseries.rate
-    assert rate is not None
-    max_timestamp_count = max(
-        1, max_bounded_read_bytes // np.dtype(np.float64).itemsize
+    timestamps = timeseries.timestamps
+    timestamp_values, timestamp_slice = _read_bounded_array(
+        timestamps,
+        max_bounded_read_bytes,
     )
-    timestamp_count = min(
-        max(1, bounded_sample_count),
-        _MAX_BOUNDED_AXIS_EXTENT,
-        max_timestamp_count,
-    )
-    starting_time_value = float(np.asarray(starting_time[()]).item())
-    timestamp_values = (
-        np.arange(timestamp_count, dtype=np.float64) / float(rate)
-    ) + starting_time_value
     _LOGGER.debug(
-        "bounded TimeSeries rate-derived timestamps read: source_url=%s "
-        "exact_timeseries_path=%s starting_time=%s rate=%s "
-        "bounded_read_shape=%s bounded_read_size=%d bounded_read_bytes=%d "
+        "bounded TimeSeries timestamps read: source_url=%s "
+        "exact_timeseries_path=%s timestamps_shape=%s bounded_slice=%s "
+        "bounded_sample_count=%d bounded_read_shape=%s bounded_read_size=%d "
+        "bounded_read_bytes=%d "
         "max_bounded_read_bytes=%d",
         sanitized_source_url,
         timeseries_path,
-        starting_time_value,
-        rate,
+        _shape_tuple(timestamps.shape),
+        timestamp_slice,
+        bounded_sample_count,
         timestamp_values.shape,
         timestamp_values.size,
         timestamp_values.nbytes,
