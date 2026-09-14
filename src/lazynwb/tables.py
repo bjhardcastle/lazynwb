@@ -2068,15 +2068,12 @@ def _materialize_table_data_from_columns(  # noqa: C901
             raise lazynwb.exceptions.InternalPathError(
                 f"Could not determine TimeSeries length for {normalized_table_path!r}"
             )
-        timestamps = np.linspace(
-            starting_time,
-            starting_time + timeseries_len / rate,
-            num=timeseries_len,
-        )
-        column_data["timestamps"] = timestamps[_idx]
-        logger.debug(
-            "generated %d TimeSeries timestamps from range-read starting_time/rate",
-            len(column_data["timestamps"]),
+        column_data["timestamps"] = _rate_derived_timestamps(
+            starting_time=starting_time,
+            rate=rate,
+            timeseries_len=timeseries_len,
+            table_row_indices=table_row_indices,
+            normalized_table_path=normalized_table_path,
         )
     for column in non_indexed_columns:
         if column.ndim is None:
@@ -2105,10 +2102,13 @@ def _materialize_table_data_from_columns(  # noqa: C901
                 raise lazynwb.exceptions.InternalPathError(
                     f"Could not determine TimeSeries length for {normalized_table_path!r}"
                 )
-            timestamps = np.linspace(
-                starting_time, starting_time + timeseries_len / rate, num=timeseries_len
+            column_data["timestamps"] = _rate_derived_timestamps(
+                starting_time=starting_time,
+                rate=rate,
+                timeseries_len=timeseries_len,
+                table_row_indices=table_row_indices,
+                normalized_table_path=normalized_table_path,
             )
-            column_data["timestamps"] = timestamps[_idx]
             continue
         if _is_string_or_object_dtype(column.dtype):
             if not column.shape:
@@ -2220,6 +2220,34 @@ def _materialize_table_data_from_columns(  # noqa: C901
             identifier_column_data.pop(column_name)
 
     return column_data | identifier_column_data
+
+
+def _rate_derived_timestamps(
+    *,
+    starting_time: float | np.generic,
+    rate: float | np.generic,
+    timeseries_len: int,
+    table_row_indices: Sequence[int] | None,
+    normalized_table_path: str,
+) -> npt.NDArray[np.float64]:
+    if table_row_indices is None:
+        timestamp_indices = np.arange(timeseries_len, dtype=np.float64)
+    else:
+        timestamp_indices = _normalize_indexed_table_row_indices(
+            table_row_indices,
+            row_count=timeseries_len,
+        )
+    timestamps = float(starting_time) + (timestamp_indices / float(rate))
+    logger.debug(
+        "generated rate-derived TimeSeries timestamps for %s: selected_samples=%d "
+        "total_samples=%d starting_time=%s rate=%s",
+        normalized_table_path,
+        len(timestamp_indices),
+        timeseries_len,
+        starting_time,
+        rate,
+    )
+    return np.asarray(timestamps, dtype=np.float64)
 
 
 def _get_table_data(

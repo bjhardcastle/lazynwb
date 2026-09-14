@@ -111,6 +111,30 @@ def test_timeseries_with_rate(nwb_fixture_name, request):
     assert isinstance(df.schema['timestamps'], pl.Float64), f"'timestamps' column should be a float type, not {df.schema['timestamps']}"
 
 
+def test_sparse_rate_timestamps_are_generated_only_for_selected_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def _fail_full_index_generation(*args: object, **kwargs: object) -> None:
+        raise AssertionError("sparse timestamp generation must not allocate a full index")
+
+    monkeypatch.setattr(lazynwb.tables.np, "arange", _fail_full_index_generation)
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+
+    timestamps = lazynwb.tables._rate_derived_timestamps(
+        starting_time=2.0,
+        rate=60.0,
+        timeseries_len=10_000_000,
+        table_row_indices=[9_999_999, 2, 2],
+        normalized_table_path="/processing/behavior/running_speed_with_rate",
+    )
+
+    assert timestamps.tolist() == pytest.approx(
+        [2.0 + 9_999_999 / 60.0, 2.0 + 2 / 60.0, 2.0 + 2 / 60.0]
+    )
+    assert "selected_samples=3 total_samples=10000000" in caplog.text
+
+
 def test_indexed_column_subset_reads_data_slices_not_full_column() -> None:
     data_accessor = _CountingArray([10, 11, 20, 21, 22, 30, 40, 41])
     index_accessor = _CountingArray([2, 5, 6, 8])
