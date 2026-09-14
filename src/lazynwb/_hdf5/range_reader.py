@@ -127,6 +127,7 @@ class _ObstoreRangeReader:
             **self._storage_options,
         )
         self._semaphore = asyncio.Semaphore(max(1, self._config.max_concurrency))
+        self._content_length: int | None = None
         self.request_count = 0
         self.bytes_fetched = 0
         logger.debug(
@@ -140,6 +141,7 @@ class _ObstoreRangeReader:
             self._source_identity_cache_key(resolved_url=None)
         )
         if cached_identity is not None:
+            self._content_length = cached_identity.content_length
             logger.debug(
                 "source identity cache hit for %s (resolved_url=%r, validator=%s)",
                 self._url,
@@ -150,6 +152,7 @@ class _ObstoreRangeReader:
         logger.debug("source identity cache miss for %s", self._url)
         metadata = await obstore.head_async(self._store, self._object_path)
         source_identity = _source_identity_from_metadata(self._url, metadata)
+        self._content_length = source_identity.content_length
         _put_cached_source_identity(
             self._source_identity_cache_key(resolved_url=None),
             source_identity,
@@ -197,10 +200,19 @@ class _ObstoreRangeReader:
         requested_ranges = tuple(ranges)
         if not requested_ranges:
             return {}
+        if self._content_length is None:
+            identity = await self.get_source_identity()
+            self._content_length = identity.content_length
+        _require_ranges_within_bound(
+            requested_ranges,
+            upper_bound=self._content_length,
+            source_url=self._url,
+        )
         coalesced_ranges = _coalesce_ranges(
             requested_ranges,
             alignment=self._config.range_alignment,
             max_gap=self._config.coalesce_gap_bytes,
+            upper_bound=self._content_length,
         )
         logger.debug(
             "planned %d requested ranges as %d coalesced windows for %s",
@@ -307,10 +319,16 @@ class _BufferRangeReader:
         ranges: Iterable[_ByteRange],
     ) -> dict[_ByteRange, bytes]:
         requested_ranges = tuple(ranges)
+        _require_ranges_within_bound(
+            requested_ranges,
+            upper_bound=len(self._data),
+            source_url="memory://buffer",
+        )
         coalesced_ranges = _coalesce_ranges(
             requested_ranges,
             alignment=self._config.range_alignment,
             max_gap=self._config.coalesce_gap_bytes,
+            upper_bound=len(self._data),
         )
         coalesced_payloads = {
             byte_range: await self.read_range(byte_range.start, end=byte_range.end)
@@ -390,9 +408,15 @@ def _coalesce_ranges(
     ranges: Iterable[_ByteRange],
     alignment: int,
     max_gap: int,
+    upper_bound: int | None = None,
 ) -> tuple[_ByteRange, ...]:
     aligned_ranges = sorted(
-        _align_range(byte_range, alignment=alignment) for byte_range in ranges
+        _align_range(
+            byte_range,
+            alignment=alignment,
+            upper_bound=upper_bound,
+        )
+        for byte_range in ranges
     )
     if not aligned_ranges:
         return ()
@@ -409,11 +433,33 @@ def _coalesce_ranges(
     return tuple(coalesced)
 
 
-def _align_range(byte_range: _ByteRange, alignment: int) -> _ByteRange:
+def _require_ranges_within_bound(
+    ranges: Iterable[_ByteRange],
+    *,
+    upper_bound: int | None,
+    source_url: str,
+) -> None:
+    if upper_bound is None:
+        return
+    for byte_range in ranges:
+        if byte_range.end > upper_bound:
+            raise _RangeReadError(
+                f"range {byte_range.start}:{byte_range.end} exceeds "
+                f"{source_url} content length {upper_bound}"
+            )
+
+
+def _align_range(
+    byte_range: _ByteRange,
+    alignment: int,
+    upper_bound: int | None = None,
+) -> _ByteRange:
     if alignment <= 1:
         return byte_range
     start = (byte_range.start // alignment) * alignment
     end = math.ceil(byte_range.end / alignment) * alignment
+    if upper_bound is not None:
+        end = min(end, upper_bound)
     return _ByteRange(start=start, end=end)
 
 

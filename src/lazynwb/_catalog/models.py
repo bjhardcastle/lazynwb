@@ -194,6 +194,11 @@ class _DatasetSchema:
     is_dataset: bool = False
     hdf5_data_offset: int | None = None
     hdf5_storage_size: int | None = None
+    hdf5_base_address: int | None = None
+    hdf5_offset_size: int | None = None
+    hdf5_length_size: int | None = None
+    hdf5_chunk_index_offset: int | None = None
+    hdf5_chunk_rank: int | None = None
 
     @property
     def attrs(self) -> types.MappingProxyType:
@@ -226,6 +231,11 @@ class _DatasetSchema:
             "is_dataset": self.is_dataset,
             "hdf5_data_offset": self.hdf5_data_offset,
             "hdf5_storage_size": self.hdf5_storage_size,
+            "hdf5_base_address": self.hdf5_base_address,
+            "hdf5_offset_size": self.hdf5_offset_size,
+            "hdf5_length_size": self.hdf5_length_size,
+            "hdf5_chunk_index_offset": self.hdf5_chunk_index_offset,
+            "hdf5_chunk_rank": self.hdf5_chunk_rank,
         }
 
     @classmethod
@@ -262,6 +272,13 @@ class _DatasetSchema:
             is_dataset=bool(data.get("is_dataset", False)),
             hdf5_data_offset=_optional_int(data.get("hdf5_data_offset")),
             hdf5_storage_size=_optional_int(data.get("hdf5_storage_size")),
+            hdf5_base_address=_optional_int(data.get("hdf5_base_address")),
+            hdf5_offset_size=_optional_int(data.get("hdf5_offset_size")),
+            hdf5_length_size=_optional_int(data.get("hdf5_length_size")),
+            hdf5_chunk_index_offset=_optional_int(
+                data.get("hdf5_chunk_index_offset")
+            ),
+            hdf5_chunk_rank=_optional_int(data.get("hdf5_chunk_rank")),
         )
 
 
@@ -364,7 +381,7 @@ class _TableColumnSchema:
 class _TableSchemaSnapshot:
     """Versioned table schema/catalog snapshot for one exact table path."""
 
-    PAYLOAD_VERSION = 3
+    PAYLOAD_VERSION = 4
 
     source_identity: _SourceIdentity
     table_path: str

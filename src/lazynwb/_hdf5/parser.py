@@ -42,7 +42,8 @@ _DEFAULT_OBJECT_HEADER_BOOTSTRAP_BYTES = int(
 )
 _DEFAULT_ALIGNMENT = int(os.getenv("LAZYNWB_HDF5_ALIGNMENT", 4 * 1024))
 _DEFAULT_MERGE_GAP = int(os.getenv("LAZYNWB_HDF5_MERGE_GAP", 64 * 1024))
-_PARSED_METADATA_PAYLOAD_VERSION = 2
+_PARSED_METADATA_PAYLOAD_VERSION = 3
+_SUPPORTED_DIRECT_FILTER_IDS = frozenset({1, 2, 3, 32001, 32015})
 
 _ByteBuffer = bytes
 
@@ -68,6 +69,16 @@ class _GlobalHeapReference:
     address: int
     index: int
     length: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _FilterPipelineEntry:
+    """One HDF5 raw-data filter, including the values needed to decode it."""
+
+    filter_id: int
+    flags: int
+    client_values: tuple[int, ...] = ()
+    name: str | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -170,7 +181,7 @@ class _DatasetDescriptor:
     attributes: dict[str, Any]
     layout: dict[str, Any] | None
     fill_value: dict[str, Any] | None
-    filters: tuple[int, ...]
+    filters: tuple[_FilterPipelineEntry, ...]
 
     @property
     def ndim(self) -> int:
@@ -186,7 +197,7 @@ class _ObjectHeaderInfo:
     old_group: _OldGroupPointers | None = None
     layout: dict[str, Any] | None = None
     fill_value: dict[str, Any] | None = None
-    filters: tuple[int, ...] = ()
+    filters: tuple[_FilterPipelineEntry, ...] = ()
     has_colnames: bool = False
 
     @property
@@ -909,12 +920,19 @@ class _HDF5MetadataScanner:
         header: _ObjectHeaderInfo,
     ) -> _DatasetDescriptor:
         layout = dict(header.layout) if header.layout is not None else None
-        if (
-            layout is not None
-            and isinstance(layout.get("address"), int)
-            and layout.get("kind") == "contiguous"
-        ):
-            layout["file_offset"] = self._absolute(int(layout["address"]))
+        if layout is not None:
+            assert self.superblock is not None
+            layout["base_address"] = self.superblock.base_address
+            layout["offset_size"] = self.superblock.offset_size
+            layout["length_size"] = self.superblock.length_size
+            if isinstance(layout.get("address"), int) and self._is_defined_address(
+                int(layout["address"])
+            ):
+                absolute_address = self._absolute(int(layout["address"]))
+                if layout.get("kind") == "contiguous":
+                    layout["file_offset"] = absolute_address
+                elif layout.get("kind") == "chunked":
+                    layout["chunk_index_offset"] = absolute_address
         return _DatasetDescriptor(
             name=name,
             path=path,
@@ -1307,6 +1325,11 @@ def _column_schema_from_descriptor(
         is_dataset=True,
         hdf5_data_offset=storage_facts["hdf5_data_offset"],
         hdf5_storage_size=storage_facts["hdf5_storage_size"],
+        hdf5_base_address=storage_facts["hdf5_base_address"],
+        hdf5_offset_size=storage_facts["hdf5_offset_size"],
+        hdf5_length_size=storage_facts["hdf5_length_size"],
+        hdf5_chunk_index_offset=storage_facts["hdf5_chunk_index_offset"],
+        hdf5_chunk_rank=storage_facts["hdf5_chunk_rank"],
     )
     if column_rules.is_metadata_table and descriptor.ndim <= 1:
         logger.debug(
@@ -1374,22 +1397,28 @@ def _storage_facts_from_descriptor(descriptor: _DatasetDescriptor) -> dict[str, 
         hdf5_storage_size = None
     if isinstance(chunks, list):
         chunks = tuple(int(item) for item in chunks)
-    compression, compression_opts = _compression_facts_from_filter_ids(
+    chunk_rank = len(chunks) if isinstance(chunks, tuple) else None
+    if (
+        isinstance(chunks, tuple)
+        and len(chunks) == descriptor.ndim + 1
+        and chunks[-1] == descriptor.datatype.size
+    ):
+        # Version-3 chunk layout messages append the datatype byte size as a
+        # non-dataspace dimension. It is part of the v1 B-tree key rank, but
+        # not part of the public chunk shape.
+        chunks = chunks[:-1]
+    compression, compression_opts = _compression_facts_from_filter_pipeline(
         descriptor.filters
     )
-    filters: list[Any] = []
-    if compression is not None:
-        filters.append(
-            {
-                "id": "compression",
-                "name": compression,
-                "options": compression_opts,
-            }
-        )
-    for filter_id in descriptor.filters:
-        if filter_id == 1:
-            continue
-        filters.append({"id": filter_id})
+    filters: list[Any] = [
+        {
+            "id": entry.filter_id,
+            "name": entry.name,
+            "flags": entry.flags,
+            "options": list(entry.client_values),
+        }
+        for entry in descriptor.filters
+    ]
     read_capabilities = ["metadata", "shape", "dtype", "slice"]
     if descriptor.ndim == 0:
         read_capabilities.append("scalar")
@@ -1404,6 +1433,14 @@ def _storage_facts_from_descriptor(descriptor: _DatasetDescriptor) -> dict[str, 
         read_capabilities.append("chunked")
     if filters:
         read_capabilities.append("filtered")
+    if (
+        chunks is not None
+        and layout.get("chunk_index_type") == "btree_v1"
+        and {entry.filter_id for entry in descriptor.filters}.issubset(
+            _SUPPORTED_DIRECT_FILTER_IDS
+        )
+    ):
+        read_capabilities.append("direct_chunked")
     logger.debug(
         "HDF5 parser storage facts for %s: layout=%s chunks=%s filters=%s "
         "offset=%s storage_size=%s",
@@ -1423,18 +1460,31 @@ def _storage_facts_from_descriptor(descriptor: _DatasetDescriptor) -> dict[str, 
         "read_capabilities": tuple(read_capabilities),
         "hdf5_data_offset": hdf5_data_offset,
         "hdf5_storage_size": hdf5_storage_size,
+        "hdf5_base_address": _optional_layout_int(layout, "base_address"),
+        "hdf5_offset_size": _optional_layout_int(layout, "offset_size"),
+        "hdf5_length_size": _optional_layout_int(layout, "length_size"),
+        "hdf5_chunk_index_offset": _optional_layout_int(
+            layout, "chunk_index_offset"
+        ),
+        "hdf5_chunk_rank": chunk_rank,
     }
 
 
-def _compression_facts_from_filter_ids(
-    filter_ids: tuple[int, ...],
+def _optional_layout_int(layout: Mapping[str, Any], key: str) -> int | None:
+    value = layout.get(key)
+    return int(value) if isinstance(value, int) else None
+
+
+def _compression_facts_from_filter_pipeline(
+    filters: tuple[_FilterPipelineEntry, ...],
 ) -> tuple[str | None, Any]:
-    if 1 in filter_ids:
-        return "gzip", None
-    if 32001 in filter_ids:
-        return "blosc", None
-    if 32015 in filter_ids:
-        return "zstd", None
+    by_id = {entry.filter_id: entry for entry in filters}
+    if entry := by_id.get(1):
+        return "gzip", entry.client_values[0] if entry.client_values else None
+    if entry := by_id.get(32001):
+        return "blosc", list(entry.client_values) or None
+    if entry := by_id.get(32015):
+        return "zstd", entry.client_values[0] if entry.client_values else None
     return None, None
 
 
@@ -1634,12 +1684,22 @@ def _parse_fill_value(data: bytes) -> dict[str, Any]:
     if version in (1, 2):
         defined = len(data) > 3 and data[3] != 0
         size = _u(data, 4, 4) if defined and len(data) >= 8 else 0
-        return {"version": version, "defined": defined, "size": size}
+        return {
+            "version": version,
+            "defined": defined,
+            "size": size,
+            "value_hex": bytes(data[8 : 8 + size]).hex() if size else None,
+        }
     if version == 3:
         flags = data[1] if len(data) > 1 else 0
         defined = bool(flags & 0b0010_0000)
         size = _u(data, 2, 4) if defined and len(data) >= 6 else 0
-        return {"version": version, "defined": defined, "size": size}
+        return {
+            "version": version,
+            "defined": defined,
+            "size": size,
+            "value_hex": bytes(data[6 : 6 + size]).hex() if size else None,
+        }
     return {"version": version}
 
 
@@ -1663,43 +1723,72 @@ def _parse_data_layout(
         storage_size = _u(data, 2, 2)
         payload["storage_size"] = storage_size
         payload["data"] = bytes(data[4 : 4 + storage_size])
-    elif kind == "chunked" and version in (3, 4) and len(data) >= 4 + offset_size:
+    elif kind == "chunked" and version == 3 and len(data) >= 3 + offset_size:
         rank = data[2]
-        chunk_address_offset = 4
+        chunk_address_offset = 3
         payload["address"] = _u(data, chunk_address_offset, offset_size)
         dims_offset = chunk_address_offset + offset_size
         if len(data) >= dims_offset + (rank * 4):
             payload["chunk_shape"] = tuple(
                 _u(data, dims_offset + (index * 4), 4) for index in range(rank)
             )
+        payload["chunk_index_type"] = "btree_v1"
+        payload["chunk_rank"] = rank
+    elif kind == "chunked" and version == 4:
+        # Version 4 can use extensible arrays, fixed arrays, v2 B-trees, or an
+        # implicit/single-chunk index. Preserve the version so materialization
+        # can fail with a structured unsupported-layout error instead of
+        # interpreting the index as a v1 B-tree.
+        payload["chunk_index_type"] = "unsupported_v4"
     return payload
 
 
-def _parse_filter_pipeline(data: bytes) -> tuple[int, ...]:
+def _parse_filter_pipeline(data: bytes) -> tuple[_FilterPipelineEntry, ...]:
     version = data[0]
     filter_count = data[1] if len(data) > 1 else 0
     offset = 8 if version == 1 else 2
-    filter_ids: list[int] = []
+    filters: list[_FilterPipelineEntry] = []
     for _ in range(filter_count):
         if version == 1:
             if offset + 8 > len(data):
                 break
             filter_id = _u(data, offset, 2)
             name_size = _u(data, offset + 2, 2)
+            flags = _u(data, offset + 4, 2)
             client_value_count = _u(data, offset + 6, 2)
             offset += 8
-            if filter_id >= 256:
-                offset += _align8(name_size)
+            name_payload = data[offset : offset + name_size]
+            name = _strip_nul_bytes(name_payload).decode("utf-8", errors="replace")
+            offset += _align8(name_size)
         else:
             if offset + 6 > len(data):
                 break
             filter_id = _u(data, offset, 2)
+            flags = _u(data, offset + 2, 2)
             client_value_count = _u(data, offset + 4, 2)
             offset += 6
+            name = None
+            if filter_id >= 256:
+                name_end = _find_nul(data, offset)
+                name = bytes(data[offset:name_end]).decode("utf-8", errors="replace")
+                offset = name_end + 1
+        client_values = tuple(
+            _u(data, offset + (index * 4), 4)
+            for index in range(client_value_count)
+            if offset + ((index + 1) * 4) <= len(data)
+        )
         offset += client_value_count * 4
-        offset = _align8(offset)
-        filter_ids.append(filter_id)
-    return tuple(filter_ids)
+        if version == 1:
+            offset = _align8(offset)
+        filters.append(
+            _FilterPipelineEntry(
+                filter_id=filter_id,
+                flags=flags,
+                client_values=client_values,
+                name=name or None,
+            )
+        )
+    return tuple(filters)
 
 
 def _decode_attribute_payload(
@@ -2063,7 +2152,15 @@ def _encode_object_header(value: _ObjectHeaderInfo) -> dict[str, Any]:
         "old_group": _encode_old_group(value.old_group),
         "layout": _encode_json_value(value.layout),
         "fill_value": _encode_json_value(value.fill_value),
-        "filters": list(value.filters),
+        "filters": [
+            {
+                "id": entry.filter_id,
+                "flags": entry.flags,
+                "client_values": list(entry.client_values),
+                "name": entry.name,
+            }
+            for entry in value.filters
+        ],
         "has_colnames": value.has_colnames,
     }
 
@@ -2083,6 +2180,20 @@ def _decode_object_header(payload: object) -> _ObjectHeaderInfo:
         old_group=_decode_old_group(payload.get("old_group")),
         layout=layout,
         fill_value=_decode_json_value(payload.get("fill_value")),
-        filters=tuple(int(value) for value in payload.get("filters", ())),
+        filters=tuple(
+            _decode_filter_pipeline_entry(value)
+            for value in payload.get("filters", ())
+        ),
         has_colnames=bool(payload.get("has_colnames", False)),
+    )
+
+
+def _decode_filter_pipeline_entry(payload: object) -> _FilterPipelineEntry:
+    if not isinstance(payload, Mapping):
+        raise ValueError("filter pipeline entry must be an object")
+    return _FilterPipelineEntry(
+        filter_id=int(payload["id"]),
+        flags=int(payload.get("flags", 0)),
+        client_values=tuple(int(value) for value in payload.get("client_values", ())),
+        name=(str(payload["name"]) if payload.get("name") is not None else None),
     )

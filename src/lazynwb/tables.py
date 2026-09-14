@@ -6,12 +6,16 @@ import concurrent.futures
 import dataclasses
 import difflib
 import logging
+import math
 import time
 import typing
+import urllib.parse
+import zlib
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, TypeVar
 
 import h5py
+import numcodecs
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -63,6 +67,7 @@ UNITS_TABLE_INDEX_COLUMN_NAME = "_units" + TABLE_INDEX_COLUMN_NAME
 
 _INDEXED_COLUMN_FULL_READ_MIN_COVERAGE = 0.8
 _INDEXED_COLUMN_MAX_COALESCE_GAP_ELEMENTS = 1_048_576
+_SUPPORTED_DIRECT_HDF5_FILTER_IDS = frozenset({1, 2, 3, 32001, 32015})
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -97,6 +102,23 @@ class _DirectHDF5IndexedRangeReadPlan:
     requested_element_count: int
     spanned_element_count: int
     full_element_count: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _HDF5ChunkRecord:
+    address: int
+    stored_size: int
+    filter_mask: int
+    offsets: tuple[int, ...]
+
+
+class _DirectHDF5ReadError(RuntimeError):
+    """Private direct-reader coverage error, shaped at the public boundary."""
+
+    def __init__(self, column_name: str, reason: str) -> None:
+        super().__init__(reason)
+        self.column_name = column_name
+        self.reason = reason
 
 
 @typing.overload
@@ -635,19 +657,15 @@ def _raw_metadata_from_catalog_column(
 def _is_direct_hdf5_scalar_column(
     column: catalog_models._TableColumnSchema,
 ) -> bool:
-    if not _has_direct_hdf5_contiguous_layout(column):
+    if not _has_direct_hdf5_layout(column):
         return False
     if column.is_nominally_indexed or column.is_index_column:
         return False
-    if column.is_multidimensional:
-        return False
     if column.is_timeseries and not column.is_timeseries_length_aligned:
         return False
-    if column.name == "starting_time" and column.is_timeseries_with_rate:
+    if not _has_direct_hdf5_dtype(column):
         return False
-    if not _has_direct_hdf5_numpy_dtype(column):
-        return False
-    if column.ndim not in (0, 1):
+    if column.ndim is None:
         return False
     return True
 
@@ -662,13 +680,54 @@ def _has_direct_hdf5_contiguous_layout(
     )
 
 
-def _has_direct_hdf5_numpy_dtype(
+def _has_direct_hdf5_chunked_layout(
     column: catalog_models._TableColumnSchema,
 ) -> bool:
-    return (
-        column.dtype.kind in {"numeric", "bool"}
-        and column.dtype.numpy_dtype is not None
+    dataset = column.dataset
+    if not (
+        dataset.storage_layout == "chunked"
+        and dataset.chunks
+        and dataset.hdf5_chunk_index_offset is not None
+        and dataset.hdf5_chunk_rank is not None
+        and dataset.hdf5_offset_size is not None
+    ):
+        return False
+    filter_ids = {
+        int(item["id"])
+        for item in dataset.filters
+        if isinstance(item, Mapping) and isinstance(item.get("id"), int)
+    }
+    return filter_ids.issubset(_SUPPORTED_DIRECT_HDF5_FILTER_IDS)
+
+
+def _has_direct_hdf5_layout(column: catalog_models._TableColumnSchema) -> bool:
+    if (
+        column.shape
+        and math.prod(column.shape) == 0
+        and column.dataset.storage_layout in {"contiguous", "chunked"}
+    ):
+        return True
+    return _has_direct_hdf5_contiguous_layout(column) or _has_direct_hdf5_chunked_layout(
+        column
     )
+
+
+def _has_direct_hdf5_dtype(
+    column: catalog_models._TableColumnSchema,
+) -> bool:
+    dtype = column.dtype
+    if dtype.kind in {"numeric", "bool", "string"}:
+        return dtype.numpy_dtype is not None
+    if dtype.kind == "vlen_string":
+        return (
+            dtype.itemsize is not None
+            and column.dataset.hdf5_base_address is not None
+            and column.dataset.hdf5_offset_size is not None
+            and column.dataset.hdf5_length_size is not None
+        )
+    if dtype.kind == "array":
+        return dtype.element_numpy_dtype is not None and dtype.itemsize is not None
+    return False
 
 
 def _is_direct_hdf5_indexed_data_column(
@@ -677,13 +736,11 @@ def _is_direct_hdf5_indexed_data_column(
 ) -> bool:
     if column.is_index_column or not column.is_nominally_indexed:
         return False
-    if column.is_multidimensional:
+    if column.ndim is None or column.ndim < 1:
         return False
-    if column.ndim != 1:
+    if not _has_direct_hdf5_dtype(column):
         return False
-    if not _has_direct_hdf5_numpy_dtype(column):
-        return False
-    if not _has_direct_hdf5_contiguous_layout(column):
+    if not _has_direct_hdf5_layout(column):
         return False
     index_column_name = column.index_column_name or f"{column.name}_index"
     index_column = columns_by_name.get(index_column_name)
@@ -691,8 +748,8 @@ def _is_direct_hdf5_indexed_data_column(
         return False
     return (
         index_column.is_index_column
-        and _has_direct_hdf5_numpy_dtype(index_column)
-        and _has_direct_hdf5_contiguous_layout(index_column)
+        and _has_direct_hdf5_dtype(index_column)
+        and _has_direct_hdf5_layout(index_column)
     )
 
 
@@ -738,9 +795,59 @@ def _plan_direct_hdf5_table_reads(
     return read_plan
 
 
+def _direct_hdf5_unsupported_reason(
+    column: catalog_models._TableColumnSchema,
+) -> str:
+    dataset = column.dataset
+    if column.is_timeseries and not column.is_timeseries_length_aligned:
+        return "TimeSeries sidecar length is not aligned with the data column"
+    if column.dtype.kind not in {"numeric", "bool", "string", "vlen_string", "array"}:
+        return f"datatype {column.dtype.kind!r} is not supported"
+    if dataset.storage_layout == "chunked":
+        filter_ids = [
+            item.get("id") for item in dataset.filters if isinstance(item, Mapping)
+        ]
+        unsupported_filters = [
+            filter_id
+            for filter_id in filter_ids
+            if not isinstance(filter_id, int)
+            or filter_id not in _SUPPORTED_DIRECT_HDF5_FILTER_IDS
+        ]
+        if unsupported_filters:
+            return f"chunk filters {unsupported_filters!r} are not supported"
+        return "chunk index metadata is missing or unsupported"
+    return f"storage layout {dataset.storage_layout!r} is not directly readable"
+
+
+def _is_remote_source(path: lazynwb.types_.PathLike) -> bool:
+    return urllib.parse.urlsplit(str(path)).scheme.casefold() not in {"", "file"}
+
+
+def _unsupported_hdf5_layout_error(
+    *,
+    path: lazynwb.types_.PathLike,
+    table_path: str,
+    columns_and_reasons: Sequence[tuple[str, str]],
+) -> lazynwb.exceptions.UnsupportedHDF5LayoutError:
+    return lazynwb.exceptions.UnsupportedHDF5LayoutError(
+        source_url=str(path),
+        table_path=table_path,
+        columns=tuple(column for column, _ in columns_and_reasons),
+        reasons=tuple(reason for _, reason in columns_and_reasons),
+    )
+
+
 def _source_path_strings(
     path: lazynwb.types_.PathLike,
 ) -> tuple[str, str]:
+    raw_path = str(path)
+    parsed_path = urllib.parse.urlsplit(raw_path)
+    if parsed_path.scheme.casefold() == "file":
+        # Preserve the caller's canonical file URI. Windows UPath stringification
+        # otherwise collapses file:///C:/... to file://C:/....
+        if parsed_path.netloc.endswith(":"):
+            raw_path = f"file:///{parsed_path.netloc}{parsed_path.path}"
+        return raw_path, raw_path
     u_path = lazynwb.file_io.from_pathlike(path)
     log_source_path = u_path.as_posix()
     if getattr(u_path, "protocol", None) not in (None, "", "file"):
@@ -789,22 +896,26 @@ async def _materialize_direct_hdf5_read_plan_async(
     read_plan: _DirectHDF5TableReadPlan,
     table_row_indices: Sequence[int] | None,
 ) -> dict[str, Any]:
-    column_data = {
-        column.name: await _read_direct_hdf5_column_array(
+    column_names = [column.name for column in read_plan.scalar_columns]
+    reads: list[typing.Awaitable[Any]] = [
+        _read_direct_hdf5_column_array(range_reader, column, table_row_indices)
+        for column in read_plan.scalar_columns
+    ]
+    column_names.extend(plan.data_column.name for plan in read_plan.indexed_columns)
+    reads.extend(
+        _read_direct_hdf5_indexed_column(
             range_reader,
-            column,
+            indexed_plan,
             table_row_indices,
         )
-        for column in read_plan.scalar_columns
-    }
-    for indexed_plan in read_plan.indexed_columns:
-        column_data[indexed_plan.data_column.name] = (
-            await _read_direct_hdf5_indexed_column(
-                range_reader,
-                indexed_plan,
-                table_row_indices,
-            )
-        )
+        for indexed_plan in read_plan.indexed_columns
+    )
+    values = await asyncio.gather(*reads)
+    column_data: dict[str, Any] = dict(zip(column_names, values, strict=True))
+    logger.debug(
+        "completed %d direct HDF5 column reads concurrently",
+        len(reads),
+    )
     return column_data
 
 
@@ -813,53 +924,642 @@ async def _read_direct_hdf5_column_array(
     column: catalog_models._TableColumnSchema,
     table_row_indices: Sequence[int] | None,
 ) -> npt.NDArray[Any] | np.generic:
+    if column.shape and math.prod(column.shape) == 0:
+        return _empty_direct_hdf5_array(column, leading_size=column.shape[0])
+    if column.dataset.storage_layout == "contiguous":
+        return await _read_direct_hdf5_contiguous_array(
+            range_reader,
+            column,
+            table_row_indices,
+        )
+    if column.dataset.storage_layout == "chunked":
+        return await _read_direct_hdf5_chunked_array(
+            range_reader,
+            column,
+            table_row_indices,
+        )
+    raise _DirectHDF5ReadError(
+        column.name,
+        f"unsupported storage layout {column.dataset.storage_layout!r}",
+    )
+
+
+async def _read_direct_hdf5_contiguous_array(
+    range_reader: hdf5_range_reader._RangeReader,
+    column: catalog_models._TableColumnSchema,
+    table_row_indices: Sequence[int] | None,
+) -> npt.NDArray[Any] | np.generic:
     dataset = column.dataset
     if dataset.hdf5_data_offset is None or dataset.hdf5_storage_size is None:
-        raise ValueError(f"column {column.name!r} is missing HDF5 byte layout facts")
-    np_dtype = np.dtype(column.dtype.numpy_dtype)
-    itemsize = int(np_dtype.itemsize)
-    if itemsize <= 0:
-        raise ValueError(f"column {column.name!r} has invalid itemsize {itemsize}")
+        raise _DirectHDF5ReadError(column.name, "missing contiguous byte layout facts")
+    itemsize = _hdf5_storage_itemsize(column)
     if column.ndim == 0:
         payload = await range_reader.read_range(
             dataset.hdf5_data_offset,
             length=itemsize,
         )
-        return np.frombuffer(payload, dtype=np_dtype, count=1)[0]
+        decoded = await _decode_direct_hdf5_payload(
+            range_reader,
+            column,
+            payload,
+            logical_shape=(),
+        )
+        return decoded.item() if isinstance(decoded, np.ndarray) else decoded
 
     row_count = int(column.shape[0]) if column.shape else 0
+    trailing_count = math.prod(column.shape[1:]) if column.shape else 1
+    row_byte_length = trailing_count * itemsize
     if table_row_indices is None:
-        byte_length = min(dataset.hdf5_storage_size, row_count * itemsize)
+        byte_length = min(dataset.hdf5_storage_size, row_count * row_byte_length)
         payload = await range_reader.read_range(
             dataset.hdf5_data_offset,
             length=byte_length,
         )
-        return np.frombuffer(payload, dtype=np_dtype, count=row_count).copy()
+        return await _decode_direct_hdf5_payload(
+            range_reader,
+            column,
+            payload,
+            logical_shape=column.shape or (),
+        )
 
     row_indices = _normalize_indexed_table_row_indices(
         table_row_indices,
         row_count=row_count,
     )
     if row_indices.size == 0:
-        return np.asarray([], dtype=np_dtype)
+        return _empty_direct_hdf5_array(column, leading_size=0)
     ranges = _row_indices_to_byte_ranges(
         row_indices,
         data_offset=dataset.hdf5_data_offset,
-        itemsize=itemsize,
+        itemsize=row_byte_length,
     )
     payloads = await range_reader.read_ranges(ranges)
-    values = np.empty(row_indices.size, dtype=np_dtype)
-    for output_index, row_index in enumerate(row_indices):
-        byte_range = hdf5_range_reader._ByteRange(
-            dataset.hdf5_data_offset + (int(row_index) * itemsize),
-            dataset.hdf5_data_offset + ((int(row_index) + 1) * itemsize),
+    selected_shape = (len(row_indices), *(column.shape or ())[1:])
+    selected_payload = b"".join(
+        payloads[
+            hdf5_range_reader._ByteRange(
+                dataset.hdf5_data_offset + (int(row_index) * row_byte_length),
+                dataset.hdf5_data_offset + ((int(row_index) + 1) * row_byte_length),
+            )
+        ]
+        for row_index in row_indices
+    )
+    return await _decode_direct_hdf5_payload(
+        range_reader,
+        column,
+        selected_payload,
+        logical_shape=selected_shape,
+    )
+
+
+def _hdf5_storage_itemsize(column: catalog_models._TableColumnSchema) -> int:
+    itemsize = column.dtype.itemsize
+    if itemsize is None and column.dtype.numpy_dtype is not None:
+        itemsize = np.dtype(column.dtype.numpy_dtype).itemsize
+    if itemsize is None or itemsize <= 0:
+        raise _DirectHDF5ReadError(column.name, "missing or invalid datatype size")
+    return int(itemsize)
+
+
+def _hdf5_element_numpy_dtype(
+    column: catalog_models._TableColumnSchema,
+) -> np.dtype[Any]:
+    dtype_string = (
+        column.dtype.element_numpy_dtype
+        if column.dtype.kind == "array"
+        else column.dtype.numpy_dtype
+    )
+    if dtype_string is None:
+        raise _DirectHDF5ReadError(column.name, "missing NumPy datatype")
+    return np.dtype(dtype_string)
+
+
+def _hdf5_decoded_shape(
+    column: catalog_models._TableColumnSchema,
+    logical_shape: tuple[int, ...],
+) -> tuple[int, ...]:
+    if column.dtype.kind == "array" and column.dtype.element_shape:
+        return (*logical_shape, *column.dtype.element_shape)
+    return logical_shape
+
+
+def _empty_direct_hdf5_array(
+    column: catalog_models._TableColumnSchema,
+    *,
+    leading_size: int,
+) -> npt.NDArray[Any]:
+    shape = (leading_size, *(column.shape or ())[1:])
+    shape = _hdf5_decoded_shape(column, shape)
+    if column.dtype.kind in {"string", "vlen_string"}:
+        return np.empty(shape, dtype=object)
+    return np.empty(shape, dtype=_hdf5_element_numpy_dtype(column))
+
+
+async def _decode_direct_hdf5_payload(
+    range_reader: hdf5_range_reader._RangeReader,
+    column: catalog_models._TableColumnSchema,
+    payload: bytes,
+    *,
+    logical_shape: tuple[int, ...],
+) -> npt.NDArray[Any]:
+    element_count = math.prod(logical_shape) if logical_shape else 1
+    decoded_shape = _hdf5_decoded_shape(column, logical_shape)
+    if column.dtype.kind == "vlen_string":
+        references = _parse_direct_hdf5_vlen_references(column, payload, element_count)
+        strings = await _resolve_direct_hdf5_vlen_strings(
+            range_reader,
+            column,
+            references,
         )
-        values[output_index] = np.frombuffer(
-            payloads[byte_range],
-            dtype=np_dtype,
-            count=1,
-        )[0]
-    return values
+        return np.asarray(strings, dtype=object).reshape(decoded_shape)
+    if column.dtype.kind == "string":
+        raw_dtype = np.dtype(column.dtype.numpy_dtype)
+        raw_values = np.frombuffer(payload, dtype=raw_dtype, count=element_count)
+        strings = [
+            bytes(value).split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+            for value in raw_values
+        ]
+        return np.asarray(strings, dtype=object).reshape(decoded_shape)
+    np_dtype = _hdf5_element_numpy_dtype(column)
+    decoded_count = math.prod(decoded_shape) if decoded_shape else 1
+    return np.frombuffer(payload, dtype=np_dtype, count=decoded_count).copy().reshape(
+        decoded_shape
+    )
+
+
+def _parse_direct_hdf5_vlen_references(
+    column: catalog_models._TableColumnSchema,
+    payload: bytes,
+    count: int,
+) -> tuple[tuple[int, int, int], ...]:
+    offset_size = column.dataset.hdf5_offset_size
+    if offset_size is None:
+        raise _DirectHDF5ReadError(column.name, "missing HDF5 offset size")
+    stride = 4 + offset_size + 4
+    if len(payload) < count * stride:
+        raise _DirectHDF5ReadError(
+            column.name,
+            f"short vlen reference payload: need {count * stride}, got {len(payload)}",
+        )
+    return tuple(
+        (
+            int.from_bytes(payload[index * stride : index * stride + 4], "little"),
+            int.from_bytes(
+                payload[index * stride + 4 : index * stride + 4 + offset_size],
+                "little",
+            ),
+            int.from_bytes(
+                payload[
+                    index * stride
+                    + 4
+                    + offset_size : index * stride
+                    + 8
+                    + offset_size
+                ],
+                "little",
+            ),
+        )
+        for index in range(count)
+    )
+
+
+async def _resolve_direct_hdf5_vlen_strings(
+    range_reader: hdf5_range_reader._RangeReader,
+    column: catalog_models._TableColumnSchema,
+    references: Sequence[tuple[int, int, int]],
+) -> list[str]:
+    dataset = column.dataset
+    base_address = dataset.hdf5_base_address
+    length_size = dataset.hdf5_length_size
+    if base_address is None or length_size is None:
+        raise _DirectHDF5ReadError(column.name, "missing global-heap address facts")
+    heap_addresses = tuple(
+        dict.fromkeys(address for length, address, index in references if length and index)
+    )
+    if not heap_addresses:
+        return ["" for _ in references]
+    heap_probe_size = 4096
+    source_identity = await range_reader.get_source_identity()
+    content_length = source_identity.content_length
+    header_ranges = tuple(
+        hdf5_range_reader._ByteRange(
+            base_address + address,
+            min(base_address + address + heap_probe_size, content_length)
+            if content_length is not None
+            else base_address + address + heap_probe_size,
+        )
+        for address in heap_addresses
+    )
+    header_payloads = await range_reader.read_ranges(header_ranges)
+    header_payload_by_address = {
+        address: header_payloads[byte_range]
+        for address, byte_range in zip(heap_addresses, header_ranges, strict=True)
+    }
+    collection_ranges: dict[int, hdf5_range_reader._ByteRange] = {}
+    collection_payload_by_address: dict[int, bytes] = {}
+    for address in heap_addresses:
+        header = header_payload_by_address[address]
+        if header[:4] != b"GCOL":
+            raise _DirectHDF5ReadError(
+                column.name,
+                f"expected global heap collection at {address}, found {header[:4]!r}",
+            )
+        collection_size = int.from_bytes(header[8 : 8 + length_size], "little")
+        if collection_size <= len(header):
+            collection_payload_by_address[address] = header[:collection_size]
+        else:
+            collection_ranges[address] = hdf5_range_reader._ByteRange(
+                base_address + address + len(header),
+                base_address + address + collection_size,
+            )
+    collection_payloads = await range_reader.read_ranges(collection_ranges.values())
+    collection_payload_by_address.update(
+        {
+            address: (
+                header_payload_by_address[address] + collection_payloads[byte_range]
+            )
+            for address, byte_range in collection_ranges.items()
+        }
+    )
+    heap_objects = {
+        address: _parse_direct_hdf5_global_heap_collection(
+            collection_payload_by_address[address],
+            length_size=length_size,
+        )
+        for address in heap_addresses
+    }
+    strings: list[str] = []
+    for length, address, index in references:
+        if not length or not index:
+            strings.append("")
+            continue
+        try:
+            value = heap_objects[address][index][:length]
+        except KeyError as exc:
+            raise _DirectHDF5ReadError(
+                column.name,
+                f"global heap object {index} was not found at {address}",
+            ) from exc
+        strings.append(value.rstrip(b"\x00").decode("utf-8", errors="replace"))
+    logger.debug(
+        "resolved %d HDF5 vlen strings from %d coalesced global heap collections",
+        len(references),
+        len(heap_addresses),
+    )
+    return strings
+
+
+def _parse_direct_hdf5_global_heap_collection(
+    payload: bytes,
+    *,
+    length_size: int,
+) -> dict[int, bytes]:
+    collection_size = min(
+        int.from_bytes(payload[8 : 8 + length_size], "little"),
+        len(payload),
+    )
+    cursor = 8 + length_size
+    objects: dict[int, bytes] = {}
+    while cursor + 8 + length_size <= collection_size:
+        object_index = int.from_bytes(payload[cursor : cursor + 2], "little")
+        object_size = int.from_bytes(
+            payload[cursor + 8 : cursor + 8 + length_size], "little"
+        )
+        cursor += 8 + length_size
+        if object_index == 0 and object_size == 0:
+            break
+        if object_index:
+            objects[object_index] = bytes(payload[cursor : cursor + object_size])
+        cursor += (object_size + 7) & ~7
+    return objects
+
+
+async def _read_direct_hdf5_chunked_array(
+    range_reader: hdf5_range_reader._RangeReader,
+    column: catalog_models._TableColumnSchema,
+    table_row_indices: Sequence[int] | None,
+) -> npt.NDArray[Any] | np.generic:
+    dataset = column.dataset
+    shape = column.shape or ()
+    chunks = dataset.chunks or ()
+    if not shape or len(chunks) != len(shape):
+        raise _DirectHDF5ReadError(
+            column.name,
+            f"invalid chunk shape {chunks!r} for dataset shape {shape!r}",
+        )
+    if table_row_indices is None:
+        row_indices = np.arange(shape[0], dtype=np.intp)
+    else:
+        row_indices = _normalize_indexed_table_row_indices(
+            table_row_indices,
+            row_count=shape[0],
+        )
+    if row_indices.size == 0:
+        return _empty_direct_hdf5_array(column, leading_size=0)
+
+    records = await _read_direct_hdf5_v1_chunk_index(range_reader, column)
+    needed_first_offsets = {int(row // chunks[0]) * chunks[0] for row in row_indices}
+    needed_records = tuple(
+        record
+        for record in records
+        if record.offsets
+        and record.offsets[0] in needed_first_offsets
+        and all(
+            offset < dimension
+            for offset, dimension in zip(record.offsets, shape, strict=True)
+        )
+    )
+    chunk_ranges = tuple(
+        hdf5_range_reader._ByteRange(
+            record.address,
+            record.address + record.stored_size,
+        )
+        for record in needed_records
+    )
+    stored_payloads = await range_reader.read_ranges(chunk_ranges)
+    output_shape = _hdf5_decoded_shape(column, (len(row_indices), *shape[1:]))
+    if column.dtype.kind in {"string", "vlen_string"}:
+        output = np.full(
+            output_shape,
+            _direct_hdf5_fill_value(column, default=""),
+            dtype=object,
+        )
+    else:
+        output = np.full(
+            output_shape,
+            _direct_hdf5_fill_value(column, default=0),
+            dtype=_hdf5_element_numpy_dtype(column),
+        )
+    output_rows_by_chunk: dict[int, list[tuple[int, int]]] = {}
+    for output_row, selected_input_row in enumerate(row_indices):
+        chunk_offset = int(selected_input_row // chunks[0]) * chunks[0]
+        output_rows_by_chunk.setdefault(chunk_offset, []).append(
+            (int(output_row), int(selected_input_row))
+        )
+
+    raw_payloads = tuple(
+        _decode_direct_hdf5_chunk_filters(
+            column,
+            stored_payloads[byte_range],
+            filter_mask=record.filter_mask,
+        )
+        for record, byte_range in zip(needed_records, chunk_ranges, strict=True)
+    )
+    if column.dtype.kind == "vlen_string":
+        references_by_chunk = tuple(
+            _parse_direct_hdf5_vlen_references(
+                column,
+                raw_payload,
+                math.prod(chunks),
+            )
+            for raw_payload in raw_payloads
+        )
+        all_references = tuple(
+            reference
+            for chunk_references in references_by_chunk
+            for reference in chunk_references
+        )
+        all_strings = await _resolve_direct_hdf5_vlen_strings(
+            range_reader,
+            column,
+            all_references,
+        )
+        strings_per_chunk = math.prod(chunks)
+        chunk_arrays = tuple(
+            np.asarray(
+                all_strings[
+                    index * strings_per_chunk : (index + 1) * strings_per_chunk
+                ],
+                dtype=object,
+            ).reshape(chunks)
+            for index in range(len(raw_payloads))
+        )
+    else:
+        chunk_arrays = tuple(
+            await asyncio.gather(
+                *(
+                    _decode_direct_hdf5_payload(
+                        range_reader,
+                        column,
+                        raw_payload,
+                        logical_shape=chunks,
+                    )
+                    for raw_payload in raw_payloads
+                )
+            )
+        )
+
+    for record, chunk_array in zip(needed_records, chunk_arrays, strict=True):
+        valid_lengths = tuple(
+            min(chunk_size, dimension - offset)
+            for chunk_size, dimension, offset in zip(
+                chunks,
+                shape,
+                record.offsets,
+                strict=True,
+            )
+        )
+        trailing_target = tuple(
+            slice(offset, offset + length)
+            for offset, length in zip(record.offsets[1:], valid_lengths[1:])
+        )
+        trailing_source = tuple(slice(0, length) for length in valid_lengths[1:])
+        element_rank = len(column.dtype.element_shape or ())
+        element_slices = (slice(None),) * element_rank
+        for output_row, input_row_value in output_rows_by_chunk.get(
+            record.offsets[0], ()
+        ):
+            source_row = input_row_value - record.offsets[0]
+            target_index: Any = (output_row, *trailing_target, *element_slices)
+            source_index: Any = (source_row, *trailing_source, *element_slices)
+            output[target_index] = chunk_array[source_index]
+    logger.debug(
+        "direct HDF5 chunked materialization for %r: selected_rows=%d "
+        "index_records=%d selected_chunks=%d",
+        column.name,
+        len(row_indices),
+        len(records),
+        len(needed_records),
+    )
+    return output
+
+
+def _direct_hdf5_fill_value(
+    column: catalog_models._TableColumnSchema,
+    *,
+    default: object,
+) -> object:
+    fill_facts = column.dataset.fill_value
+    if not isinstance(fill_facts, Mapping):
+        return default
+    value_hex = fill_facts.get("value_hex")
+    if not isinstance(value_hex, str) or not value_hex:
+        return default
+    payload = bytes.fromhex(value_hex)
+    if column.dtype.kind == "string":
+        return payload.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+    if column.dtype.kind == "vlen_string":
+        return default
+    np_dtype = _hdf5_element_numpy_dtype(column)
+    if len(payload) < np_dtype.itemsize:
+        return default
+    value = np.frombuffer(payload, dtype=np_dtype, count=1)[0]
+    return value.item() if isinstance(value, np.generic) else value
+
+
+async def _read_direct_hdf5_v1_chunk_index(
+    range_reader: hdf5_range_reader._RangeReader,
+    column: catalog_models._TableColumnSchema,
+) -> tuple[_HDF5ChunkRecord, ...]:
+    dataset = column.dataset
+    root_offset = dataset.hdf5_chunk_index_offset
+    offset_size = dataset.hdf5_offset_size
+    chunk_rank = dataset.hdf5_chunk_rank
+    base_address = dataset.hdf5_base_address or 0
+    if root_offset is None or offset_size is None or chunk_rank is None:
+        raise _DirectHDF5ReadError(column.name, "missing v1 chunk-index facts")
+    node_header_size = 8 + (2 * offset_size)
+    key_size = 8 + (chunk_rank * 8)
+    source_identity = await range_reader.get_source_identity()
+    content_length = source_identity.content_length
+    pending: tuple[int, ...] = (root_offset,)
+    seen: set[int] = set()
+    records: list[_HDF5ChunkRecord] = []
+    while pending:
+        level_addresses = tuple(address for address in pending if address not in seen)
+        if not level_addresses:
+            break
+        seen.update(level_addresses)
+        probe_ranges = tuple(
+            hdf5_range_reader._ByteRange(
+                address,
+                min(address + 4096, content_length)
+                if content_length is not None
+                else address + 4096,
+            )
+            for address in level_addresses
+        )
+        probes = await range_reader.read_ranges(probe_ranges)
+        node_facts: list[tuple[int, int, int]] = []
+        oversized_node_ranges: list[hdf5_range_reader._ByteRange] = []
+        node_payloads: dict[int, bytes] = {}
+        for address, byte_range in zip(level_addresses, probe_ranges, strict=True):
+            header = probes[byte_range]
+            if header[:4] != b"TREE" or header[4] != 1:
+                raise _DirectHDF5ReadError(
+                    column.name,
+                    f"unsupported chunk index at byte {address}: {header[:5]!r}",
+                )
+            level = header[5]
+            entries_used = int.from_bytes(header[6:8], "little")
+            node_size = node_header_size + (entries_used * (key_size + offset_size))
+            node_size += key_size
+            node_facts.append((address, level, entries_used))
+            if node_size <= len(header):
+                node_payloads[address] = header[:node_size]
+            else:
+                oversized_node_ranges.append(
+                    hdf5_range_reader._ByteRange(address, address + node_size)
+                )
+        oversized_nodes = await range_reader.read_ranges(oversized_node_ranges)
+        node_payloads.update(
+            {byte_range.start: payload for byte_range, payload in oversized_nodes.items()}
+        )
+        next_pending: list[int] = []
+        for address, level, entries_used in node_facts:
+            node = node_payloads[address]
+            cursor = node_header_size
+            for _ in range(entries_used):
+                key = node[cursor : cursor + key_size]
+                cursor += key_size
+                child_address = int.from_bytes(
+                    node[cursor : cursor + offset_size], "little"
+                )
+                cursor += offset_size
+                if level:
+                    next_pending.append(base_address + child_address)
+                    continue
+                records.append(
+                    _HDF5ChunkRecord(
+                        address=base_address + child_address,
+                        stored_size=int.from_bytes(key[:4], "little"),
+                        filter_mask=int.from_bytes(key[4:8], "little"),
+                        offsets=tuple(
+                            int.from_bytes(
+                                key[8 + (index * 8) : 16 + (index * 8)],
+                                "little",
+                            )
+                            for index in range(chunk_rank - 1)
+                        ),
+                    )
+                )
+        pending = tuple(next_pending)
+    logger.debug(
+        "resolved HDF5 v1 chunk index for %r: nodes=%d records=%d",
+        column.name,
+        len(seen),
+        len(records),
+    )
+    return tuple(records)
+
+
+def _decode_direct_hdf5_chunk_filters(
+    column: catalog_models._TableColumnSchema,
+    payload: bytes,
+    *,
+    filter_mask: int,
+) -> bytes:
+    decoded = payload
+    filters = tuple(
+        item for item in column.dataset.filters if isinstance(item, Mapping)
+    )
+    for pipeline_index in range(len(filters) - 1, -1, -1):
+        if filter_mask & (1 << pipeline_index):
+            continue
+        filter_info = filters[pipeline_index]
+        filter_id = filter_info.get("id")
+        options = tuple(int(value) for value in filter_info.get("options", ()))
+        if filter_id == 1:
+            decoded = zlib.decompress(decoded)
+        elif filter_id == 2:
+            element_size = options[0] if options else _hdf5_storage_itemsize(column)
+            decoded = _unshuffle_hdf5_chunk(decoded, element_size=element_size)
+        elif filter_id == 3:
+            if len(decoded) < 4:
+                raise _DirectHDF5ReadError(column.name, "short Fletcher32 payload")
+            decoded = decoded[:-4]
+        elif filter_id == 32001:
+            decoded = bytes(numcodecs.Blosc().decode(decoded))
+        elif filter_id == 32015:
+            decoded = bytes(numcodecs.Zstd().decode(decoded))
+        else:
+            raise _DirectHDF5ReadError(
+                column.name,
+                f"unsupported HDF5 filter {filter_id!r}",
+            )
+    expected_size = math.prod(column.dataset.chunks or ()) * _hdf5_storage_itemsize(
+        column
+    )
+    if len(decoded) < expected_size:
+        raise _DirectHDF5ReadError(
+            column.name,
+            f"decoded chunk is short: need {expected_size} bytes, got {len(decoded)}",
+        )
+    return decoded[:expected_size]
+
+
+def _unshuffle_hdf5_chunk(payload: bytes, *, element_size: int) -> bytes:
+    if element_size <= 1 or not payload:
+        return payload
+    if len(payload) % element_size:
+        raise ValueError(
+            f"shuffled payload length {len(payload)} is not divisible by {element_size}"
+        )
+    element_count = len(payload) // element_size
+    shuffled = np.frombuffer(payload, dtype=np.uint8).reshape(
+        element_size, element_count
+    )
+    return shuffled.T.copy().tobytes()
 
 
 async def _read_direct_hdf5_indexed_column(
@@ -986,27 +1686,23 @@ async def _read_direct_hdf5_element_spans(
 ) -> list[npt.NDArray[Any]]:
     if not spans:
         return []
-    dataset = column.dataset
-    if dataset.hdf5_data_offset is None:
-        raise ValueError(f"column {column.name!r} is missing HDF5 byte offset")
-    np_dtype = np.dtype(column.dtype.numpy_dtype)
-    itemsize = int(np_dtype.itemsize)
-    byte_ranges = tuple(
-        hdf5_range_reader._ByteRange(
-            dataset.hdf5_data_offset + (start * itemsize),
-            dataset.hdf5_data_offset + (end * itemsize),
-        )
-        for start, end in spans
+    selected_indices = np.concatenate(
+        [np.arange(start, end, dtype=np.intp) for start, end in spans]
     )
-    payloads = await range_reader.read_ranges(byte_ranges)
-    return [
-        np.frombuffer(
-            payloads[byte_range],
-            dtype=np_dtype,
-            count=end - start,
-        ).copy()
-        for byte_range, (start, end) in zip(byte_ranges, spans, strict=True)
-    ]
+    selected = np.asarray(
+        await _read_direct_hdf5_column_array(
+            range_reader,
+            column,
+            selected_indices.tolist(),
+        )
+    )
+    payloads: list[npt.NDArray[Any]] = []
+    cursor = 0
+    for start, end in spans:
+        length = end - start
+        payloads.append(selected[cursor : cursor + length])
+        cursor += length
+    return payloads
 
 
 def _split_direct_indexed_span_payloads(
@@ -1100,11 +1796,36 @@ def _get_fast_table_data_if_available(
         )
 
     read_plan = _plan_direct_hdf5_table_reads(filtered_catalog_columns)
-    direct_column_data = _materialize_direct_hdf5_read_plan(
-        path,
-        read_plan,
-        table_row_indices,
-    )
+    if snapshot.backend == "hdf5" and read_plan.fallback_columns and _is_remote_source(
+        path
+    ):
+        unsupported = tuple(
+            (column.name, _direct_hdf5_unsupported_reason(column))
+            for column in read_plan.fallback_columns
+        )
+        logger.debug(
+            "rejecting remote accessor fallback for %r/%s: %s",
+            path,
+            exact_table_path,
+            unsupported,
+        )
+        raise _unsupported_hdf5_layout_error(
+            path=path,
+            table_path=exact_table_path,
+            columns_and_reasons=unsupported,
+        )
+    try:
+        direct_column_data = _materialize_direct_hdf5_read_plan(
+            path,
+            read_plan,
+            table_row_indices,
+        )
+    except _DirectHDF5ReadError as exc:
+        raise _unsupported_hdf5_layout_error(
+            path=path,
+            table_path=exact_table_path,
+            columns_and_reasons=((exc.column_name, exc.reason),),
+        ) from exc
     logger.debug(
         "fast HDF5 materialization selected direct scalar columns=%s "
         "direct indexed columns=%s fallback columns=%s for %r/%s",
@@ -1197,6 +1918,31 @@ def _materialize_table_data_from_columns(  # noqa: C901
     else:
         _idx = slice(None)
         table_length = table_length_from_metadata
+    starting_time_column = next(
+        (
+            column
+            for column in all_columns
+            if column.name == "starting_time" and column.is_timeseries_with_rate
+        ),
+        None,
+    )
+    if starting_time_column is not None and "starting_time" in column_data:
+        starting_time = np.asarray(column_data.pop("starting_time")).item()
+        rate = starting_time_column.attrs["rate"]
+        if timeseries_len is None:
+            raise lazynwb.exceptions.InternalPathError(
+                f"Could not determine TimeSeries length for {normalized_table_path!r}"
+            )
+        timestamps = np.linspace(
+            starting_time,
+            starting_time + timeseries_len / rate,
+            num=timeseries_len,
+        )
+        column_data["timestamps"] = timestamps[_idx]
+        logger.debug(
+            "generated %d TimeSeries timestamps from range-read starting_time/rate",
+            len(column_data["timestamps"]),
+        )
     for column in non_indexed_columns:
         if column.ndim is None:
             continue
@@ -1670,6 +2416,40 @@ def _array_column_helper(
     table_row_indices: Sequence[int],
     as_polars: bool = False,
 ) -> pd.DataFrame | pl.DataFrame:
+    normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
+    fast_data = _get_fast_table_data_if_available(
+        path=nwb_path,
+        exact_table_path=normalized_table_path,
+        include_column_names=(column_name,),
+        exclude_column_names=None,
+        exclude_array_columns=False,
+        table_row_indices=table_row_indices,
+        catalog_snapshot=None,
+        low_memory=False,
+        as_polars=as_polars,
+        allow_missing_columns=False,
+    )
+    if fast_data is not None:
+        if column_name not in fast_data:
+            raise lazynwb.exceptions.ColumnError(column_name)
+        logger.debug(
+            "materialized large array column %r for %r/%s with range reads",
+            column_name,
+            nwb_path,
+            normalized_table_path,
+        )
+        df_cls = pl.DataFrame if as_polars else pd.DataFrame
+        column_data = fast_data[column_name]
+        if not as_polars and isinstance(column_data, np.ndarray):
+            column_data = _format_multi_dim_column_pd(column_data)
+        return df_cls(
+            {
+                column_name: column_data,
+                TABLE_INDEX_COLUMN_NAME: table_row_indices,
+                NWB_PATH_COLUMN_NAME: [nwb_path] * len(table_row_indices),
+            }
+        )
+
     file = lazynwb.file_io._get_accessor(nwb_path)
     try:
         columns = lazynwb.table_metadata.get_table_column_metadata(file, table_path)
@@ -1711,6 +2491,8 @@ def _format_multi_dim_column_pd(
 ) -> list[list[Any]]:
     """Pandas inists 'Per-column arrays must each be 1-dimensional': this converts to a list of
     arrays, if not already"""
+    if len(column_data) == 0:
+        return []
     if isinstance(column_data[0], list):
         return list(column_data)  # type: ignore[arg-type]
     else:

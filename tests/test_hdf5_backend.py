@@ -992,6 +992,225 @@ def test_hdf5_backend_reader_fails_fast_with_structured_parser_error(
     assert exc_info.value.feature == "hdf5_metadata_parser"
 
 
+def test_scan_nwb_remote_vlen_string_never_instantiates_file_accessor(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_remote_url = "https://example.test/common-remote.nwb"
+    created_readers: list[hdf5_reader._HDF5BackendReader] = []
+
+    def _reader(_: object) -> hdf5_reader._HDF5BackendReader:
+        reader = _buffer_hdf5_reader(
+            local_hdf5_path,
+            tmp_path / "remote-vlen-catalog.sqlite",
+        )
+        created_readers.append(reader)
+        return reader
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("remote vlen string queries must not instantiate FileAccessor")
+
+    monkeypatch.setattr(hdf5_reader, "_default_hdf5_backend_reader", _reader)
+    monkeypatch.setattr(lazynwb.file_io, "FileAccessor", _fail_accessor)
+
+    frame = (
+        lazynwb.scan_nwb(fake_remote_url, "/units", disable_progress=True)
+        .filter(pl.col("structure") == "VISp")
+        .select("structure")
+        .collect()
+    )
+
+    assert frame["structure"].to_list() == ["VISp"] * 4
+    assert created_readers
+
+
+def test_direct_hdf5_strings_and_multidimensional_selection_match_h5py(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nwb_path = tmp_path / "direct-string-array.nwb"
+    fixed_values = np.array([b"a", b"bb", b"ccc", b"dddd"], dtype="S4")
+    vlen_values = np.array(["zero", "one", "two", "three"], dtype=object)
+    array_values = np.arange(48, dtype=np.float64).reshape(4, 3, 4)
+    with h5py.File(nwb_path, "w") as h5_file:
+        group = h5_file.create_group("table")
+        group.create_dataset("fixed", data=fixed_values)
+        group.create_dataset(
+            "vlen",
+            data=vlen_values,
+            dtype=h5py.string_dtype(encoding="utf-8"),
+        )
+        group.create_dataset("array", data=array_values)
+
+    source_url = nwb_path.as_uri()
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("supported direct columns must not instantiate FileAccessor")
+
+    monkeypatch.setattr(lazynwb.file_io, "FileAccessor", _fail_accessor)
+    frame = lazynwb.get_df(
+        source_url,
+        "/table",
+        exact_path=True,
+        include_column_names=("fixed", "vlen", "array"),
+        nwb_path_to_row_indices={source_url: [3, 0, 2]},
+        exclude_array_columns=False,
+        as_polars=True,
+    )
+
+    assert frame["fixed"].to_list() == ["dddd", "a", "ccc"]
+    assert frame["vlen"].to_list() == ["three", "zero", "two"]
+    assert frame["array"].to_list() == array_values[[3, 0, 2]].tolist()
+
+
+def test_direct_hdf5_chunked_compressed_columns_match_h5py_without_accessor(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nwb_path = tmp_path / "chunked-compressed.nwb"
+    numeric_values = np.arange(70, dtype=np.int32).reshape(10, 7)
+    fixed_values = np.array([f"f{index}".encode() for index in range(10)], dtype="S4")
+    vlen_values = np.array([f"value-{index}" for index in range(10)], dtype=object)
+    with h5py.File(nwb_path, "w") as h5_file:
+        group = h5_file.create_group("table")
+        group.create_dataset(
+            "numeric",
+            data=numeric_values,
+            chunks=(3, 4),
+            compression="gzip",
+            shuffle=True,
+        )
+        group.create_dataset(
+            "fixed",
+            data=fixed_values,
+            chunks=(4,),
+            compression="gzip",
+        )
+        group.create_dataset(
+            "vlen",
+            data=vlen_values,
+            dtype=h5py.string_dtype(encoding="utf-8"),
+            chunks=(4,),
+            compression="gzip",
+        )
+
+    source_url = nwb_path.as_uri()
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("supported chunked columns must not instantiate FileAccessor")
+
+    monkeypatch.setattr(lazynwb.file_io, "FileAccessor", _fail_accessor)
+    selected_rows = [9, 0, 5, 5]
+    frame = lazynwb.get_df(
+        source_url,
+        "/table",
+        exact_path=True,
+        include_column_names=("numeric", "fixed", "vlen"),
+        nwb_path_to_row_indices={source_url: selected_rows},
+        exclude_array_columns=False,
+        as_polars=True,
+    )
+
+    assert frame["numeric"].to_list() == numeric_values[selected_rows].tolist()
+    assert frame["fixed"].to_list() == ["f9", "f0", "f5", "f5"]
+    assert frame["vlen"].to_list() == ["value-9", "value-0", "value-5", "value-5"]
+
+
+def test_rate_timeseries_and_large_array_merge_use_range_reader(
+    local_hdf5_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_url = local_hdf5_path.as_uri()
+    units = lazynwb.get_df(
+        source_url,
+        "/units",
+        exact_path=True,
+        include_column_names=("id",),
+        nwb_path_to_row_indices={source_url: [3, 1]},
+        as_polars=True,
+    )
+    with h5py.File(local_hdf5_path, "r") as h5_file:
+        expected_waveforms = h5_file["units/waveform_mean"][[1, 3]][:].tolist()
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("TimeSeries and large arrays must not instantiate FileAccessor")
+
+    monkeypatch.setattr(lazynwb.file_io, "FileAccessor", _fail_accessor)
+    timeseries = lazynwb.get_df(
+        source_url,
+        "/processing/behavior/running_speed_with_rate",
+        exact_path=True,
+        as_polars=True,
+    )
+    units_with_waveforms = lazynwb.merge_array_column(units, "waveform_mean")
+
+    assert {"data", "timestamps"}.issubset(timeseries.columns)
+    assert timeseries.height > 0
+    assert np.asarray(units_with_waveforms["waveform_mean"].to_list()) == pytest.approx(
+        np.asarray(expected_waveforms)
+    )
+
+
+def test_vlen_heap_reads_are_coalesced_within_request_budget(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    catalog_reader = _buffer_hdf5_reader(
+        local_hdf5_path,
+        tmp_path / "request-budget-catalog.sqlite",
+    )
+    snapshot = asyncio.run(catalog_reader.read_table_schema_snapshot("units"))
+    structure = next(column for column in snapshot.columns if column.name == "structure")
+    direct_reader = hdf5_range_reader._BufferRangeReader(local_hdf5_path.read_bytes())
+
+    values = asyncio.run(
+        lazynwb.tables._read_direct_hdf5_column_array(
+            direct_reader,
+            structure,
+            None,
+        )
+    )
+
+    assert values.tolist() == ["VISp"] * 4
+    assert direct_reader.request_count <= 2
+    assert direct_reader.bytes_fetched < local_hdf5_path.stat().st_size
+
+
+def test_remote_unsupported_layout_raises_structured_error_before_accessor(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nwb_path = tmp_path / "unsupported-compound.nwb"
+    compound_dtype = np.dtype([("left", "<i4"), ("right", "<f8")])
+    with h5py.File(nwb_path, "w") as h5_file:
+        h5_file.create_dataset(
+            "table/value",
+            data=np.array([(1, 2.0), (3, 4.0)], dtype=compound_dtype),
+        )
+    reader = _buffer_hdf5_reader(nwb_path, tmp_path / "unsupported-catalog.sqlite")
+
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("unsupported remote layouts must fail before FileAccessor")
+
+    monkeypatch.setattr(hdf5_reader, "_default_hdf5_backend_reader", lambda _: reader)
+    monkeypatch.setattr(lazynwb.file_io, "FileAccessor", _fail_accessor)
+
+    with pytest.raises(lazynwb.exceptions.UnsupportedHDF5LayoutError) as exc_info:
+        lazynwb.get_df(
+            "https://example.test/unsupported.nwb",
+            "/table",
+            exact_path=True,
+            include_column_names=("value",),
+            as_polars=True,
+        )
+
+    assert exc_info.value.source_url == "https://example.test/unsupported.nwb"
+    assert exc_info.value.table_path == "table"
+    assert exc_info.value.columns == ("value",)
+    assert "compound" in exc_info.value.reasons[0]
+
+
 @pytest.mark.skipif(
     os.environ.get("LAZYNWB_REMOTE_SCHEMA_TESTS") != "1",
     reason="set LAZYNWB_REMOTE_SCHEMA_TESTS=1 to run remote schema integration test",
