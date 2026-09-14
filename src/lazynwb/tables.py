@@ -1686,6 +1686,13 @@ async def _read_direct_hdf5_element_spans(
 ) -> list[npt.NDArray[Any]]:
     if not spans:
         return []
+    if column.dataset.storage_layout == "contiguous":
+        return await _read_direct_hdf5_contiguous_element_spans(
+            range_reader,
+            column,
+            spans,
+        )
+
     selected_indices = np.concatenate(
         [np.arange(start, end, dtype=np.intp) for start, end in spans]
     )
@@ -1703,6 +1710,66 @@ async def _read_direct_hdf5_element_spans(
         payloads.append(selected[cursor : cursor + length])
         cursor += length
     return payloads
+
+
+async def _read_direct_hdf5_contiguous_element_spans(
+    range_reader: hdf5_range_reader._RangeReader,
+    column: catalog_models._TableColumnSchema,
+    spans: Sequence[tuple[int, int]],
+) -> list[npt.NDArray[Any]]:
+    dataset = column.dataset
+    if dataset.hdf5_data_offset is None or dataset.hdf5_storage_size is None:
+        raise _DirectHDF5ReadError(column.name, "missing contiguous byte layout facts")
+    shape = column.shape or ()
+    if not shape:
+        raise _DirectHDF5ReadError(
+            column.name,
+            "indexed data must have a leading element dimension",
+        )
+
+    row_count = int(shape[0])
+    normalized_spans = tuple((int(start), int(end)) for start, end in spans)
+    for start, end in normalized_spans:
+        if start < 0 or end <= start or end > row_count:
+            raise _DirectHDF5ReadError(
+                column.name,
+                f"indexed span {start}:{end} is outside element range 0:{row_count}",
+            )
+
+    trailing_shape = shape[1:]
+    row_byte_length = math.prod(trailing_shape) * _hdf5_storage_itemsize(column)
+    byte_ranges = tuple(
+        hdf5_range_reader._ByteRange(
+            dataset.hdf5_data_offset + (start * row_byte_length),
+            dataset.hdf5_data_offset + (end * row_byte_length),
+        )
+        for start, end in normalized_spans
+    )
+    payloads = await range_reader.read_ranges(byte_ranges)
+    decoded_spans = await asyncio.gather(
+        *(
+            _decode_direct_hdf5_payload(
+                range_reader,
+                column,
+                payloads[byte_range],
+                logical_shape=(end - start, *trailing_shape),
+            )
+            for byte_range, (start, end) in zip(
+                byte_ranges,
+                normalized_spans,
+                strict=True,
+            )
+        )
+    )
+    logger.debug(
+        "direct HDF5 contiguous span materialization for %r: spans=%d "
+        "elements=%d logical_ranges=%d",
+        column.name,
+        len(normalized_spans),
+        sum(end - start for start, end in normalized_spans),
+        len(byte_ranges),
+    )
+    return list(decoded_spans)
 
 
 def _split_direct_indexed_span_payloads(

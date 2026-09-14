@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections.abc
 import logging
 import os
 import pathlib
@@ -672,6 +673,60 @@ def test_hdf5_direct_indexed_materializes_selected_rows_empty_rows_and_row_order
     assert df["spike_times"].to_list() == [[0.3], [], [0.1, 0.2], []]
     assert df[lazynwb.TABLE_INDEX_COLUMN_NAME].to_list() == [3, 0, 1, 2]
     assert df.schema["spike_times"] == pl.List(pl.Float64)
+
+
+def test_hdf5_direct_contiguous_indexed_reads_preserve_element_spans(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    nwb_path = tmp_path / "large-contiguous-ragged-table.nwb"
+    values = np.arange(100_000, dtype=np.float64)
+    with h5py.File(nwb_path, "w") as h5_file:
+        group = h5_file.create_group("units")
+        group.create_dataset("spike_times", data=values)
+        group.create_dataset(
+            "spike_times_index",
+            data=np.array([30_100, 60_000, 95_000, 100_000], dtype=np.uint64),
+        )
+
+    catalog_reader = _buffer_hdf5_reader(
+        nwb_path,
+        tmp_path / "large-contiguous-ragged-catalog.sqlite",
+    )
+    snapshot = asyncio.run(catalog_reader.read_table_schema_snapshot("units"))
+    spike_times = next(
+        column for column in snapshot.columns if column.name == "spike_times"
+    )
+    assert spike_times.dataset.storage_layout == "contiguous"
+
+    direct_reader = hdf5_range_reader._BufferRangeReader(nwb_path.read_bytes())
+    logical_range_counts: list[int] = []
+    original_read_ranges = direct_reader.read_ranges
+
+    async def _track_logical_ranges(
+        ranges: collections.abc.Iterable[hdf5_range_reader._ByteRange],
+    ) -> dict[hdf5_range_reader._ByteRange, bytes]:
+        requested_ranges = tuple(ranges)
+        logical_range_counts.append(len(requested_ranges))
+        return await original_read_ranges(requested_ranges)
+
+    monkeypatch.setattr(direct_reader, "read_ranges", _track_logical_ranges)
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+    spans = ((100, 30_100), (60_000, 95_000))
+
+    payloads = asyncio.run(
+        lazynwb.tables._read_direct_hdf5_element_spans(
+            direct_reader,
+            spike_times,
+            spans,
+        )
+    )
+
+    assert logical_range_counts == [len(spans)]
+    assert payloads[0].tolist() == values[100:30_100].tolist()
+    assert payloads[1].tolist() == values[60_000:95_000].tolist()
+    assert "spans=2 elements=65000 logical_ranges=2" in caplog.text
 
 
 def test_scan_nwb_predicate_projection_uses_direct_indexed_ranges(
