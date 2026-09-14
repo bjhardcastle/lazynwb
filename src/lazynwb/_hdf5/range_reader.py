@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import dataclasses
 import datetime
 import logging
@@ -30,6 +31,14 @@ _SourceIdentityCacheKey = tuple[
     str,
     str,
 ]
+_RangeWindowCacheKey = tuple[
+    str,
+    tuple[tuple[str, str], ...],
+    str,
+    str,
+    str,
+    int,
+]
 _OBSTORE_STORE_CACHE_LOCK = threading.RLock()
 _OBSTORE_STORE_CACHE: dict[_ObstoreStoreCacheKey, obstore.store.ObjectStore] = {}
 _SOURCE_IDENTITY_CACHE_LOCK = threading.RLock()
@@ -37,6 +46,8 @@ _SOURCE_IDENTITY_CACHE: dict[
     _SourceIdentityCacheKey,
     catalog_models._SourceIdentity,
 ] = {}
+_RANGE_WINDOW_CACHES_LOCK = threading.RLock()
+_RANGE_WINDOW_CACHES: dict[_RangeWindowCacheKey, _SharedRangeWindowCache] = {}
 
 
 class _RangeReadError(OSError):
@@ -62,6 +73,7 @@ class _RangeReaderConfig:
     range_alignment: int = 4096
     coalesce_gap_bytes: int = 0
     max_concurrency: int = 8
+    max_range_cache_bytes: int = 64 * 1024 * 1024
     storage_options: Mapping[str, object] | None = None
     client_options: object | None = None
     retry_config: object | None = None
@@ -74,6 +86,76 @@ class _ObstoreUrlContext:
     store_url: str
     object_path: str
     storage_options: dict[str, object]
+
+
+class _SharedRangeWindowCache:
+    """Bounded source-level cache of byte windows shared by reader lifetimes."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = max(0, max_bytes)
+        self._windows: collections.OrderedDict[_ByteRange, bytes] = (
+            collections.OrderedDict()
+        )
+        self._total_bytes = 0
+        self._lock = threading.RLock()
+
+    def get(self, byte_range: _ByteRange) -> bytes | None:
+        with self._lock:
+            matching = sorted(
+                (cached_range, payload)
+                for cached_range, payload in self._windows.items()
+                if cached_range.start < byte_range.end
+                and byte_range.start < cached_range.end
+            )
+            cursor = byte_range.start
+            pieces: list[bytes] = []
+            used_ranges: list[_ByteRange] = []
+            for cached_range, payload in matching:
+                if cached_range.end <= cursor:
+                    continue
+                if cached_range.start > cursor:
+                    return None
+                piece_end = min(byte_range.end, cached_range.end)
+                pieces.append(
+                    payload[cursor - cached_range.start : piece_end - cached_range.start]
+                )
+                used_ranges.append(cached_range)
+                cursor = piece_end
+                if cursor == byte_range.end:
+                    for used_range in used_ranges:
+                        self._windows.move_to_end(used_range)
+                    return b"".join(pieces)
+            return None
+
+    def covered_ranges(self, byte_range: _ByteRange) -> tuple[_ByteRange, ...]:
+        with self._lock:
+            return tuple(
+                _ByteRange(
+                    max(byte_range.start, cached_range.start),
+                    min(byte_range.end, cached_range.end),
+                )
+                for cached_range in self._windows
+                if cached_range.start < byte_range.end
+                and byte_range.start < cached_range.end
+            )
+
+    def put(self, byte_range: _ByteRange, payload: bytes) -> None:
+        if self.max_bytes <= 0 or len(payload) > self.max_bytes:
+            return
+        with self._lock:
+            previous = self._windows.pop(byte_range, None)
+            if previous is not None:
+                self._total_bytes -= len(previous)
+            self._windows[byte_range] = payload
+            self._total_bytes += len(payload)
+            while self._total_bytes > self.max_bytes:
+                _, evicted = self._windows.popitem(last=False)
+                self._total_bytes -= len(evicted)
+
+    @property
+    def window_count(self) -> int:
+        with self._lock:
+            return len(self._windows)
 
 
 @typing.runtime_checkable
@@ -126,10 +208,23 @@ class _ObstoreRangeReader:
             retry_config=self._config.retry_config,
             **self._storage_options,
         )
+        self._window_cache = _shared_range_window_cache(
+            _range_window_cache_key(
+                self._store_url,
+                self._object_path,
+                self._config,
+                self._storage_options,
+            ),
+            max_bytes=self._config.max_range_cache_bytes,
+        )
         self._semaphore = asyncio.Semaphore(max(1, self._config.max_concurrency))
+        self._inflight_windows: dict[_ByteRange, asyncio.Task[bytes]] = {}
         self._content_length: int | None = None
         self.request_count = 0
         self.bytes_fetched = 0
+        self.cache_hit_count = 0
+        self.cache_hit_bytes = 0
+        self.inflight_hit_count = 0
         logger.debug(
             "initialized obstore range reader for %s as path %r",
             self._url,
@@ -191,7 +286,7 @@ class _ObstoreRangeReader:
         end: int | None = None,
     ) -> bytes:
         byte_range = _normalize_range(start=start, length=length, end=end)
-        return await self._read_range(byte_range)
+        return await self._read_cached_range(byte_range)
 
     async def read_ranges(
         self,
@@ -222,7 +317,7 @@ class _ObstoreRangeReader:
         )
         t0 = time.perf_counter()
         fetched = await asyncio.gather(
-            *(self._read_range(byte_range) for byte_range in coalesced_ranges)
+            *(self._read_cached_range(byte_range) for byte_range in coalesced_ranges)
         )
         by_coalesced_range = dict(zip(coalesced_ranges, fetched, strict=True))
         result: dict[_ByteRange, bytes] = {}
@@ -238,16 +333,101 @@ class _ObstoreRangeReader:
             end = requested.end - containing_range.start
             result[requested] = window[start:end]
         logger.debug(
-            "read %d requested ranges from %s in %.3f s (%d total requests, %d bytes)",
+            "read %d requested ranges from %s in %.3f s (%d total requests, "
+            "%d bytes, %d cache hits/%d bytes, %d in-flight hits)",
             len(requested_ranges),
             self._url,
             time.perf_counter() - t0,
             self.request_count,
             self.bytes_fetched,
+            self.cache_hit_count,
+            self.cache_hit_bytes,
+            self.inflight_hit_count,
         )
         return result
 
-    async def _read_range(self, byte_range: _ByteRange) -> bytes:
+    async def _read_cached_range(self, byte_range: _ByteRange) -> bytes:
+        if (
+            self._window_cache.max_bytes <= 0
+            or byte_range.length > self._window_cache.max_bytes
+        ):
+            return await self._fetch_range(byte_range)
+        cached = self._window_cache.get(byte_range)
+        if cached is not None:
+            self.cache_hit_count += 1
+            self.cache_hit_bytes += len(cached)
+            logger.debug(
+                "range cache hit for %s bytes %d:%d (%d shared windows)",
+                self._url,
+                byte_range.start,
+                byte_range.end,
+                self._window_cache.window_count,
+            )
+            return cached
+
+        overlapping_inflight = {
+            inflight_range: task
+            for inflight_range, task in self._inflight_windows.items()
+            if inflight_range.start < byte_range.end
+            and byte_range.start < inflight_range.end
+        }
+        if overlapping_inflight:
+            self.inflight_hit_count += len(overlapping_inflight)
+            logger.debug(
+                "range in-flight cache hit for %s bytes %d:%d across %d windows",
+                self._url,
+                byte_range.start,
+                byte_range.end,
+                len(overlapping_inflight),
+            )
+        covered_ranges = (
+            *self._window_cache.covered_ranges(byte_range),
+            *overlapping_inflight,
+        )
+        missing_ranges = _subtract_byte_ranges(byte_range, covered_ranges)
+        new_tasks: list[asyncio.Task[bytes]] = []
+        for missing_range in missing_ranges:
+            task = asyncio.create_task(self._fetch_and_cache_range(missing_range))
+            self._inflight_windows[missing_range] = task
+            task.add_done_callback(
+                lambda completed, planned_range=missing_range: self._remove_inflight_range(
+                    planned_range,
+                    completed,
+                )
+            )
+            new_tasks.append(task)
+        await asyncio.gather(
+            *(
+                asyncio.shield(task)
+                for task in (*overlapping_inflight.values(), *new_tasks)
+            )
+        )
+        cached = self._window_cache.get(byte_range)
+        if cached is not None:
+            return cached
+        logger.debug(
+            "range cache could not assemble %s bytes %d:%d after concurrent reads; "
+            "fetching directly",
+            self._url,
+            byte_range.start,
+            byte_range.end,
+        )
+        return await self._fetch_range(byte_range)
+
+    async def _fetch_and_cache_range(self, byte_range: _ByteRange) -> bytes:
+        payload = await self._fetch_range(byte_range)
+        self._window_cache.put(byte_range, payload)
+        return payload
+
+    def _remove_inflight_range(
+        self,
+        byte_range: _ByteRange,
+        completed: asyncio.Task[bytes],
+    ) -> None:
+        if self._inflight_windows.get(byte_range) is completed:
+            self._inflight_windows.pop(byte_range, None)
+
+    async def _fetch_range(self, byte_range: _ByteRange) -> bytes:
         async with self._semaphore:
             t0 = time.perf_counter()
             data = await obstore.get_range_async(
@@ -433,6 +613,29 @@ def _coalesce_ranges(
     return tuple(coalesced)
 
 
+def _subtract_byte_ranges(
+    byte_range: _ByteRange,
+    covered_ranges: Iterable[_ByteRange],
+) -> tuple[_ByteRange, ...]:
+    clipped_coverage = sorted(
+        _ByteRange(
+            max(byte_range.start, covered.start),
+            min(byte_range.end, covered.end),
+        )
+        for covered in covered_ranges
+        if covered.start < byte_range.end and byte_range.start < covered.end
+    )
+    missing: list[_ByteRange] = []
+    cursor = byte_range.start
+    for covered in clipped_coverage:
+        if cursor < covered.start:
+            missing.append(_ByteRange(cursor, covered.start))
+        cursor = max(cursor, covered.end)
+    if cursor < byte_range.end:
+        missing.append(_ByteRange(cursor, byte_range.end))
+    return tuple(missing)
+
+
 def _require_ranges_within_bound(
     ranges: Iterable[_ByteRange],
     *,
@@ -615,6 +818,52 @@ def _cached_store_from_url(
         return store
 
 
+def _range_window_cache_key(
+    store_url: str,
+    object_path: str,
+    config: _RangeReaderConfig,
+    storage_options: Mapping[str, object],
+) -> _RangeWindowCacheKey:
+    return (
+        *_obstore_store_cache_key(
+            store_url,
+            client_options=config.client_options,
+            retry_config=config.retry_config,
+            storage_options=storage_options,
+        ),
+        object_path,
+        config.max_range_cache_bytes,
+    )
+
+
+def _shared_range_window_cache(
+    cache_key: _RangeWindowCacheKey,
+    *,
+    max_bytes: int,
+) -> _SharedRangeWindowCache:
+    with _RANGE_WINDOW_CACHES_LOCK:
+        cache = _RANGE_WINDOW_CACHES.get(cache_key)
+        if cache is None:
+            cache = _SharedRangeWindowCache(max_bytes)
+            _RANGE_WINDOW_CACHES[cache_key] = cache
+            logger.debug(
+                "created shared range window cache for %s/%s with %d byte budget",
+                cache_key[0],
+                cache_key[4],
+                max_bytes,
+            )
+        return cache
+
+
+def _clear_range_window_caches() -> None:
+    with _RANGE_WINDOW_CACHES_LOCK:
+        logger.debug(
+            "clearing %d shared range window caches",
+            len(_RANGE_WINDOW_CACHES),
+        )
+        _RANGE_WINDOW_CACHES.clear()
+
+
 def _obstore_store_cache_key(
     store_url: str,
     *,
@@ -707,6 +956,7 @@ def _clear_cache() -> None:
     """
     _clear_obstore_store_cache()
     _clear_source_identity_cache()
+    _clear_range_window_caches()
     _clear_s3_region_cache()
     lazynwb._storage_options._clear_default_s3_credential_provider()
 

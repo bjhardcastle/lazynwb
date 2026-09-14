@@ -39,6 +39,110 @@ def test_buffer_range_reader_coalesces_aligned_ranges() -> None:
     assert reader.bytes_fetched == 32
 
 
+def test_obstore_range_cache_deduplicates_inflight_and_later_reader_phases(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _Payload:
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+
+        def to_bytes(self) -> bytes:
+            return self._payload
+
+    source_bytes = bytes(range(64))
+    get_calls: list[tuple[int, int]] = []
+    hdf5_range_reader._clear_cache()
+    caplog.set_level(logging.DEBUG, logger="lazynwb._hdf5.range_reader")
+
+    monkeypatch.setattr(
+        hdf5_range_reader.obstore.store,
+        "from_url",
+        lambda store_url, **kwargs: object(),
+    )
+
+    async def _fake_head_async(store: object, path: str) -> dict[str, object]:
+        return {"size": len(source_bytes), "version": "version-1"}
+
+    async def _fake_get_range_async(
+        store: object,
+        path: str,
+        *,
+        start: int,
+        end: int,
+    ) -> _Payload:
+        get_calls.append((start, end))
+        await asyncio.sleep(0)
+        return _Payload(source_bytes[start:end])
+
+    monkeypatch.setattr(hdf5_range_reader.obstore, "head_async", _fake_head_async)
+    monkeypatch.setattr(
+        hdf5_range_reader.obstore,
+        "get_range_async",
+        _fake_get_range_async,
+    )
+    config = hdf5_range_reader._RangeReaderConfig(
+        range_alignment=16,
+        max_range_cache_bytes=64,
+    )
+
+    async def _read_concurrently(
+        reader: hdf5_range_reader._ObstoreRangeReader,
+    ) -> tuple[
+        dict[hdf5_range_reader._ByteRange, bytes],
+        dict[hdf5_range_reader._ByteRange, bytes],
+    ]:
+        await reader.get_source_identity()
+        return await asyncio.gather(
+            reader.read_ranges((hdf5_range_reader._ByteRange(1, 20),)),
+            reader.read_ranges((hdf5_range_reader._ByteRange(17, 40),)),
+        )
+
+    try:
+        first_reader = hdf5_range_reader._ObstoreRangeReader(
+            "https://example.com/file.nwb",
+            config,
+        )
+        first_payloads, overlapping_payloads = asyncio.run(
+            _read_concurrently(first_reader)
+        )
+        second_reader = hdf5_range_reader._ObstoreRangeReader(
+            "https://example.com/file.nwb",
+            config,
+        )
+        later_payloads = asyncio.run(
+            second_reader.read_ranges((hdf5_range_reader._ByteRange(18, 22),))
+        )
+
+        assert first_payloads[hdf5_range_reader._ByteRange(1, 20)] == source_bytes[1:20]
+        assert overlapping_payloads[
+            hdf5_range_reader._ByteRange(17, 40)
+        ] == source_bytes[17:40]
+        assert later_payloads[hdf5_range_reader._ByteRange(18, 22)] == bytes(
+            [18, 19, 20, 21]
+        )
+        assert sorted(get_calls) == [(0, 32), (32, 48)]
+        assert first_reader.inflight_hit_count == 1
+        assert second_reader.cache_hit_count == 1
+        assert "range in-flight cache hit" in caplog.text
+        assert "range cache hit" in caplog.text
+    finally:
+        hdf5_range_reader._clear_cache()
+
+
+def test_shared_range_window_cache_evicts_least_recently_used_bytes() -> None:
+    cache = hdf5_range_reader._SharedRangeWindowCache(max_bytes=4)
+    first = hdf5_range_reader._ByteRange(0, 4)
+    second = hdf5_range_reader._ByteRange(4, 8)
+
+    cache.put(first, b"0123")
+    cache.put(second, b"4567")
+
+    assert cache.get(first) is None
+    assert cache.get(second) == b"4567"
+    assert cache.window_count == 1
+
+
 def test_source_identity_from_obstore_metadata() -> None:
     metadata = {
         "size": 123,
