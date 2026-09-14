@@ -678,6 +678,79 @@ def _normalize_timeseries_path(path: str) -> str:
     return "/" if normalized == "/" else f"/{normalized}"
 
 
+def _timeseries_path_from_candidate(path: str) -> str:
+    return _normalize_timeseries_path(
+        path.removesuffix("/data").removesuffix("/timestamps")
+    )
+
+
+def _get_exact_range_backed_hdf5_timeseries(
+    nwb_path: lazynwb.types_.PathLike,
+    search_term: str,
+    hdf5_source_url: str,
+) -> TimeSeries | None:
+    """Resolve one exact HDF5 path without scanning unrelated file metadata."""
+    normalized_search_path = _normalize_timeseries_path(search_term)
+    reader_path = lazynwb.utils.normalize_internal_file_path(normalized_search_path)
+    reader = hdf5_reader._default_hdf5_backend_reader(
+        hdf5_source_url,
+        resolve_vlen_attributes=True,
+    )
+    try:
+        try:
+            requested_entry = lazynwb.tables._run_async_value(
+                reader._read_path_entry(reader_path)
+            )
+        except hdf5_reader._NotHDF5Error:
+            logger.debug(
+                "targeted range-backed TimeSeries discovery rejected "
+                "non-HDF5 source %r",
+                nwb_path,
+            )
+            return None
+        except KeyError:
+            logger.debug(
+                "targeted TimeSeries path was not found: "
+                "source_url=%s search_term=%r",
+                hdf5_source_url,
+                search_term,
+            )
+            raise lazynwb.exceptions.InternalPathError(
+                f"Exact path {search_term!r} not found in file {hdf5_source_url}"
+            ) from None
+
+        timeseries_path = _timeseries_path_from_candidate(normalized_search_path)
+        metadata_entry = requested_entry
+        if timeseries_path != normalized_search_path:
+            metadata_path = lazynwb.utils.normalize_internal_file_path(timeseries_path)
+            try:
+                metadata_entry = lazynwb.tables._run_async_value(
+                    reader._read_path_entry(metadata_path)
+                )
+            except KeyError:
+                raise lazynwb.exceptions.InternalPathError(
+                    f"Exact path {search_term!r} not found in file {hdf5_source_url}"
+                ) from None
+    finally:
+        lazynwb.tables._run_async_value(reader.close())
+
+    logger.debug(
+        "targeted range-backed TimeSeries discovery used exact HDF5 path: "
+        "source_url=%s requested_path=%s timeseries_path=%s",
+        hdf5_source_url,
+        normalized_search_path,
+        timeseries_path,
+    )
+    return TimeSeries(
+        _file_path=nwb_path,
+        _table_path=timeseries_path,
+        _hdf5_source_url=hdf5_source_url,
+        _path_metadata=lazynwb.file_io._path_metadata_from_summary_entry(
+            metadata_entry
+        ),
+    )
+
+
 @typing.overload
 def get_timeseries(
     nwb_path: lazynwb.types_.PathLike,
@@ -747,10 +820,20 @@ def get_timeseries(
             "Either `search_term` must be specified or `match_all` must be set to True"
         )
 
-    def _format(name: str) -> str:
-        return _normalize_timeseries_path(
-            name.removesuffix("/data").removesuffix("/timestamps")
+    hdf5_source_url = _range_backed_hdf5_source_url(nwb_path)
+    if (
+        hdf5_source_url is not None
+        and exact_path
+        and not match_all
+        and search_term is not None
+    ):
+        exact_timeseries = _get_exact_range_backed_hdf5_timeseries(
+            nwb_path,
+            search_term,
+            hdf5_source_url,
         )
+        if exact_timeseries is not None:
+            return exact_timeseries
 
     path_info, hdf5_source_url = _get_timeseries_path_info(nwb_path)
     source_url = hdf5_source_url or lazynwb.file_io.from_pathlike(nwb_path).as_posix()
@@ -784,7 +867,7 @@ def get_timeseries(
         )
     elif not match_all and search_term and is_in_file:
         assert normalized_search_path is not None
-        timeseries_path = _format(normalized_search_path)
+        timeseries_path = _timeseries_path_from_candidate(normalized_search_path)
         logger.debug(
             "selected exact TimeSeries path: source_url=%s timeseries_path=%s",
             source_url,

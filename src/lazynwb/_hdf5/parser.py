@@ -567,6 +567,55 @@ class _HDF5MetadataScanner:
         )
         return tuple(entries)
 
+    async def _read_path_entry(
+        self,
+        exact_path: str,
+    ) -> catalog_models._PathSummaryEntry:
+        """Read metadata for one exact path without traversing unrelated groups."""
+        started = time.perf_counter()
+        normalized_path = _normalize_exact_path(exact_path)
+        absolute_path = f"/{normalized_path.strip('/')}"
+        parent_path, name = absolute_path.rsplit("/", maxsplit=1)
+        parent_group = await self.resolve_group(parent_path or "/")
+        members = await self.enumerate_group(parent_group)
+        try:
+            member = members[name]
+        except KeyError as exc:
+            raise _TableNotFoundError(
+                f"missing {name!r} under {parent_group.path!r}"
+            ) from exc
+        if not self._is_defined_address(member.object_header_address):
+            raise _TableNotFoundError(
+                f"path {absolute_path!r} has no readable object header"
+            )
+        headers = await self.load_object_headers([member.object_header_address])
+        info = headers.get(member.object_header_address)
+        if info is None:
+            raise _TableNotFoundError(
+                f"path {absolute_path!r} has no readable object metadata"
+            )
+        attrs = dict(info.attributes)
+        if info.has_colnames:
+            attrs.setdefault("colnames", True)
+        entry = catalog_models._PathSummaryEntry(
+            path=absolute_path,
+            is_group=info.is_group,
+            is_dataset=info.is_dataset,
+            shape=(info.dataspace or ()) if info.is_dataset else None,
+            attrs_json=catalog_models._attrs_to_tuple(attrs),
+        )
+        logger.debug(
+            "built targeted HDF5 path entry for %s%s in %.3f s "
+            "(is_group=%s is_dataset=%s attrs=%s)",
+            self.source_url,
+            absolute_path,
+            time.perf_counter() - started,
+            entry.is_group,
+            entry.is_dataset,
+            sorted(attrs),
+        )
+        return entry
+
     async def _collect_path_summary_entries(
         self,
         group: _GroupHandle,

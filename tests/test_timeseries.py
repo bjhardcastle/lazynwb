@@ -127,7 +127,17 @@ def test_hdf5_timeseries_dataset_properties_and_slices_are_range_backed(
     def _fail_accessor(*args: object, **kwargs: object) -> None:
         raise AssertionError("HDF5 TimeSeries reads must not instantiate FileAccessor")
 
+    async def _fail_path_summary(
+        self: hdf5_reader._HDF5BackendReader,
+    ) -> tuple[catalog_models._PathSummaryEntry, ...]:
+        raise AssertionError("exact TimeSeries lookup must not scan the whole file")
+
     monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+    monkeypatch.setattr(
+        hdf5_reader._HDF5BackendReader,
+        "read_path_summary",
+        _fail_path_summary,
+    )
     caplog.set_level(logging.DEBUG, logger="lazynwb.timeseries")
     timeseries = lazynwb.get_timeseries(
         local_hdf5_path.as_uri(),
@@ -153,7 +163,43 @@ def test_hdf5_timeseries_dataset_properties_and_slices_are_range_backed(
     assert data[-1] == expected[-1]
     assert data[[7, 1, 7]].tolist() == expected[[7, 1, 7]].tolist()
     assert np.array_equal(np.asarray(data), expected)
+    assert "targeted range-backed TimeSeries discovery" in caplog.text
     assert "range-backed TimeSeries dataset read" in caplog.text
+
+
+def test_exact_hdf5_timeseries_child_path_is_targeted(
+    local_hdf5_path: pathlib.Path,
+) -> None:
+    timeseries_path = "/processing/behavior/running_speed_with_timestamps"
+
+    timeseries = lazynwb.get_timeseries(
+        local_hdf5_path.as_uri(),
+        f"{timeseries_path}/data",
+        exact_path=True,
+    )
+
+    assert timeseries._table_path == timeseries_path
+    assert timeseries.data.name == f"{timeseries_path}/data"
+
+
+def test_missing_exact_hdf5_timeseries_does_not_fall_back_to_file_accessor(
+    local_hdf5_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail_accessor(*args: object, **kwargs: object) -> None:
+        raise AssertionError("exact HDF5 lookup must not instantiate FileAccessor")
+
+    monkeypatch.setattr(lazynwb.file_io, "_get_accessor", _fail_accessor)
+
+    with pytest.raises(
+        lazynwb.exceptions.InternalPathError,
+        match="Exact path.*not found",
+    ):
+        lazynwb.get_timeseries(
+            local_hdf5_path.as_uri(),
+            "/processing/behavior/not-present",
+            exact_path=True,
+        )
 
 
 def test_rate_based_timeseries_timestamps_are_lazy_and_bounded(
@@ -198,7 +244,7 @@ def test_chunked_multidimensional_timeseries_and_child_dataset_are_range_backed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     nwb_path = tmp_path / "chunked-timeseries.nwb"
-    data_values = np.arange(120, dtype=np.int32).reshape(20, 6)
+    data_values = np.arange(120, dtype=np.int32).reshape(20, 3, 2)
     quality_values = np.linspace(0.0, 1.0, 20)
     with h5py.File(nwb_path, "w") as h5_file:
         group = h5_file.create_group("acquisition/recording")
@@ -206,7 +252,7 @@ def test_chunked_multidimensional_timeseries_and_child_dataset_are_range_backed(
         data = group.create_dataset(
             "data",
             data=data_values,
-            chunks=(4, 3),
+            chunks=(4, 2, 1),
             compression="gzip",
             shuffle=True,
         )
@@ -229,9 +275,11 @@ def test_chunked_multidimensional_timeseries_and_child_dataset_are_range_backed(
         exact_path=True,
     )
 
-    assert timeseries.data[3, 1:5].tolist() == data_values[3, 1:5].tolist()
-    assert timeseries.data[2:8:2, 2:4].tolist() == data_values[2:8:2, 2:4].tolist()
-    assert timeseries.data[[7, 1, 7], 2].tolist() == data_values[[7, 1, 7], 2].tolist()
+    assert timeseries.data[3, 1:3, 1].tolist() == data_values[3, 1:3, 1].tolist()
+    assert timeseries.data[2:8:2, 1:, 0].tolist() == data_values[2:8:2, 1:, 0].tolist()
+    assert timeseries.data[[7, 1, 7], 2, 1].tolist() == data_values[
+        [7, 1, 7], 2, 1
+    ].tolist()
     assert timeseries.quality[4:9].tolist() == quality_values[4:9].tolist()
     assert h5py.check_string_dtype(timeseries.labels.dtype).encoding == "utf-8"
     assert timeseries.labels[:].tolist() == [b"good", b"bad"]

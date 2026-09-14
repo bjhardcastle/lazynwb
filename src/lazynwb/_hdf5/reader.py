@@ -363,6 +363,82 @@ class _HDF5BackendReader:
         )
         return summary
 
+    async def _read_path_entry(
+        self,
+        exact_path: str,
+    ) -> catalog_models._PathSummaryEntry:
+        """Read one exact HDF5 path without recursively scanning the file."""
+        catalog_backend._require_exact_normalized_path(exact_path)
+        started = time.perf_counter()
+        request_count_before = _range_reader_request_count(self._range_reader)
+        fetched_bytes_before = _range_reader_fetched_bytes(self._range_reader)
+        source_identity = await self.get_source_identity()
+        if source_identity.content_length is None:
+            raise _HDF5ParserError(
+                source_url=source_identity.source_url,
+                table_path=exact_path,
+                feature="source_identity",
+                detail="content length is required for range-backed HDF5 parsing",
+            )
+        scanner = self._get_scanner(int(source_identity.content_length))
+        if self._cache is not None and not self._parsed_metadata_loaded:
+            parsed_lookup = await self._cache.get_parsed_hdf5_metadata(
+                source_identity,
+                payload_version=hdf5_parser._PARSED_METADATA_PAYLOAD_VERSION,
+                options_key=self._parsed_metadata_options_key,
+            )
+            if parsed_lookup.payload is not None:
+                scanner.import_metadata(parsed_lookup.payload)
+            logger.debug(
+                "parsed HDF5 metadata cache lookup for exact path %s/%s: %s",
+                source_identity.source_url,
+                exact_path,
+                parsed_lookup.reason,
+            )
+            self._parsed_metadata_loaded = True
+        try:
+            entry = await scanner._read_path_entry(exact_path)
+        except hdf5_parser._TableNotFoundError as exc:
+            raise KeyError(exact_path) from exc
+        except ValueError as exc:
+            if scanner.is_hdf5 is False or "no HDF5 superblock" in str(exc):
+                raise _NotHDF5Error(
+                    source_url=source_identity.source_url,
+                    table_path=exact_path,
+                    feature="hdf5_signature",
+                    detail=str(exc),
+                ) from exc
+            raise _HDF5ParserError(
+                source_url=source_identity.source_url,
+                table_path=exact_path,
+                feature="hdf5_exact_path",
+                detail=repr(exc),
+            ) from exc
+        except Exception as exc:
+            raise _HDF5ParserError(
+                source_url=source_identity.source_url,
+                table_path=exact_path,
+                feature="hdf5_exact_path",
+                detail=repr(exc),
+            ) from exc
+        if self._cache is not None:
+            await self._cache.put_parsed_hdf5_metadata(
+                source_identity,
+                payload_version=hdf5_parser._PARSED_METADATA_PAYLOAD_VERSION,
+                options_key=self._parsed_metadata_options_key,
+                payload=scanner.export_metadata(),
+            )
+        logger.debug(
+            "read targeted HDF5 path entry for %s/%s in %.3f s "
+            "(requests=%d bytes=%d)",
+            source_identity.source_url,
+            exact_path,
+            time.perf_counter() - started,
+            _range_reader_request_count(self._range_reader) - request_count_before,
+            _range_reader_fetched_bytes(self._range_reader) - fetched_bytes_before,
+        )
+        return entry
+
     async def close(self) -> None:
         logger.debug("closing HDF5 backend reader for %s", self._source_url)
 
