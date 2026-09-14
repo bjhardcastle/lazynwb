@@ -5,10 +5,12 @@ import collections.abc
 import logging
 import os
 import pathlib
+import threading
 
 import h5py
 import numpy as np
 import polars as pl
+import pyarrow as pa
 import pytest
 
 import lazynwb
@@ -39,7 +41,9 @@ def test_hdf5_backend_reader_parses_scalar_table_from_byte_buffer(
     assert schema["start_time"] == pl.Float64
     assert columns_by_name["start_time"].dataset.hdf5_data_offset is not None
     assert columns_by_name["start_time"].dataset.hdf5_storage_size is not None
-    assert "direct_contiguous" in columns_by_name["start_time"].dataset.read_capabilities
+    assert (
+        "direct_contiguous" in columns_by_name["start_time"].dataset.read_capabilities
+    )
 
 
 def test_hdf5_backend_reader_preserves_units_array_catalog_facts(
@@ -1120,7 +1124,9 @@ def test_scan_nwb_remote_vlen_string_never_instantiates_file_accessor(
         return reader
 
     def _fail_accessor(*args: object, **kwargs: object) -> None:
-        raise AssertionError("remote vlen string queries must not instantiate FileAccessor")
+        raise AssertionError(
+            "remote vlen string queries must not instantiate FileAccessor"
+        )
 
     monkeypatch.setattr(hdf5_reader, "_default_hdf5_backend_reader", _reader)
     monkeypatch.setattr(lazynwb.file_io, "FileAccessor", _fail_accessor)
@@ -1157,7 +1163,9 @@ def test_direct_hdf5_strings_and_multidimensional_selection_match_h5py(
     source_url = nwb_path.as_uri()
 
     def _fail_accessor(*args: object, **kwargs: object) -> None:
-        raise AssertionError("supported direct columns must not instantiate FileAccessor")
+        raise AssertionError(
+            "supported direct columns must not instantiate FileAccessor"
+        )
 
     monkeypatch.setattr(lazynwb.file_io, "FileAccessor", _fail_accessor)
     frame = lazynwb.get_df(
@@ -1209,7 +1217,9 @@ def test_direct_hdf5_chunked_compressed_columns_match_h5py_without_accessor(
     source_url = nwb_path.as_uri()
 
     def _fail_accessor(*args: object, **kwargs: object) -> None:
-        raise AssertionError("supported chunked columns must not instantiate FileAccessor")
+        raise AssertionError(
+            "supported chunked columns must not instantiate FileAccessor"
+        )
 
     monkeypatch.setattr(lazynwb.file_io, "FileAccessor", _fail_accessor)
     selected_rows = [9, 0, 5, 5]
@@ -1226,6 +1236,159 @@ def test_direct_hdf5_chunked_compressed_columns_match_h5py_without_accessor(
     assert frame["numeric"].to_list() == numeric_values[selected_rows].tolist()
     assert frame["fixed"].to_list() == ["f9", "f0", "f5", "f5"]
     assert frame["vlen"].to_list() == ["value-9", "value-0", "value-5", "value-5"]
+
+
+def test_direct_hdf5_polars_reads_build_arrow_string_and_ragged_buffers(
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    nwb_path = tmp_path / "arrow-native-table.nwb"
+    with h5py.File(nwb_path, "w") as h5_file:
+        group = h5_file.create_group("table")
+        group.create_dataset(
+            "fixed",
+            data=np.asarray([b"a", b"bb", b"ccc", b"dddd"], dtype="S4"),
+        )
+        group.create_dataset(
+            "vlen",
+            data=np.asarray(["zero", "one", "two", "three"], dtype=object),
+            dtype=h5py.string_dtype(encoding="utf-8"),
+        )
+        group.create_dataset(
+            "values",
+            data=np.asarray([0.1, 0.2, 0.3, 0.4], dtype=np.float64),
+        )
+        group.create_dataset(
+            "values_index",
+            data=np.asarray([2, 2, 3, 4], dtype=np.uint8),
+        )
+        group.create_dataset(
+            "labels",
+            data=np.asarray(["alpha", "beta", "gamma"], dtype=object),
+            dtype=h5py.string_dtype(encoding="utf-8"),
+        )
+        group.create_dataset(
+            "labels_index",
+            data=np.asarray([2, 2, 3, 3], dtype=np.uint8),
+        )
+
+    catalog_reader = _buffer_hdf5_reader(
+        nwb_path,
+        tmp_path / "arrow-native-catalog.sqlite",
+    )
+    snapshot = asyncio.run(catalog_reader.read_table_schema_snapshot("table"))
+    columns = {column.name: column for column in snapshot.columns}
+    direct_reader = hdf5_range_reader._BufferRangeReader(nwb_path.read_bytes())
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+
+    fixed = asyncio.run(
+        lazynwb.tables._read_direct_hdf5_column_array(
+            direct_reader,
+            columns["fixed"],
+            [3, 0, 2],
+            arrow_native=True,
+        )
+    )
+    vlen = asyncio.run(
+        lazynwb.tables._read_direct_hdf5_column_array(
+            direct_reader,
+            columns["vlen"],
+            [3, 0, 2],
+            arrow_native=True,
+        )
+    )
+    ragged = asyncio.run(
+        lazynwb.tables._read_direct_hdf5_indexed_column(
+            direct_reader,
+            lazynwb.tables._DirectHDF5IndexedColumnReadPlan(
+                data_column=columns["values"],
+                index_column=columns["values_index"],
+            ),
+            [3, 0, 1, 2],
+            arrow_native=True,
+        )
+    )
+    string_ragged = asyncio.run(
+        lazynwb.tables._read_direct_hdf5_indexed_column(
+            direct_reader,
+            lazynwb.tables._DirectHDF5IndexedColumnReadPlan(
+                data_column=columns["labels"],
+                index_column=columns["labels_index"],
+            ),
+            [2, 0, 1, 3],
+            arrow_native=True,
+        )
+    )
+
+    assert isinstance(fixed, pa.Array)
+    assert pa.types.is_large_string(fixed.type)
+    assert fixed.to_pylist() == ["dddd", "a", "ccc"]
+    assert isinstance(vlen, pa.Array)
+    assert pa.types.is_large_string(vlen.type)
+    assert vlen.to_pylist() == ["three", "zero", "two"]
+    assert isinstance(ragged, pa.LargeListArray)
+    assert ragged.to_pylist() == [[0.4], [0.1, 0.2], [], [0.3]]
+    assert isinstance(string_ragged, pa.LargeListArray)
+    assert string_ragged.to_pylist() == [["gamma"], ["alpha", "beta"], [], []]
+    assert "packed 3 fixed-width HDF5 strings into Arrow buffers" in caplog.text
+    assert "built Arrow ragged buffers" in caplog.text
+
+
+def test_filtered_chunks_decode_off_event_loop_and_shuffle_uses_one_output_buffer(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    nwb_path = tmp_path / "threaded-filter-decode.nwb"
+    values = np.arange(32, dtype=np.int32)
+    with h5py.File(nwb_path, "w") as h5_file:
+        h5_file.create_dataset(
+            "table/value",
+            data=values,
+            chunks=(4,),
+            compression="gzip",
+            shuffle=True,
+        )
+
+    calling_thread = threading.get_ident()
+    decode_threads: list[int] = []
+    original_decode = lazynwb.tables._decode_direct_hdf5_chunk_filters
+
+    def _record_decode_thread(*args: object, **kwargs: object) -> object:
+        decode_threads.append(threading.get_ident())
+        return original_decode(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        lazynwb.tables,
+        "_decode_direct_hdf5_chunk_filters",
+        _record_decode_thread,
+    )
+    caplog.set_level(logging.DEBUG, logger="lazynwb.tables")
+    selected_rows = [0, 7, 16, 31]
+
+    frame = lazynwb.get_df(
+        nwb_path.as_uri(),
+        "/table",
+        exact_path=True,
+        include_column_names=("value",),
+        nwb_path_to_row_indices={nwb_path.as_uri(): selected_rows},
+        as_polars=True,
+    )
+
+    raw = values[:4].tobytes()
+    shuffled = (
+        np.frombuffer(raw, dtype=np.uint8).reshape(4, values.dtype.itemsize).T.tobytes()
+    )
+    unshuffled = lazynwb.tables._unshuffle_hdf5_chunk(
+        shuffled,
+        element_size=values.dtype.itemsize,
+    )
+    assert frame["value"].to_list() == values[selected_rows].tolist()
+    assert decode_threads
+    assert all(thread_id != calling_thread for thread_id in decode_threads)
+    assert "off_event_loop=4" in caplog.text
+    assert isinstance(unshuffled, bytearray)
+    assert unshuffled == raw
 
 
 def test_sparse_chunk_index_lookup_reads_one_branch_and_caches_record(
@@ -1317,7 +1480,9 @@ def test_rate_timeseries_and_large_array_merge_use_range_reader(
         expected_waveforms = h5_file["units/waveform_mean"][[1, 3]][:].tolist()
 
     def _fail_accessor(*args: object, **kwargs: object) -> None:
-        raise AssertionError("TimeSeries and large arrays must not instantiate FileAccessor")
+        raise AssertionError(
+            "TimeSeries and large arrays must not instantiate FileAccessor"
+        )
 
     monkeypatch.setattr(lazynwb.file_io, "FileAccessor", _fail_accessor)
     timeseries = lazynwb.get_df(
@@ -1344,7 +1509,9 @@ def test_vlen_heap_reads_are_coalesced_within_request_budget(
         tmp_path / "request-budget-catalog.sqlite",
     )
     snapshot = asyncio.run(catalog_reader.read_table_schema_snapshot("units"))
-    structure = next(column for column in snapshot.columns if column.name == "structure")
+    structure = next(
+        column for column in snapshot.columns if column.name == "structure"
+    )
     direct_reader = hdf5_range_reader._BufferRangeReader(local_hdf5_path.read_bytes())
 
     values = asyncio.run(

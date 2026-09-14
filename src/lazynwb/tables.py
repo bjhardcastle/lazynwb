@@ -25,6 +25,8 @@ import pandas as pd
 import polars as pl
 import polars._typing
 import polars.datatypes.convert
+import pyarrow as pa
+import pyarrow.compute as pa_compute
 import tqdm
 import zarr
 
@@ -52,6 +54,7 @@ ColumnMetadataType = TypeVar(
 )
 AsyncValueType = TypeVar("AsyncValueType")
 _FastCatalogBackendName = Literal["hdf5", "zarr"]
+_HDF5Buffer = bytes | bytearray | memoryview
 
 logger = logging.getLogger(__name__)
 
@@ -171,11 +174,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: None = None,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
     _allow_missing_columns: bool = False,
 ) -> pd.DataFrame | pl.DataFrame: ...
 
@@ -198,11 +203,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: Literal[False] = False,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
     _allow_missing_columns: bool = False,
 ) -> pd.DataFrame: ...
 
@@ -223,11 +230,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: Literal[True] = True,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
     _allow_missing_columns: bool = False,
 ) -> pl.DataFrame: ...
 
@@ -250,11 +259,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: bool | None = None,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
     _allow_missing_columns: bool = False,
 ) -> pd.DataFrame | pl.DataFrame: ...
 
@@ -276,11 +287,13 @@ def get_df(
     ignore_errors: bool = False,
     low_memory: bool = False,
     as_polars: bool | None = None,
-    _catalog_snapshots: Mapping[
-        str,
-        catalog_models._TableSchemaSnapshot,
-    ]
-    | None = None,
+    _catalog_snapshots: (
+        Mapping[
+            str,
+            catalog_models._TableSchemaSnapshot,
+        ]
+        | None
+    ) = None,
     _allow_missing_columns: bool = False,
 ) -> pd.DataFrame | pl.DataFrame:
     """ ""Get a DataFrame from one or more NWB files.
@@ -739,9 +752,9 @@ def _has_direct_hdf5_layout(column: catalog_models._TableColumnSchema) -> bool:
         and column.dataset.storage_layout in {"contiguous", "chunked"}
     ):
         return True
-    return _has_direct_hdf5_contiguous_layout(column) or _has_direct_hdf5_chunked_layout(
+    return _has_direct_hdf5_contiguous_layout(
         column
-    )
+    ) or _has_direct_hdf5_chunked_layout(column)
 
 
 def _has_direct_hdf5_dtype(
@@ -895,6 +908,8 @@ def _materialize_direct_hdf5_read_plan(
     path: lazynwb.types_.PathLike,
     read_plan: _DirectHDF5TableReadPlan,
     table_row_indices: Sequence[int] | None,
+    *,
+    arrow_native: bool,
 ) -> dict[str, Any]:
     if not read_plan.has_direct_columns:
         return {}
@@ -907,6 +922,7 @@ def _materialize_direct_hdf5_read_plan(
                 reader._range_reader,
                 read_plan,
                 table_row_indices,
+                arrow_native=arrow_native,
             )
         )
     finally:
@@ -927,10 +943,17 @@ async def _materialize_direct_hdf5_read_plan_async(
     range_reader: hdf5_range_reader._RangeReader,
     read_plan: _DirectHDF5TableReadPlan,
     table_row_indices: Sequence[int] | None,
+    *,
+    arrow_native: bool,
 ) -> dict[str, Any]:
     column_names = [column.name for column in read_plan.scalar_columns]
     reads: list[typing.Awaitable[Any]] = [
-        _read_direct_hdf5_column_array(range_reader, column, table_row_indices)
+        _read_direct_hdf5_column_array(
+            range_reader,
+            column,
+            table_row_indices,
+            arrow_native=arrow_native and not column.is_metadata_table,
+        )
         for column in read_plan.scalar_columns
     ]
     column_names.extend(plan.data_column.name for plan in read_plan.indexed_columns)
@@ -939,6 +962,7 @@ async def _materialize_direct_hdf5_read_plan_async(
             range_reader,
             indexed_plan,
             table_row_indices,
+            arrow_native=arrow_native,
         )
         for indexed_plan in read_plan.indexed_columns
     )
@@ -955,20 +979,30 @@ async def _read_direct_hdf5_column_array(
     range_reader: hdf5_range_reader._RangeReader,
     column: catalog_models._TableColumnSchema,
     table_row_indices: Sequence[int] | None,
-) -> npt.NDArray[Any] | np.generic:
+    *,
+    arrow_native: bool = False,
+) -> npt.NDArray[Any] | np.generic | pa.Array:
     if column.shape and math.prod(column.shape) == 0:
+        if (
+            arrow_native
+            and len(column.shape) == 1
+            and column.dtype.kind in {"string", "vlen_string"}
+        ):
+            return pa.array([], type=pa.large_string())
         return _empty_direct_hdf5_array(column, leading_size=column.shape[0])
     if column.dataset.storage_layout == "contiguous":
         return await _read_direct_hdf5_contiguous_array(
             range_reader,
             column,
             table_row_indices,
+            arrow_native=arrow_native,
         )
     if column.dataset.storage_layout == "chunked":
         return await _read_direct_hdf5_chunked_array(
             range_reader,
             column,
             table_row_indices,
+            arrow_native=arrow_native,
         )
     raise _DirectHDF5ReadError(
         column.name,
@@ -980,7 +1014,9 @@ async def _read_direct_hdf5_contiguous_array(
     range_reader: hdf5_range_reader._RangeReader,
     column: catalog_models._TableColumnSchema,
     table_row_indices: Sequence[int] | None,
-) -> npt.NDArray[Any] | np.generic:
+    *,
+    arrow_native: bool,
+) -> npt.NDArray[Any] | np.generic | pa.Array:
     dataset = column.dataset
     if dataset.hdf5_data_offset is None or dataset.hdf5_storage_size is None:
         raise _DirectHDF5ReadError(column.name, "missing contiguous byte layout facts")
@@ -995,6 +1031,7 @@ async def _read_direct_hdf5_contiguous_array(
             column,
             payload,
             logical_shape=(),
+            arrow_native=False,
         )
         return decoded.item() if isinstance(decoded, np.ndarray) else decoded
 
@@ -1012,6 +1049,7 @@ async def _read_direct_hdf5_contiguous_array(
             column,
             payload,
             logical_shape=column.shape or (),
+            arrow_native=arrow_native,
         )
 
     row_indices = _normalize_indexed_table_row_indices(
@@ -1041,6 +1079,7 @@ async def _read_direct_hdf5_contiguous_array(
         column,
         selected_payload,
         logical_shape=selected_shape,
+        arrow_native=arrow_native,
     )
 
 
@@ -1090,10 +1129,11 @@ def _empty_direct_hdf5_array(
 async def _decode_direct_hdf5_payload(
     range_reader: hdf5_range_reader._RangeReader,
     column: catalog_models._TableColumnSchema,
-    payload: bytes,
+    payload: _HDF5Buffer,
     *,
     logical_shape: tuple[int, ...],
-) -> npt.NDArray[Any]:
+    arrow_native: bool = False,
+) -> npt.NDArray[Any] | pa.Array:
     element_count = math.prod(logical_shape) if logical_shape else 1
     decoded_shape = _hdf5_decoded_shape(column, logical_shape)
     if column.dtype.kind == "vlen_string":
@@ -1102,10 +1142,19 @@ async def _decode_direct_hdf5_payload(
             range_reader,
             column,
             references,
+            arrow_native=arrow_native and len(decoded_shape) == 1,
         )
+        if isinstance(strings, pa.Array):
+            return strings
         return np.asarray(strings, dtype=object).reshape(decoded_shape)
     if column.dtype.kind == "string":
         raw_dtype = np.dtype(column.dtype.numpy_dtype)
+        if arrow_native and len(decoded_shape) == 1:
+            return _arrow_fixed_hdf5_strings(
+                payload,
+                element_count=element_count,
+                itemsize=raw_dtype.itemsize,
+            )
         raw_values = np.frombuffer(payload, dtype=raw_dtype, count=element_count)
         strings = [
             bytes(value).split(b"\x00", 1)[0].decode("utf-8", errors="replace")
@@ -1114,14 +1163,71 @@ async def _decode_direct_hdf5_payload(
         return np.asarray(strings, dtype=object).reshape(decoded_shape)
     np_dtype = _hdf5_element_numpy_dtype(column)
     decoded_count = math.prod(decoded_shape) if decoded_shape else 1
-    return np.frombuffer(payload, dtype=np_dtype, count=decoded_count).copy().reshape(
-        decoded_shape
+    return (
+        np.frombuffer(payload, dtype=np_dtype, count=decoded_count)
+        .copy()
+        .reshape(decoded_shape)
     )
+
+
+def _arrow_utf8_array_from_buffers(
+    offsets: npt.NDArray[np.int64],
+    data: bytearray | npt.NDArray[np.uint8],
+) -> pa.Array:
+    binary_array = pa.Array.from_buffers(
+        pa.large_binary(),
+        len(offsets) - 1,
+        [None, pa.py_buffer(offsets), pa.py_buffer(data)],
+    )
+    try:
+        # Binary and UTF-8 arrays share the same buffers, so a successful cast validates
+        # UTF-8 without copying the packed payload.
+        return binary_array.cast(pa.large_string())
+    except pa.ArrowInvalid:
+        logger.debug(
+            "falling back to replacement decoding for %d invalid UTF-8 values",
+            len(binary_array),
+        )
+        return pa.array(
+            [
+                value.decode("utf-8", errors="replace")
+                for value in binary_array.to_pylist()
+            ],
+            type=pa.large_string(),
+        )
+
+
+def _arrow_fixed_hdf5_strings(
+    payload: _HDF5Buffer,
+    *,
+    element_count: int,
+    itemsize: int,
+) -> pa.Array:
+    raw_values = np.frombuffer(payload, dtype=np.uint8, count=element_count * itemsize)
+    raw_values = raw_values.reshape(element_count, itemsize)
+    nul_mask = raw_values == 0
+    has_nul = nul_mask.any(axis=1)
+    lengths = np.full(element_count, itemsize, dtype=np.int64)
+    lengths[has_nul] = nul_mask.argmax(axis=1)[has_nul]
+    del nul_mask, has_nul
+
+    offsets = np.empty(element_count + 1, dtype=np.int64)
+    offsets[0] = 0
+    np.cumsum(lengths, out=offsets[1:])
+    packed = raw_values[np.arange(itemsize) < lengths[:, None]]
+    logger.debug(
+        "packed %d fixed-width HDF5 strings into Arrow buffers: storage_bytes=%d "
+        "utf8_bytes=%d",
+        element_count,
+        element_count * itemsize,
+        len(packed),
+    )
+    return _arrow_utf8_array_from_buffers(offsets, packed)
 
 
 def _parse_direct_hdf5_vlen_references(
     column: catalog_models._TableColumnSchema,
-    payload: bytes,
+    payload: _HDF5Buffer,
     count: int,
 ) -> tuple[tuple[int, int, int], ...]:
     offset_size = column.dataset.hdf5_offset_size
@@ -1134,41 +1240,57 @@ def _parse_direct_hdf5_vlen_references(
             f"short vlen reference payload: need {count * stride}, got {len(payload)}",
         )
     return tuple(
-        (
-            int.from_bytes(payload[index * stride : index * stride + 4], "little"),
-            int.from_bytes(
-                payload[index * stride + 4 : index * stride + 4 + offset_size],
-                "little",
-            ),
-            int.from_bytes(
-                payload[
-                    index * stride
-                    + 4
-                    + offset_size : index * stride
-                    + 8
-                    + offset_size
-                ],
-                "little",
-            ),
-        )
+        _parse_direct_hdf5_vlen_reference_at(column, payload, index)
         for index in range(count)
     )
 
 
-async def _resolve_direct_hdf5_vlen_strings(
+def _parse_direct_hdf5_vlen_reference_at(
+    column: catalog_models._TableColumnSchema,
+    payload: _HDF5Buffer,
+    index: int,
+) -> tuple[int, int, int]:
+    offset_size = column.dataset.hdf5_offset_size
+    if offset_size is None:
+        raise _DirectHDF5ReadError(column.name, "missing HDF5 offset size")
+    stride = 4 + offset_size + 4
+    start = index * stride
+    if start < 0 or start + stride > len(payload):
+        raise _DirectHDF5ReadError(
+            column.name,
+            f"vlen reference {index} is outside the {len(payload)}-byte payload",
+        )
+    return (
+        int.from_bytes(payload[start : start + 4], "little"),
+        int.from_bytes(payload[start + 4 : start + 4 + offset_size], "little"),
+        int.from_bytes(
+            payload[start + 4 + offset_size : start + 8 + offset_size],
+            "little",
+        ),
+    )
+
+
+async def _resolve_direct_hdf5_vlen_strings(  # noqa: C901
     range_reader: hdf5_range_reader._RangeReader,
     column: catalog_models._TableColumnSchema,
     references: Sequence[tuple[int, int, int]],
-) -> list[str]:
+    *,
+    arrow_native: bool = False,
+) -> list[str] | pa.Array:
     dataset = column.dataset
     base_address = dataset.hdf5_base_address
     length_size = dataset.hdf5_length_size
     if base_address is None or length_size is None:
         raise _DirectHDF5ReadError(column.name, "missing global-heap address facts")
     heap_addresses = tuple(
-        dict.fromkeys(address for length, address, index in references if length and index)
+        dict.fromkeys(
+            address for length, address, index in references if length and index
+        )
     )
     if not heap_addresses:
+        if arrow_native:
+            offsets = np.zeros(len(references) + 1, dtype=np.int64)
+            return _arrow_utf8_array_from_buffers(offsets, bytearray())
         return ["" for _ in references]
     heap_probe_size = 4096
     source_identity = await range_reader.get_source_identity()
@@ -1176,9 +1298,11 @@ async def _resolve_direct_hdf5_vlen_strings(
     header_ranges = tuple(
         hdf5_range_reader._ByteRange(
             base_address + address,
-            min(base_address + address + heap_probe_size, content_length)
-            if content_length is not None
-            else base_address + address + heap_probe_size,
+            (
+                min(base_address + address + heap_probe_size, content_length)
+                if content_length is not None
+                else base_address + address + heap_probe_size
+            ),
         )
         for address in heap_addresses
     )
@@ -1220,6 +1344,33 @@ async def _resolve_direct_hdf5_vlen_strings(
         )
         for address in heap_addresses
     }
+    if arrow_native:
+        offsets = np.empty(len(references) + 1, dtype=np.int64)
+        offsets[0] = 0
+        packed = bytearray()
+        for output_index, (length, address, index) in enumerate(references, start=1):
+            if length and index:
+                try:
+                    value = heap_objects[address][index]
+                except KeyError as exc:
+                    raise _DirectHDF5ReadError(
+                        column.name,
+                        f"global heap object {index} was not found at {address}",
+                    ) from exc
+                value_length = min(length, len(value))
+                while value_length and value[value_length - 1] == 0:
+                    value_length -= 1
+                packed.extend(value[:value_length])
+            offsets[output_index] = len(packed)
+        logger.debug(
+            "resolved %d HDF5 vlen strings from %d coalesced global heap "
+            "collections into %d Arrow UTF-8 bytes",
+            len(references),
+            len(heap_addresses),
+            len(packed),
+        )
+        return _arrow_utf8_array_from_buffers(offsets, packed)
+
     strings: list[str] = []
     for length, address, index in references:
         if not length or not index:
@@ -1232,7 +1383,9 @@ async def _resolve_direct_hdf5_vlen_strings(
                 column.name,
                 f"global heap object {index} was not found at {address}",
             ) from exc
-        strings.append(value.rstrip(b"\x00").decode("utf-8", errors="replace"))
+        strings.append(
+            bytes(value[:length]).rstrip(b"\x00").decode("utf-8", errors="replace")
+        )
     logger.debug(
         "resolved %d HDF5 vlen strings from %d coalesced global heap collections",
         len(references),
@@ -1245,13 +1398,14 @@ def _parse_direct_hdf5_global_heap_collection(
     payload: bytes,
     *,
     length_size: int,
-) -> dict[int, bytes]:
+) -> dict[int, memoryview]:
     collection_size = min(
         int.from_bytes(payload[8 : 8 + length_size], "little"),
         len(payload),
     )
     cursor = 8 + length_size
-    objects: dict[int, bytes] = {}
+    objects: dict[int, memoryview] = {}
+    payload_view = memoryview(payload)
     while cursor + 8 + length_size <= collection_size:
         object_index = int.from_bytes(payload[cursor : cursor + 2], "little")
         object_size = int.from_bytes(
@@ -1261,16 +1415,18 @@ def _parse_direct_hdf5_global_heap_collection(
         if object_index == 0 and object_size == 0:
             break
         if object_index:
-            objects[object_index] = bytes(payload[cursor : cursor + object_size])
+            objects[object_index] = payload_view[cursor : cursor + object_size]
         cursor += (object_size + 7) & ~7
     return objects
 
 
-async def _read_direct_hdf5_chunked_array(
+async def _read_direct_hdf5_chunked_array(  # noqa: C901
     range_reader: hdf5_range_reader._RangeReader,
     column: catalog_models._TableColumnSchema,
     table_row_indices: Sequence[int] | None,
-) -> npt.NDArray[Any] | np.generic:
+    *,
+    arrow_native: bool,
+) -> npt.NDArray[Any] | np.generic | pa.Array:
     dataset = column.dataset
     shape = column.shape or ()
     chunks = dataset.chunks or ()
@@ -1330,6 +1486,32 @@ async def _read_direct_hdf5_chunked_array(
         for record in needed_records
     )
     stored_payloads = await range_reader.read_ranges(chunk_ranges)
+    output_rows_by_chunk: dict[int, list[tuple[int, int]]] = {}
+    for output_row, selected_input_row in enumerate(row_indices):
+        chunk_offset = int(selected_input_row // chunks[0]) * chunks[0]
+        output_rows_by_chunk.setdefault(chunk_offset, []).append(
+            (int(output_row), int(selected_input_row))
+        )
+
+    raw_payloads = await _decode_direct_hdf5_chunk_payloads(
+        column,
+        tuple(stored_payloads[byte_range] for byte_range in chunk_ranges),
+        tuple(record.filter_mask for record in needed_records),
+    )
+    if (
+        arrow_native
+        and len(shape) == 1
+        and column.dtype.kind in {"string", "vlen_string"}
+    ):
+        return await _materialize_arrow_chunked_hdf5_strings(
+            range_reader,
+            column,
+            row_indices=row_indices,
+            chunks=chunks,
+            needed_records=needed_records,
+            raw_payloads=raw_payloads,
+        )
+
     output_shape = _hdf5_decoded_shape(column, (len(row_indices), *shape[1:]))
     if column.dtype.kind in {"string", "vlen_string"}:
         output = np.full(
@@ -1343,21 +1525,6 @@ async def _read_direct_hdf5_chunked_array(
             _direct_hdf5_fill_value(column, default=0),
             dtype=_hdf5_element_numpy_dtype(column),
         )
-    output_rows_by_chunk: dict[int, list[tuple[int, int]]] = {}
-    for output_row, selected_input_row in enumerate(row_indices):
-        chunk_offset = int(selected_input_row // chunks[0]) * chunks[0]
-        output_rows_by_chunk.setdefault(chunk_offset, []).append(
-            (int(output_row), int(selected_input_row))
-        )
-
-    raw_payloads = tuple(
-        _decode_direct_hdf5_chunk_filters(
-            column,
-            stored_payloads[byte_range],
-            filter_mask=record.filter_mask,
-        )
-        for record, byte_range in zip(needed_records, chunk_ranges, strict=True)
-    )
     if column.dtype.kind == "vlen_string":
         references_by_chunk = tuple(
             _parse_direct_hdf5_vlen_references(
@@ -1376,6 +1543,7 @@ async def _read_direct_hdf5_chunked_array(
             range_reader,
             column,
             all_references,
+            arrow_native=False,
         )
         strings_per_chunk = math.prod(chunks)
         chunk_arrays = tuple(
@@ -1396,6 +1564,7 @@ async def _read_direct_hdf5_chunked_array(
                         column,
                         raw_payload,
                         logical_shape=chunks,
+                        arrow_native=False,
                     )
                     for raw_payload in raw_payloads
                 )
@@ -1435,6 +1604,84 @@ async def _read_direct_hdf5_chunked_array(
         len(needed_records),
     )
     return output
+
+
+async def _materialize_arrow_chunked_hdf5_strings(
+    range_reader: hdf5_range_reader._RangeReader,
+    column: catalog_models._TableColumnSchema,
+    *,
+    row_indices: npt.NDArray[np.intp],
+    chunks: tuple[int, ...],
+    needed_records: Sequence[_HDF5ChunkRecord],
+    raw_payloads: Sequence[_HDF5Buffer],
+) -> pa.Array:
+    payload_by_chunk_offset = {
+        record.offsets[0]: payload
+        for record, payload in zip(needed_records, raw_payloads, strict=True)
+    }
+    if column.dtype.kind == "vlen_string":
+        references = tuple(
+            (
+                (0, 0, 0)
+                if (payload := payload_by_chunk_offset.get(chunk_offset)) is None
+                else _parse_direct_hdf5_vlen_reference_at(
+                    column,
+                    payload,
+                    int(input_row) - chunk_offset,
+                )
+            )
+            for input_row in row_indices
+            for chunk_offset in (int(input_row // chunks[0]) * chunks[0],)
+        )
+        selected = await _resolve_direct_hdf5_vlen_strings(
+            range_reader,
+            column,
+            references,
+            arrow_native=True,
+        )
+        assert isinstance(selected, pa.Array)
+    else:
+        selected = _arrow_selected_fixed_hdf5_strings(
+            column,
+            row_indices=row_indices,
+            chunk_size=chunks[0],
+            payload_by_chunk_offset=payload_by_chunk_offset,
+        )
+    logger.debug(
+        "materialized %d selected HDF5 string rows from %d chunks directly into "
+        "Arrow buffers",
+        len(row_indices),
+        len(needed_records),
+    )
+    return selected
+
+
+def _arrow_selected_fixed_hdf5_strings(
+    column: catalog_models._TableColumnSchema,
+    *,
+    row_indices: npt.NDArray[np.intp],
+    chunk_size: int,
+    payload_by_chunk_offset: Mapping[int, _HDF5Buffer],
+) -> pa.Array:
+    itemsize = _hdf5_storage_itemsize(column)
+    fill_value = _direct_hdf5_fill_value(column, default="")
+    fill_bytes = str(fill_value).encode("utf-8")[:itemsize]
+    selected_raw = np.zeros((len(row_indices), itemsize), dtype=np.uint8)
+    if fill_bytes:
+        selected_raw[:, : len(fill_bytes)] = np.frombuffer(fill_bytes, dtype=np.uint8)
+    selected_chunk_offsets = (row_indices // chunk_size) * chunk_size
+    for chunk_offset, payload in payload_by_chunk_offset.items():
+        output_indices = np.flatnonzero(selected_chunk_offsets == chunk_offset)
+        if not output_indices.size:
+            continue
+        chunk_values = np.frombuffer(payload, dtype=np.uint8).reshape(chunk_size, itemsize)
+        input_indices = row_indices[output_indices] - chunk_offset
+        selected_raw[output_indices] = chunk_values[input_indices]
+    return _arrow_fixed_hdf5_strings(
+        selected_raw,
+        element_count=len(row_indices),
+        itemsize=itemsize,
+    )
 
 
 def _direct_hdf5_fill_value(
@@ -1512,9 +1759,11 @@ async def _read_direct_hdf5_v1_chunk_index(  # noqa: C901
         probe_ranges = tuple(
             hdf5_range_reader._ByteRange(
                 address,
-                min(address + 4096, content_length)
-                if content_length is not None
-                else address + 4096,
+                (
+                    min(address + 4096, content_length)
+                    if content_length is not None
+                    else address + 4096
+                ),
             )
             for address in level_addresses
         )
@@ -1541,7 +1790,10 @@ async def _read_direct_hdf5_v1_chunk_index(  # noqa: C901
                 )
         oversized_nodes = await range_reader.read_ranges(oversized_node_ranges)
         node_payloads.update(
-            {byte_range.start: payload for byte_range, payload in oversized_nodes.items()}
+            {
+                byte_range.start: payload
+                for byte_range, payload in oversized_nodes.items()
+            }
         )
         next_pending: dict[int, set[tuple[int, ...]] | None] = {}
         for address, entries_used in node_facts:
@@ -1565,7 +1817,10 @@ async def _read_direct_hdf5_v1_chunk_index(  # noqa: C901
                     else:
                         existing_targets.update(entry_targets)
                     continue
-                if entry_targets is not None and entry.offsets[:-1] not in entry_targets:
+                if (
+                    entry_targets is not None
+                    and entry.offsets[:-1] not in entry_targets
+                ):
                     continue
                 records.append(
                     _HDF5ChunkRecord(
@@ -1697,7 +1952,11 @@ def _get_cached_direct_hdf5_chunk_records(
             _DIRECT_HDF5_CHUNK_RECORD_CACHE.move_to_end(cache_key)
             if record is not None:
                 records.append(record)
-    return tuple(records), frozenset(uncached), len(target_chunk_offsets) - len(uncached)
+    return (
+        tuple(records),
+        frozenset(uncached),
+        len(target_chunk_offsets) - len(uncached),
+    )
 
 
 def _put_cached_direct_hdf5_chunk_records(
@@ -1738,13 +1997,72 @@ def _clear_direct_hdf5_chunk_record_cache() -> None:
         _DIRECT_HDF5_CHUNK_RECORD_CACHE.clear()
 
 
+def _chunk_has_applied_hdf5_filter(
+    column: catalog_models._TableColumnSchema,
+    *,
+    filter_mask: int,
+) -> bool:
+    return any(
+        isinstance(item, Mapping) and not filter_mask & (1 << pipeline_index)
+        for pipeline_index, item in enumerate(column.dataset.filters)
+    )
+
+
+async def _decode_direct_hdf5_chunk_payloads(
+    column: catalog_models._TableColumnSchema,
+    payloads: Sequence[bytes],
+    filter_masks: Sequence[int],
+) -> tuple[_HDF5Buffer, ...]:
+    if len(payloads) != len(filter_masks):
+        raise ValueError("chunk payload and filter-mask counts differ")
+    started = time.perf_counter()
+    offloaded_count = 0
+    decodes: list[typing.Awaitable[_HDF5Buffer]] = []
+    for payload, filter_mask in zip(payloads, filter_masks, strict=True):
+        if _chunk_has_applied_hdf5_filter(column, filter_mask=filter_mask):
+            offloaded_count += 1
+            decodes.append(
+                asyncio.to_thread(
+                    _decode_direct_hdf5_chunk_filters,
+                    column,
+                    payload,
+                    filter_mask=filter_mask,
+                )
+            )
+        else:
+
+            async def _decode_inline(
+                payload: bytes = payload,
+                filter_mask: int = filter_mask,
+            ) -> _HDF5Buffer:
+                return _decode_direct_hdf5_chunk_filters(
+                    column,
+                    payload,
+                    filter_mask=filter_mask,
+                )
+
+            decodes.append(_decode_inline())
+    decoded = tuple(await asyncio.gather(*decodes))
+    logger.debug(
+        "decoded %d HDF5 chunks for %r in %.3f s: off_event_loop=%d "
+        "stored_bytes=%d decoded_bytes=%d",
+        len(payloads),
+        column.name,
+        time.perf_counter() - started,
+        offloaded_count,
+        sum(map(len, payloads)),
+        sum(map(len, decoded)),
+    )
+    return decoded
+
+
 def _decode_direct_hdf5_chunk_filters(
     column: catalog_models._TableColumnSchema,
     payload: bytes,
     *,
     filter_mask: int,
-) -> bytes:
-    decoded = payload
+) -> _HDF5Buffer:
+    decoded: _HDF5Buffer = payload
     filters = tuple(
         item for item in column.dataset.filters if isinstance(item, Mapping)
     )
@@ -1780,10 +2098,16 @@ def _decode_direct_hdf5_chunk_filters(
             column.name,
             f"decoded chunk is short: need {expected_size} bytes, got {len(decoded)}",
         )
+    if len(decoded) == expected_size:
+        return decoded
     return decoded[:expected_size]
 
 
-def _unshuffle_hdf5_chunk(payload: bytes, *, element_size: int) -> bytes:
+def _unshuffle_hdf5_chunk(
+    payload: _HDF5Buffer,
+    *,
+    element_size: int,
+) -> _HDF5Buffer:
     if element_size <= 1 or not payload:
         return payload
     if len(payload) % element_size:
@@ -1794,14 +2118,21 @@ def _unshuffle_hdf5_chunk(payload: bytes, *, element_size: int) -> bytes:
     shuffled = np.frombuffer(payload, dtype=np.uint8).reshape(
         element_size, element_count
     )
-    return shuffled.T.copy().tobytes()
+    unshuffled = bytearray(len(payload))
+    destination = np.frombuffer(unshuffled, dtype=np.uint8).reshape(
+        element_count, element_size
+    )
+    np.copyto(destination, shuffled.T)
+    return unshuffled
 
 
 async def _read_direct_hdf5_indexed_column(
     range_reader: hdf5_range_reader._RangeReader,
     indexed_plan: _DirectHDF5IndexedColumnReadPlan,
     table_row_indices: Sequence[int] | None,
-) -> list[list[Any]]:
+    *,
+    arrow_native: bool = False,
+) -> list[list[Any]] | pa.Array:
     data_column = indexed_plan.data_column
     index_column = indexed_plan.index_column
     request_count_before = int(getattr(range_reader, "request_count", 0))
@@ -1822,6 +2153,14 @@ async def _read_direct_hdf5_indexed_column(
             "direct HDF5 indexed materialization for %r selected zero rows",
             data_column.name,
         )
+        if arrow_native:
+            return _arrow_list_array_from_indexed_spans(
+                column=data_column,
+                row_starts=range_plan.row_starts,
+                row_ends=range_plan.row_ends,
+                spans=(),
+                span_payloads=(),
+            )
         return []
 
     if range_plan.requested_element_count == 0:
@@ -1830,19 +2169,37 @@ async def _read_direct_hdf5_indexed_column(
             data_column.name,
             len(range_plan.row_indices),
         )
+        if arrow_native:
+            return _arrow_list_array_from_indexed_spans(
+                column=data_column,
+                row_starts=range_plan.row_starts,
+                row_ends=range_plan.row_ends,
+                spans=(),
+                span_payloads=(),
+            )
         return [[] for _ in range_plan.row_indices]
 
     span_payloads = await _read_direct_hdf5_element_spans(
         range_reader,
         data_column,
         range_plan.spans,
+        arrow_native=arrow_native,
     )
-    column_data = _split_direct_indexed_span_payloads(
-        row_starts=range_plan.row_starts,
-        row_ends=range_plan.row_ends,
-        spans=range_plan.spans,
-        span_payloads=span_payloads,
-    )
+    if arrow_native:
+        column_data = _arrow_list_array_from_indexed_spans(
+            column=data_column,
+            row_starts=range_plan.row_starts,
+            row_ends=range_plan.row_ends,
+            spans=range_plan.spans,
+            span_payloads=span_payloads,
+        )
+    else:
+        column_data = _split_direct_indexed_span_payloads(
+            row_starts=range_plan.row_starts,
+            row_ends=range_plan.row_ends,
+            spans=range_plan.spans,
+            span_payloads=typing.cast(Sequence[npt.NDArray[Any]], span_payloads),
+        )
     logger.debug(
         "direct HDF5 indexed materialization for %r: rows=%d spans=%d "
         "requested_elements=%d spanned_elements=%d full_elements=%d "
@@ -1986,7 +2343,9 @@ async def _read_direct_hdf5_element_spans(
     range_reader: hdf5_range_reader._RangeReader,
     column: catalog_models._TableColumnSchema,
     spans: Sequence[tuple[int, int]],
-) -> list[npt.NDArray[Any]]:
+    *,
+    arrow_native: bool = False,
+) -> list[npt.NDArray[Any] | pa.Array]:
     if not spans:
         return []
     if column.dataset.storage_layout == "contiguous":
@@ -1994,23 +2353,26 @@ async def _read_direct_hdf5_element_spans(
             range_reader,
             column,
             spans,
+            arrow_native=arrow_native,
         )
 
     selected_indices = np.concatenate(
         [np.arange(start, end, dtype=np.intp) for start, end in spans]
     )
-    selected = np.asarray(
-        await _read_direct_hdf5_column_array(
-            range_reader,
-            column,
-            selected_indices.tolist(),
-        )
+    selected = await _read_direct_hdf5_column_array(
+        range_reader,
+        column,
+        selected_indices.tolist(),
+        arrow_native=arrow_native,
     )
-    payloads: list[npt.NDArray[Any]] = []
+    payloads: list[npt.NDArray[Any] | pa.Array] = []
     cursor = 0
     for start, end in spans:
         length = end - start
-        payloads.append(selected[cursor : cursor + length])
+        if isinstance(selected, pa.Array):
+            payloads.append(selected.slice(cursor, length))
+        else:
+            payloads.append(np.asarray(selected)[cursor : cursor + length])
         cursor += length
     return payloads
 
@@ -2019,7 +2381,9 @@ async def _read_direct_hdf5_contiguous_element_spans(
     range_reader: hdf5_range_reader._RangeReader,
     column: catalog_models._TableColumnSchema,
     spans: Sequence[tuple[int, int]],
-) -> list[npt.NDArray[Any]]:
+    *,
+    arrow_native: bool,
+) -> list[npt.NDArray[Any] | pa.Array]:
     dataset = column.dataset
     if dataset.hdf5_data_offset is None or dataset.hdf5_storage_size is None:
         raise _DirectHDF5ReadError(column.name, "missing contiguous byte layout facts")
@@ -2056,6 +2420,7 @@ async def _read_direct_hdf5_contiguous_element_spans(
                 column,
                 payloads[byte_range],
                 logical_shape=(end - start, *trailing_shape),
+                arrow_native=arrow_native,
             )
             for byte_range, (start, end) in zip(
                 byte_ranges,
@@ -2073,6 +2438,146 @@ async def _read_direct_hdf5_contiguous_element_spans(
         len(byte_ranges),
     )
     return list(decoded_spans)
+
+
+def _arrow_array_from_numpy(values: npt.NDArray[Any]) -> pa.Array:
+    if values.ndim == 0:
+        return pa.array([values.item()])
+    if values.ndim == 1:
+        return pa.array(values)
+    contiguous_values = np.ascontiguousarray(values)
+    arrow_values = pa.array(contiguous_values.reshape(-1))
+    for fixed_size in reversed(contiguous_values.shape[1:]):
+        arrow_values = pa.FixedSizeListArray.from_arrays(arrow_values, fixed_size)
+    return arrow_values
+
+
+def _empty_arrow_hdf5_column_values(
+    column: catalog_models._TableColumnSchema,
+) -> pa.Array:
+    if column.dtype.kind in {"string", "vlen_string"}:
+        return pa.array([], type=pa.large_string())
+    empty_values = _empty_direct_hdf5_array(column, leading_size=0)
+    return _arrow_array_from_numpy(empty_values)
+
+
+def _arrow_list_array_from_indexed_spans(  # noqa: C901
+    *,
+    column: catalog_models._TableColumnSchema,
+    row_starts: npt.NDArray[np.intp],
+    row_ends: npt.NDArray[np.intp],
+    spans: Sequence[tuple[int, int]],
+    span_payloads: Sequence[npt.NDArray[Any] | pa.Array],
+) -> pa.Array:
+    row_lengths = np.asarray(row_ends - row_starts, dtype=np.int64)
+    offsets = np.empty(len(row_lengths) + 1, dtype=np.int64)
+    offsets[0] = 0
+    np.cumsum(row_lengths, out=offsets[1:])
+    selected_element_count = int(offsets[-1])
+    if not spans:
+        if selected_element_count:
+            raise AssertionError(
+                "indexed Arrow rows have values but no materialized spans"
+            )
+        values = _empty_arrow_hdf5_column_values(column)
+        return pa.LargeListArray.from_arrays(pa.array(offsets), values)
+
+    span_starts = np.asarray([start for start, _ in spans], dtype=np.intp)
+    span_indices = np.searchsorted(span_starts, row_starts, side="right") - 1
+    for start, end, span_index in zip(
+        row_starts,
+        row_ends,
+        span_indices,
+        strict=True,
+    ):
+        if end <= start:
+            continue
+        span_start, span_end = spans[int(span_index)]
+        if span_start > start or end > span_end:
+            raise AssertionError(
+                "direct indexed span planner produced a span that does not contain "
+                "a requested row"
+            )
+
+    if span_payloads and isinstance(span_payloads[0], pa.Array):
+        arrow_spans = tuple(
+            payload for payload in span_payloads if isinstance(payload, pa.Array)
+        )
+        if len(arrow_spans) != len(span_payloads):
+            raise AssertionError("indexed string spans mixed Arrow and NumPy payloads")
+        chunked_values = pa.chunked_array(arrow_spans)
+        span_value_offsets = np.empty(len(spans), dtype=np.int64)
+        span_value_offsets[0] = 0
+        if len(spans) > 1:
+            np.cumsum(
+                np.asarray(
+                    [len(payload) for payload in arrow_spans[:-1]], dtype=np.int64
+                ),
+                out=span_value_offsets[1:],
+            )
+        take_indices = np.empty(selected_element_count, dtype=np.int64)
+        output_start = 0
+        for start, end, span_index in zip(
+            row_starts,
+            row_ends,
+            span_indices,
+            strict=True,
+        ):
+            row_length = int(end - start)
+            if not row_length:
+                continue
+            span_index_int = int(span_index)
+            span_start = spans[span_index_int][0]
+            source_start = span_value_offsets[span_index_int] + int(start) - span_start
+            take_indices[output_start : output_start + row_length] = np.arange(
+                source_start,
+                source_start + row_length,
+                dtype=np.int64,
+            )
+            output_start += row_length
+        selected_values = pa_compute.take(chunked_values, pa.array(take_indices))
+        if isinstance(selected_values, pa.ChunkedArray):
+            values = selected_values.combine_chunks()
+        else:
+            values = selected_values
+    else:
+        numpy_spans = tuple(
+            payload for payload in span_payloads if isinstance(payload, np.ndarray)
+        )
+        if len(numpy_spans) != len(span_payloads):
+            raise AssertionError("indexed numeric spans mixed Arrow and NumPy payloads")
+        trailing_shape = numpy_spans[0].shape[1:]
+        selected_numpy = np.empty(
+            (selected_element_count, *trailing_shape),
+            dtype=numpy_spans[0].dtype,
+        )
+        output_start = 0
+        for start, end, span_index in zip(
+            row_starts,
+            row_ends,
+            span_indices,
+            strict=True,
+        ):
+            row_length = int(end - start)
+            if not row_length:
+                continue
+            span_index_int = int(span_index)
+            span_start = spans[span_index_int][0]
+            selected_numpy[output_start : output_start + row_length] = numpy_spans[
+                span_index_int
+            ][int(start) - span_start : int(end) - span_start]
+            output_start += row_length
+        values = _arrow_array_from_numpy(selected_numpy)
+
+    logger.debug(
+        "built Arrow ragged buffers for %r: rows=%d values=%d spans=%d value_type=%s",
+        column.name,
+        len(row_lengths),
+        selected_element_count,
+        len(spans),
+        values.type,
+    )
+    return pa.LargeListArray.from_arrays(pa.array(offsets), values)
 
 
 def _split_direct_indexed_span_payloads(
@@ -2166,8 +2671,10 @@ def _get_fast_table_data_if_available(
         )
 
     read_plan = _plan_direct_hdf5_table_reads(filtered_catalog_columns)
-    if snapshot.backend == "hdf5" and read_plan.fallback_columns and _is_remote_source(
-        path
+    if (
+        snapshot.backend == "hdf5"
+        and read_plan.fallback_columns
+        and _is_remote_source(path)
     ):
         unsupported = tuple(
             (column.name, _direct_hdf5_unsupported_reason(column))
@@ -2189,6 +2696,7 @@ def _get_fast_table_data_if_available(
             path,
             read_plan,
             table_row_indices,
+            arrow_native=as_polars,
         )
     except _DirectHDF5ReadError as exc:
         raise _unsupported_hdf5_layout_error(
@@ -2667,8 +3175,7 @@ def _get_indexed_column_data(
         )
         full_data = data_column_accessor[:]
         return [
-            full_data[start:end].tolist()
-            for start, end in zip(row_starts, row_ends)
+            full_data[start:end].tolist() for start, end in zip(row_starts, row_ends)
         ]
 
     logger.debug(
@@ -2723,9 +3230,7 @@ def _read_indexed_rows_by_slice(
     row_ends: npt.NDArray[np.intp],
 ) -> list[list[Any]]:
     return [
-        data_column_accessor[int(start) : int(end)].tolist()
-        if end > start
-        else []
+        data_column_accessor[int(start) : int(end)].tolist() if end > start else []
         for start, end in zip(row_starts, row_ends)
     ]
 
@@ -3347,9 +3852,8 @@ def _get_table_schema_with_catalog_snapshots(
     ] = []
     for file_path in file_paths:
         backend_order = _fast_catalog_backend_order(file_path)
-        if (
-            backend_order[0] == "hdf5"
-            and hdf5_reader._is_fast_hdf5_candidate(file_path)
+        if backend_order[0] == "hdf5" and hdf5_reader._is_fast_hdf5_candidate(
+            file_path
         ):
             fast_hdf5_paths.append(file_path)
         else:
