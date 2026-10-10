@@ -436,6 +436,22 @@ def test_zarr_path_summary_uses_targeted_metadata_without_consolidated(
     assert "read targeted Zarr metadata file" in caplog.text
 
 
+def test_zarr_catalog_parses_json_compound_dtype() -> None:
+    entry = zarr_reader._ZarrEntry(
+        name="roi_table",
+        path="processing/plane-0/image_segmentation/roi_table",
+        zarray={
+            "dtype": [["x", "<u4"], ["y", "<u4"], ["weight", "<f4"]],
+            "shape": [3],
+        },
+        zattrs={},
+    )
+
+    assert entry.dtype == np.dtype(
+        [("x", "<u4"), ("y", "<u4"), ("weight", "<f4")]
+    )
+
+
 def test_public_get_table_schema_uses_zarr_backend_for_local_store(
     local_zarr_path: pathlib.Path,
     tmp_path: pathlib.Path,

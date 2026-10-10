@@ -208,7 +208,14 @@ class _ZarrEntry:
     def dtype(self) -> np.dtype | None:
         if self.zarray is None:
             return None
-        return np.dtype(str(self.zarray["dtype"]))
+        dtype = self.zarray["dtype"]
+        if isinstance(dtype, list):
+            # Zarr v2 stores compound dtype field definitions as JSON lists,
+            # while NumPy requires each field definition to be a tuple.
+            dtype = [
+                tuple(field) if isinstance(field, list) else field for field in dtype
+            ]
+        return np.dtype(dtype)
 
     @property
     def shape(self) -> tuple[int, ...] | None:
