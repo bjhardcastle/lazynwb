@@ -25,7 +25,7 @@ Seamlessly read and concatenate tables across sessions:
 ```python
 import lazynwb
 
-# read the units table from every session into a single DataFrame
+# read the trials table from every session into a single DataFrame
 df = lazynwb.get_df(
     ['session_1.nwb', 'session_2.nwb', 'session_3.nwb'],
     '/intervals/trials',
@@ -496,7 +496,7 @@ config.use_obstore = True                         # use obstore for S3/GCS/Azure
 config.use_remfile = False                        # use remfile for HTTP byte-range requests (default: True)
 config.anon = True                                # anonymous access across backends
 config.fsspec_storage_options = {"request_payer": True}  # backend-specific extras if needed
-config.disable_cache = False                      # disable persistent SQLite catalog caching (default: False)
+config.disable_cache = False                      # True disables SQLite and internal accessor caching
 ```
 
 Signed S3 access through obstore uses a cached boto3 session by default. This

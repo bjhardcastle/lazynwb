@@ -1005,6 +1005,35 @@ def test_public_multifile_fast_hdf5_preserves_schema_merge_semantics(
     assert "Column 'value' has inconsistent types across files" in caplog.text
 
 
+def test_public_multifile_fast_hdf5_promotes_inconsistent_array_shapes_to_list(
+    tmp_path: pathlib.Path,
+) -> None:
+    def write_array_table(path: pathlib.Path, width: int) -> pathlib.Path:
+        with h5py.File(path, "w") as h5_file:
+            group = h5_file.create_group("table")
+            group.create_dataset(
+                "value",
+                data=np.arange(2 * width, dtype=np.float64).reshape(2, width),
+            )
+        return path
+
+    source_urls = tuple(
+        path.as_uri()
+        for path in (
+            write_array_table(tmp_path / "width-2.nwb", 2),
+            write_array_table(tmp_path / "width-3.nwb", 3),
+        )
+    )
+
+    schema = lazynwb.tables.get_table_schema(
+        source_urls,
+        "/table",
+        exclude_internal_columns=True,
+    )
+
+    assert schema == pl.Schema({"value": pl.List(pl.Float64)})
+
+
 def test_public_multifile_fast_hdf5_schema_batch_avoids_threadpool(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -6,9 +6,39 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 <!-- insertion marker -->
-## Unreleased
+## 1.0.0 (unreleased)
 
-<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.89...HEAD)</small>
+<small>[Compare with latest](https://github.com/bjhardcastle/lazynwb/compare/v0.2.90...HEAD)</small>
+
+### Added
+
+- Promote the dev6 development line, including catalog-backed schema discovery,
+  NWB path predicate pruning, sparse multi-file schema alignment, optional
+  single-file scan batches, DANDI source discovery, and the command-line interface.
+- Add repeatable dynamic-routing performance comparisons and metadata read checks.
+- Add raw table metadata planning ([5536849](https://github.com/bjhardcastle/lazynwb/commit/5536849af970caf07ce00d604c71faf07479b314) by bjhardcastle).
+
+### Fixed
+
+- Reuse internal accessors during metadata reads without sharing independently
+  constructed FileAccessor handles or ignoring disabled caching.
+- Retain scan catalogs across length planning and materialization, and avoid
+  unnecessary small default batches for normal remote scans.
+- Preserve anonymous Zarr access, boto3 credential handling, compound Zarr
+  dtypes, DANDI API authentication, and inconsistent array-shape promotion.
+
+### Changed
+
+- Publish from version tags; merging main no longer bumps and publishes automatically.
+
+### Removed
+
+- Remove table metadata passthrough helpers ([a7fee89](https://github.com/bjhardcastle/lazynwb/commit/a7fee89e10621eae1a02ad8519df2df8cfaa0bed) by bjhardcastle).
+
+<!-- insertion marker -->
+## [v0.2.90](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.90) - 2026-04-20
+
+<small>[Compare with v0.2.89](https://github.com/bjhardcastle/lazynwb/compare/v0.2.89...v0.2.90)</small>
 
 ### Added
 
@@ -19,7 +49,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - Fix pydantic use on 3.9 ([0aa5e74](https://github.com/bjhardcastle/lazynwb/commit/0aa5e740f9b5a601dc91c5d9c884e79b3a84d242) by bjhardcastle).
 
-<!-- insertion marker -->
 ## [v0.2.89](https://github.com/bjhardcastle/lazynwb/releases/tag/v0.2.89) - 2026-04-15
 
 <small>[Compare with v0.2.88](https://github.com/bjhardcastle/lazynwb/compare/v0.2.88...v0.2.89)</small>

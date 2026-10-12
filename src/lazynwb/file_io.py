@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import contextlib
 import dataclasses
 import enum
@@ -7,6 +8,7 @@ import importlib.metadata
 import logging
 import os
 import pathlib
+import threading
 import urllib.parse
 import warnings
 from collections.abc import Iterable
@@ -27,6 +29,29 @@ from lazynwb._config import config
 
 logger = logging.getLogger(__name__)
 
+_ACCESSOR_CACHE_LIMIT = 128
+_accessor_cache: collections.OrderedDict[tuple[object, ...], FileAccessor] = (
+    collections.OrderedDict()
+)
+_accessor_cache_lock = threading.RLock()
+
+
+def _clear_accessor_cache() -> None:
+    """Release cached references without closing handles still used by callers."""
+    with _accessor_cache_lock:
+        logger.debug(
+            "clearing %d internal accessor cache entries", len(_accessor_cache)
+        )
+        _accessor_cache.clear()
+
+
+def _accessor_is_open(accessor: FileAccessor) -> bool:
+    """Check whether a borrowed backend handle can still serve reads."""
+    if accessor._hdmf_backend == FileAccessor.HDMFBackend.HDF5:
+        return bool(accessor._accessor)
+    store = accessor._accessor.store
+    return bool(getattr(store, "_is_open", True)) and store.is_readable()
+
 
 def clear_cache() -> None:
     """
@@ -39,6 +64,7 @@ def clear_cache() -> None:
     import lazynwb.tables
 
     logger.debug("clearing process-lifetime range-reader and Zarr metadata caches")
+    _clear_accessor_cache()
     hdf5_range_reader._clear_cache()
     lazynwb.tables._clear_direct_hdf5_chunk_record_cache()
     zarr_reader._clear_shared_metadata_catalog_cache()
@@ -51,7 +77,41 @@ def _get_accessor(path: lazynwb.types_.PathLike) -> FileAccessor:
         return path
     if isinstance(path, Iterable) and not isinstance(path, str):
         raise ValueError(f"Expected a single path, but received an iterable: {path!r}")
-    return FileAccessor(path)
+    if config.disable_cache:
+        logger.debug("bypassing internal accessor cache for %s", path)
+        return FileAccessor(path)
+    source = from_pathlike(path).as_posix()
+    # Configuration belongs in the key so a credential/backend change never
+    # borrows a handle opened under different settings. Do not log this key.
+    key = (
+        source,
+        config.use_remfile,
+        config.use_obstore,
+        config.anon,
+        repr(config.fsspec_storage_options),
+    )
+    with _accessor_cache_lock:
+        cached = _accessor_cache.get(key)
+        if cached is not None and _accessor_is_open(cached):
+            _accessor_cache.move_to_end(key)
+            logger.debug("internal accessor cache hit for %s", source)
+            return cached
+    # Opening different remote sources must not serialize behind the cache lock.
+    logger.debug("internal accessor cache miss for %s", source)
+    opened = FileAccessor(path)
+    with _accessor_cache_lock:
+        cached = _accessor_cache.get(key)
+        if cached is not None and _accessor_is_open(cached):
+            opened._close()
+            _accessor_cache.move_to_end(key)
+            return cached
+        _accessor_cache[key] = opened
+        _accessor_cache.move_to_end(key)
+        while len(_accessor_cache) > _ACCESSOR_CACHE_LIMIT:
+            # Drop ownership only: a TimeSeries/dataset may still use the handle.
+            _accessor_cache.popitem(last=False)
+            logger.debug("evicted oldest internal accessor cache entry")
+    return opened
 
 
 def _get_accessors(
@@ -108,13 +168,17 @@ _OBSTORE_PROTOCOLS = frozenset({"s3", "gs", "gcs", "az", "abfs"})
 
 def _open_zarr(path: upath.UPath) -> zarr.Group:
     key = path.as_posix()
-    if config.use_obstore and path.protocol and path.protocol != "file":
-        store = obstore.store.from_url(
-            key.split("//")[-1].split("/")[0],
-            **_get_obstore_storage_options(protocol=path.protocol),
-        )
-        logger.debug("opening remote Zarr store %s with obstore", key)
-        return zarr.open(store, mode="r")
+    if config.use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
+        try:
+            fs = obstore.fsspec.FsspecStore(
+                path.protocol,
+                **_get_obstore_storage_options(protocol=path.protocol),
+            )
+            store = zarr.storage.FSStore(key, fs=fs, mode="r")
+            logger.debug("opening remote Zarr store %s with obstore", key)
+            return zarr.open(store, mode="r")
+        except Exception as exc:
+            logger.debug("obstore Zarr open failed for %s: %r", key, exc, exc_info=True)
     if path.protocol and path.protocol != "file":
         storage_options = _get_fsspec_storage_options()
         logger.debug(

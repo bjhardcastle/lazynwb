@@ -4,7 +4,7 @@ import functools
 import json
 import logging
 import operator
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, MutableMapping, Sequence
 
 import polars as pl
 import polars._typing
@@ -14,6 +14,7 @@ import lazynwb._catalog.models as catalog_models
 import lazynwb.file_io
 import lazynwb.tables
 import lazynwb.types_
+import lazynwb.utils
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,9 @@ def scan_nwb(  # noqa: C901
         Without a predicate, we fetch all data for all columns.
         """
         if batch_size is None:
-            batch_size = 1_000
+            # Match the usual Polars scan hint without forcing small remote
+            # rereads for unrestricted aggregations. Keep low-memory reads small.
+            batch_size = 1_000 if low_memory else 100_000
             logger.debug(
                 "Batch size not specified: using default of %d rows per batch",
                 batch_size,
@@ -562,7 +565,7 @@ def _iter_path_to_row_index_batches(  # noqa: C901
     batch_size: int,
     n_rows: int | None,
     catalog_snapshots: (
-        Mapping[
+        MutableMapping[
             str,
             catalog_models._TableSchemaSnapshot,
         ]
@@ -577,10 +580,20 @@ def _iter_path_to_row_index_batches(  # noqa: C901
     rows_in_batch = 0
     table_found = False
     missing_table_error: KeyError | None = None
+    if catalog_snapshots is None:
+        catalog_snapshots = {}
     for file in source:
         if remaining_rows is not None and remaining_rows <= 0:
             break
         try:
+            snapshot_key = lazynwb.tables._catalog_snapshot_key(file)
+            if snapshot_key not in catalog_snapshots:
+                snapshot = lazynwb.tables._get_fast_catalog_snapshot_if_available(
+                    file, lazynwb.utils.normalize_internal_file_path(table_path)
+                )
+                if snapshot is not None:
+                    catalog_snapshots[snapshot_key] = snapshot
+                    logger.debug("Retaining scan catalog snapshot for %s", file)
             table_length = lazynwb.tables._get_table_length(
                 file,
                 table_path,

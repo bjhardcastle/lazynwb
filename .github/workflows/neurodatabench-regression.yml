@@ -1,0 +1,171 @@
+name: NeuroDataBench performance regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      lazynwb_ref:
+        description: "Commit, branch, or tag to evaluate"
+        required: true
+        default: "main"
+        type: string
+      baseline_ref:
+        description: "Commit, branch, or tag used as the performance baseline"
+        required: true
+        default: "main"
+        type: string
+      neurodatabench_ref:
+        description: "Pinned NeuroDataBench commit"
+        required: true
+        default: "c12375d541dc5b5b642a7f3c9df916d4f6b45fd3"
+        type: string
+      benchmark:
+        description: "Packaged NeuroDataBench benchmark ID"
+        required: true
+        default: "dynamic_routing_nwb_hdf5_v0"
+        type: string
+      backend:
+        description: "lazynwb object-store backend"
+        required: true
+        default: "obstore"
+        type: string
+      repeats:
+        description: "Number of alternating baseline/candidate runs"
+        required: true
+        default: "3"
+        type: string
+      max_regression_percent:
+        description: "Allowed candidate median slowdown"
+        required: true
+        default: "15"
+        type: string
+      timeout_seconds:
+        description: "Maximum wall time for each benchmark invocation"
+        required: true
+        default: "240"
+        type: string
+
+  workflow_call:
+    inputs:
+      lazynwb_ref:
+        required: false
+        default: "main"
+        type: string
+      baseline_ref:
+        required: false
+        default: "main"
+        type: string
+      neurodatabench_ref:
+        required: false
+        default: "c12375d541dc5b5b642a7f3c9df916d4f6b45fd3"
+        type: string
+      benchmark:
+        required: false
+        default: "dynamic_routing_nwb_hdf5_v0"
+        type: string
+      backend:
+        required: false
+        default: "obstore"
+        type: string
+      repeats:
+        required: false
+        default: "3"
+        type: string
+      max_regression_percent:
+        required: false
+        default: "15"
+        type: string
+      timeout_seconds:
+        required: false
+        default: "240"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neurodatabench-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    name: Compare lazynwb checkouts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AWS_REGION: us-west-2
+      AWS_DEFAULT_REGION: us-west-2
+      AWS_EC2_METADATA_DISABLED: "true"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout regression harness
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: harness
+          fetch-depth: 1
+
+      - name: Checkout baseline lazynwb
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ inputs.baseline_ref }}
+          path: baseline
+          fetch-depth: 1
+
+      - name: Checkout candidate lazynwb
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ inputs.lazynwb_ref }}
+          path: candidate
+          fetch-depth: 1
+
+      - name: Checkout NeuroDataBench
+        uses: actions/checkout@v4
+        with:
+          repository: bjhardcastle/neurodatabench
+          ref: ${{ inputs.neurodatabench_ref }}
+          path: neurodatabench
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5.4.1
+        with:
+          version: "0.11.0"
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: |
+            candidate/uv.lock
+            baseline/uv.lock
+            neurodatabench/uv.lock
+
+      - name: Run baseline/candidate regression
+        run: |
+          python harness/scripts/run_neurodatabench_regression.py \
+            --neurodatabench-dir neurodatabench \
+            --baseline-dir baseline \
+            --candidate-dir candidate \
+            --benchmark "${{ inputs.benchmark }}" \
+            --backend "${{ inputs.backend }}" \
+            --repeats "${{ inputs.repeats }}" \
+            --max-regression-percent "${{ inputs.max_regression_percent }}" \
+            --timeout-seconds "${{ inputs.timeout_seconds }}" \
+            --output-dir results/neurodatabench-regression
+
+      - name: Add regression summary
+        if: always()
+        run: |
+          if [ -f results/neurodatabench-regression/summary.md ]; then
+            cat results/neurodatabench-regression/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload NeuroDataBench artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neurodatabench-regression-${{ github.run_id }}
+          path: results/neurodatabench-regression
+          if-no-files-found: error
+          retention-days: 30

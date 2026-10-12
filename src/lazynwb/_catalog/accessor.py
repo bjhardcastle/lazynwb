@@ -17,7 +17,9 @@ class _AccessorBackendReader:
     """Reference catalog reader backed by the existing FileAccessor behavior."""
 
     def __init__(self, source: lazynwb.types_.PathLike) -> None:
-        self._file = lazynwb.file_io._get_accessor(source)
+        # This reader closes its handle; it must not borrow one retained by
+        # metadata or TimeSeries consumers in the internal accessor cache.
+        self._file = lazynwb.file_io.FileAccessor(source)
         self._source_identity = self._build_source_identity()
         logger.debug(
             "initialized accessor backend reader for %s with backend %s",

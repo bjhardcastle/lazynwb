@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections.abc
 import concurrent.futures
 import logging
+import os
 import time
 import typing
 import urllib.parse
@@ -22,8 +23,24 @@ DANDI_API_BASE = "https://api.dandiarchive.org/api"
 def _get_session() -> requests.Session:
     """Create a requests session with automatic error handling."""
     session = requests.Session()
+    token = _get_dandi_api_token()
+    if token is not None:
+        session.headers["Authorization"] = f"token {token}"
+        logger.debug("configured DANDI API session with environment API token")
+    else:
+        logger.debug("configured DANDI API session without API token")
     session.hooks = {"response": lambda r, *args, **kwargs: r.raise_for_status()}
     return session
+
+
+def _get_dandi_api_token() -> str | None:
+    """Return a DANDI API token from the environment, without logging its value."""
+    for env_var in ("DANDI_API_KEY", "DANDI_API_TOKEN"):
+        token = os.getenv(env_var)
+        if token:
+            logger.debug("using DANDI API token from %s", env_var)
+            return token
+    return None
 
 
 def _get_most_recent_dandiset_version(dandiset_id: str) -> str:

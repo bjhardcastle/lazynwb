@@ -3793,6 +3793,23 @@ def _handle_missing_schema_table(
     return None
 
 
+def _promote_inconsistent_schema_types(
+    type_counts: collections.Counter[polars.DataType],
+) -> polars.DataType:
+    """Choose a schema type, widening arrays whose shapes disagree."""
+    most_common_type = type_counts.most_common(1)[0][0]
+    array_types = [dtype for dtype in type_counts if isinstance(dtype, pl.Array)]
+    array_shapes = {dtype.shape for dtype in array_types}
+    if len(array_types) == len(type_counts) and len(array_shapes) > 1:
+        logger.debug(
+            "promoting inconsistent array schema types %s to List(%s)",
+            dict(type_counts),
+            most_common_type.inner,
+        )
+        return pl.List(most_common_type.inner)
+    return most_common_type
+
+
 def _get_fast_hdf5_table_schema_if_available(
     file_path: lazynwb.types_.PathLike,
     table_path: str,
@@ -3931,7 +3948,7 @@ def _get_table_schema_with_catalog_snapshots(
             logger.warning(
                 f"Column {column_name!r} has inconsistent types across files - using most common: {counter}"
             )
-        schema[column_name] = counter.most_common(1)[0][0]
+        schema[column_name] = _promote_inconsistent_schema_types(counter)
 
     if not exclude_internal_columns:
         # add the internal columns to the schema:

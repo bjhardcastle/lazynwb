@@ -54,6 +54,28 @@ class _ImmediateExecutor:
         return future
 
 
+def test_dandi_session_uses_dandi_api_key_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DANDI_API_KEY", "secret-key")
+    monkeypatch.delenv("DANDI_API_TOKEN", raising=False)
+
+    session = dandi._get_session()
+
+    assert session.headers["Authorization"] == "token secret-key"
+
+
+def test_dandi_session_uses_legacy_dandi_api_token_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DANDI_API_KEY", raising=False)
+    monkeypatch.setenv("DANDI_API_TOKEN", "secret-token")
+
+    session = dandi._get_session()
+
+    assert session.headers["Authorization"] == "token secret-token"
+
+
 def test_version_none_uses_most_recent_published_metadata(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
