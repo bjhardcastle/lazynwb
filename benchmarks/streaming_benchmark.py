@@ -152,16 +152,18 @@ def _find_pynwb_timeseries(nwbfile, ts_search: str):
 def discover_contents(nwb_path: str) -> dict:
     print(f"Discovering contents of {nwb_path} ...")
     t0 = time.perf_counter()
-    paths = lazynwb.get_internal_paths(nwb_path, include_arrays=True)
+    paths = lazynwb.get_internal_path_info(nwb_path, include_child_datasets=True)
     elapsed = time.perf_counter() - t0
     print(f"  Found {len(paths)} internal paths in {elapsed:.2f}s")
 
     tables = []
     timeseries = []
-    for p, obj in paths.items():
-        attrs = dict(getattr(obj, "attrs", {}))
+    for p, metadata in paths.items():
+        attrs = dict(metadata.get("attrs", {}))
         if "colnames" in attrs:
             tables.append(p)
+        elif metadata.get("is_timeseries"):
+            timeseries.append(p)
         elif p.endswith("/data") or p.endswith("/timestamps"):
             parent = p.rsplit("/", 1)[0]
             if parent not in timeseries:

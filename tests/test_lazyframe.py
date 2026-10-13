@@ -1,18 +1,73 @@
 import logging
 import pathlib
+import shutil
 import tempfile
+import typing
 import uuid
 from datetime import datetime, timezone
 
+import h5py
 import polars as pl
 import pytest
-
-import h5py
 from pynwb import NWBHDF5IO, NWBFile
 from pynwb.epoch import TimeIntervals
 
 import lazynwb
 import lazynwb.tables
+
+
+def _capture_scan_io_source(
+    monkeypatch: pytest.MonkeyPatch,
+    source: list[pathlib.Path],
+    table_path: str = "/intervals/trials",
+    single_file_batches: bool = False,
+) -> typing.Callable[..., typing.Iterator[pl.DataFrame]]:
+    registered_source: dict[
+        str, typing.Callable[..., typing.Iterator[pl.DataFrame]]
+    ] = {}
+
+    def _capture_io_source(
+        *,
+        io_source: typing.Callable[..., typing.Iterator[pl.DataFrame]],
+        schema: object,
+    ) -> pl.LazyFrame:
+        registered_source["io_source"] = io_source
+        return pl.LazyFrame(schema=schema)
+
+    monkeypatch.setattr(
+        "polars.io.plugins.register_io_source",
+        _capture_io_source,
+    )
+    lazynwb.scan_nwb(
+        source=source,
+        table_path=table_path,
+        single_file_batches=single_file_batches,
+        disable_progress=True,
+    )
+    return registered_source["io_source"]
+
+
+def _record_row_batch_fetches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[dict[str, list[int]] | None]:
+    requested_row_batches: list[dict[str, list[int]] | None] = []
+    original_get_df = lazynwb.tables.get_df
+
+    def _recording_get_df(*args: object, **kwargs: object) -> object:
+        row_indices = typing.cast(
+            typing.Mapping[str, typing.Sequence[int]] | None,
+            kwargs.get("nwb_path_to_row_indices"),
+        )
+        requested_row_batches.append(
+            None
+            if row_indices is None
+            else {path: list(indices) for path, indices in row_indices.items()}
+        )
+        return original_get_df(*args, **kwargs)
+
+    monkeypatch.setattr(lazynwb.tables, "get_df", _recording_get_df)
+    return requested_row_batches
+
 
 def test_polars_dtype_inference(local_hdf5_path):
     schema = lazynwb.tables.get_table_schema(
@@ -50,6 +105,161 @@ def test_scan_nwb_sources(nwb_fixture_name, request):
     # Test that all expected internal columns are present
     for col in lazynwb.INTERNAL_COLUMN_NAMES:
         assert col in df.columns, f"Internal column {col!r} not found"
+
+
+@pytest.mark.parametrize(
+    ("n_rows", "expected_batch_sizes"),
+    [(None, [4, 4, 4]), (7, [4, 3])],
+)
+def test_scan_nwb_fetches_unfiltered_rows_in_requested_batches(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+    n_rows: int | None,
+    expected_batch_sizes: list[int],
+) -> None:
+    io_source = _capture_scan_io_source(monkeypatch, local_hdf5_paths)
+    requested_row_batches = _record_row_batch_fetches(monkeypatch)
+    batches = list(
+        io_source(
+            with_columns=[
+                lazynwb.NWB_PATH_COLUMN_NAME,
+                lazynwb.TABLE_INDEX_COLUMN_NAME,
+                "condition",
+            ],
+            predicate=None,
+            n_rows=n_rows,
+            batch_size=4,
+        )
+    )
+
+    assert [batch.height for batch in batches] == expected_batch_sizes
+    assert all(row_batch is not None for row_batch in requested_row_batches)
+    assert [
+        sum(
+            len(indices)
+            for indices in typing.cast(dict[str, list[int]], row_batch).values()
+        )
+        for row_batch in requested_row_batches
+    ] == expected_batch_sizes
+
+    result = pl.concat(batches)
+    expected_indices = [*range(6), *range(6)]
+    expected_paths = [
+        *(local_hdf5_paths[0].resolve().as_posix() for _ in range(6)),
+        *(local_hdf5_paths[1].resolve().as_posix() for _ in range(6)),
+    ]
+    assert (
+        result[lazynwb.TABLE_INDEX_COLUMN_NAME].to_list() == expected_indices[:n_rows]
+    )
+    assert result[lazynwb.NWB_PATH_COLUMN_NAME].to_list() == expected_paths[:n_rows]
+
+
+def test_scan_nwb_fetches_predicate_columns_in_requested_batches(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    io_source = _capture_scan_io_source(monkeypatch, local_hdf5_paths)
+    requested_row_batches = _record_row_batch_fetches(monkeypatch)
+    batches = list(
+        io_source(
+            with_columns=[
+                lazynwb.NWB_PATH_COLUMN_NAME,
+                lazynwb.TABLE_INDEX_COLUMN_NAME,
+                "condition",
+            ],
+            predicate=pl.col("start_time") >= 4.0,
+            n_rows=5,
+            batch_size=4,
+        )
+    )
+
+    assert [batch.height for batch in batches] == [2, 2, 1]
+    assert all(row_batch is not None for row_batch in requested_row_batches)
+    assert all(
+        sum(
+            len(indices)
+            for indices in typing.cast(dict[str, list[int]], row_batch).values()
+        )
+        <= 4
+        for row_batch in requested_row_batches
+    )
+    result = pl.concat(batches)
+    assert result[lazynwb.TABLE_INDEX_COLUMN_NAME].to_list() == [2, 3, 4, 5, 2]
+
+
+@pytest.mark.parametrize(
+    ("single_file_batches", "expected_batch_sizes", "expected_source_counts"),
+    [
+        (False, [3, 3, 2], [1, 2, 1]),
+        (True, [3, 1, 3, 1], [1, 1, 1, 1]),
+    ],
+)
+def test_scan_nwb_single_file_batches_are_opt_in(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+    single_file_batches: bool,
+    expected_batch_sizes: list[int],
+    expected_source_counts: list[int],
+) -> None:
+    io_source = _capture_scan_io_source(
+        monkeypatch,
+        local_hdf5_paths,
+        table_path="/units",
+        single_file_batches=single_file_batches,
+    )
+    requested_row_batches = _record_row_batch_fetches(monkeypatch)
+    batches = list(
+        io_source(
+            with_columns=[
+                lazynwb.NWB_PATH_COLUMN_NAME,
+                lazynwb.TABLE_INDEX_COLUMN_NAME,
+                "spike_times",
+            ],
+            predicate=None,
+            n_rows=None,
+            batch_size=3,
+        )
+    )
+
+    assert [batch.height for batch in batches] == expected_batch_sizes
+    assert [
+        len(typing.cast(dict[str, list[int]], row_batch))
+        for row_batch in requested_row_batches
+    ] == expected_source_counts
+
+
+def test_scan_nwb_single_file_batches_apply_after_predicate(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    io_source = _capture_scan_io_source(
+        monkeypatch,
+        local_hdf5_paths,
+        table_path="/units",
+        single_file_batches=True,
+    )
+    requested_row_batches = _record_row_batch_fetches(monkeypatch)
+    batches = list(
+        io_source(
+            with_columns=[
+                lazynwb.NWB_PATH_COLUMN_NAME,
+                lazynwb.TABLE_INDEX_COLUMN_NAME,
+                "spike_times",
+            ],
+            predicate=pl.col("id") >= 2,
+            n_rows=None,
+            batch_size=2,
+        )
+    )
+
+    assert [batch.height for batch in batches] == [2, 2]
+    assert all(
+        len(typing.cast(dict[str, list[int]], row_batch)) == 1
+        for row_batch in requested_row_batches
+    )
+    assert all(
+        batch[lazynwb.NWB_PATH_COLUMN_NAME].n_unique() == 1 for batch in batches
+    )
 
 
 def test_scan_nwb_exclude_array_columns(local_hdf5_path):
@@ -159,6 +369,187 @@ def test_scan_nwb_predicate_pushdown(local_hdf5_path):
         filtered_internal_df[lazynwb.TABLE_INDEX_COLUMN_NAME] == 3
     ).all(), "Predicate pushdown filter on internal column was not applied correctly"
     assert len(filtered_internal_df) == len(lf.collect().filter(internal_expr)), "Filtered DataFrame length does not match length when collecting and filtering separately"
+
+
+def test_scan_nwb_derived_path_predicate_prunes_files_before_materialization(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="lazynwb.lazyframe")
+    lazy_frame = lazynwb.scan_nwb(
+        source=local_hdf5_paths,
+        table_path="/intervals/trials",
+        disable_progress=True,
+    )
+    target_path = local_hdf5_paths[-1].resolve().as_posix()
+    session_id = (
+        pl.col(lazynwb.NWB_PATH_COLUMN_NAME)
+        .str.split("/")
+        .list.last()
+        .str.extract(r"test_hdf5_(\d+)\.nwb$", 1)
+    )
+    materialized_path_sets: list[set[str]] = []
+    original_get_df = lazynwb.tables.get_df
+
+    def _recording_get_df(*args: object, **kwargs: object) -> object:
+        sources = kwargs.get("nwb_data_sources", args[0] if args else ())
+        if isinstance(sources, (str, pathlib.Path)):
+            sources = (sources,)
+        sources = typing.cast(typing.Iterable[lazynwb.types_.PathLike], sources)
+        materialized_path_sets.append(
+            {lazynwb.tables._source_path_strings(source)[0] for source in sources}
+        )
+        return original_get_df(*args, **kwargs)
+
+    monkeypatch.setattr(lazynwb.tables, "get_df", _recording_get_df)
+
+    result = (
+        lazy_frame.filter(
+            (session_id == "1") & (pl.col(lazynwb.TABLE_INDEX_COLUMN_NAME) > 1)
+        )
+        .head(2)
+        .select(
+            lazynwb.NWB_PATH_COLUMN_NAME,
+            lazynwb.TABLE_INDEX_COLUMN_NAME,
+            "condition",
+        )
+        .collect()
+    )
+
+    assert not result.is_empty()
+    assert len(result) == 2
+    assert result[lazynwb.NWB_PATH_COLUMN_NAME].unique().to_list() == [target_path]
+    assert materialized_path_sets
+    assert all(paths == {target_path} for paths in materialized_path_sets)
+    assert "Pruned 1 of 2 NWB source files using" in caplog.text
+
+
+def test_scan_nwb_path_filter_null_fills_columns_missing_from_selected_file(
+    local_hdf5_path: pathlib.Path,
+    tmp_path: pathlib.Path,
+) -> None:
+    target_path = tmp_path / "target_without_notes.nwb"
+    other_path = tmp_path / "other_with_notes.nwb"
+    shutil.copyfile(local_hdf5_path, target_path)
+    shutil.copyfile(local_hdf5_path, other_path)
+    with h5py.File(other_path, "r+") as h5_file:
+        h5_file["general"].create_dataset("notes", data="only present in other file")
+
+    target_url = target_path.as_uri()
+    df = (
+        lazynwb.scan_nwb(
+            [target_url, other_path.as_uri()],
+            table_path="session",
+            disable_progress=True,
+        )
+        .filter(pl.col(lazynwb.NWB_PATH_COLUMN_NAME).str.contains(target_path.name))
+        .collect()
+    )
+
+    assert df[lazynwb.NWB_PATH_COLUMN_NAME].to_list() == [target_url]
+    assert df["notes"].to_list() == [None]
+
+    projected = (
+        lazynwb.scan_nwb(
+            [target_url, other_path.as_uri()],
+            table_path="session",
+            disable_progress=True,
+        )
+        .filter(pl.col(lazynwb.NWB_PATH_COLUMN_NAME).str.contains(target_path.name))
+        .select("notes")
+        .collect()
+    )
+
+    assert projected["notes"].to_list() == [None]
+
+
+def test_scan_nwb_unmatched_path_predicate_skips_materialization(
+    local_hdf5_paths: list[pathlib.Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lazy_frame = lazynwb.scan_nwb(
+        source=local_hdf5_paths,
+        table_path="/intervals/trials",
+        disable_progress=True,
+    )
+
+    def _unexpected_get_df(*args: object, **kwargs: object) -> typing.NoReturn:
+        raise AssertionError(
+            "An unmatched path predicate should skip table materialization"
+        )
+
+    monkeypatch.setattr(lazynwb.tables, "get_df", _unexpected_get_df)
+
+    result = (
+        lazy_frame.filter(
+            pl.col(lazynwb.NWB_PATH_COLUMN_NAME) == "/not/a/source/file.nwb"
+        )
+        .select(lazynwb.NWB_PATH_COLUMN_NAME)
+        .collect()
+    )
+
+    assert result.is_empty()
+
+
+def test_scan_nwb_mixed_or_predicate_does_not_prune_files(
+    local_hdf5_paths: list[pathlib.Path],
+) -> None:
+    target_path = local_hdf5_paths[-1].resolve().as_posix()
+    result = (
+        lazynwb.scan_nwb(
+            source=local_hdf5_paths,
+            table_path="/intervals/trials",
+            disable_progress=True,
+        )
+        .filter(
+            (pl.col(lazynwb.NWB_PATH_COLUMN_NAME) == target_path)
+            | (pl.col(lazynwb.TABLE_INDEX_COLUMN_NAME) == 0)
+        )
+        .select(
+            lazynwb.NWB_PATH_COLUMN_NAME,
+            lazynwb.TABLE_INDEX_COLUMN_NAME,
+        )
+        .collect()
+    )
+
+    expected_paths = {path.resolve().as_posix() for path in local_hdf5_paths}
+    assert set(result[lazynwb.NWB_PATH_COLUMN_NAME]) == expected_paths
+
+
+def test_scan_nwb_sort_head_ignores_polars_dynamic_topk_predicate(
+    local_hdf5_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Polars 1.39+ may push optimizer-only dynamic TopK predicates into IO plugins."""
+    caplog.set_level(logging.DEBUG, logger="lazynwb.lazyframe")
+
+    lf = lazynwb.scan_nwb(
+        source=local_hdf5_path,
+        table_path="/units",
+        disable_progress=True,
+    )
+    query = (
+        lf.filter(pl.col("structure") == "VISp")
+        .sort(lazynwb.TABLE_INDEX_COLUMN_NAME, descending=True)
+        .head(1)
+        .select(lazynwb.TABLE_INDEX_COLUMN_NAME, "spike_times")
+    )
+    plan = query.explain()
+
+    result = query.collect()
+    expected = (
+        lf.collect()
+        .filter(pl.col("structure") == "VISp")
+        .sort(lazynwb.TABLE_INDEX_COLUMN_NAME, descending=True)
+        .head(1)
+        .select(lazynwb.TABLE_INDEX_COLUMN_NAME, "spike_times")
+    )
+
+    assert result.equals(expected)
+    if "dynamic_predicate" in plan:
+        assert "Removed 1 Polars dynamic predicate conjunct" in caplog.text
+
 
 def test_scan_nwb_raises_on_missing(local_hdf5_path):
     """Test that scan_nwb raises an error when the table is not found and raise_on_missing=True."""

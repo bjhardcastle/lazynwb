@@ -5,7 +5,8 @@ name: Publish Python package
 
 on:
   push:
-    branches: [ "main" ] 
+    branches: [ "main" ]
+    tags: [ "v*" ]
     paths: # pushing any files/folders marked ! will not trigger the workflow (exceptions can be added)
       - '**'
       - '!**.ipynb'
@@ -74,7 +75,7 @@ jobs:
     
   publish:
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions: write-all
 
@@ -88,16 +89,11 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Publish with bump & tag
-      # actions/checkout 
+    - name: Publish tagged release
+      if: startsWith(github.ref, 'refs/tags/v')
       run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        uv run task release
-      env:
-        GITHUB_TOKEN: ${{ secrets.PAT }}
-        # use PAT, or push comes from `github-actions` bot, which can't trigger
-        # other workflows   
+        uv build
+        uv publish --trusted-publishing always --check-url https://pypi.org/simple
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v3

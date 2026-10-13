@@ -1,66 +1,117 @@
 from __future__ import annotations
 
+import collections
+import contextlib
+import dataclasses
 import enum
 import importlib.metadata
 import logging
 import os
 import pathlib
 import threading
+import urllib.parse
+import warnings
 from collections.abc import Iterable
 from typing import Any
 
+import fsspec
 import h5py
 import obstore.fsspec
-import pydantic_settings
 import remfile
 import upath
 import zarr
 
+import lazynwb._catalog.models as catalog_models
+import lazynwb._storage_options
 import lazynwb.types_
 import lazynwb.utils
+from lazynwb._config import config
 
 logger = logging.getLogger(__name__)
 
-
-class FileIOConfig(pydantic_settings.BaseSettings):
-    """
-    Global configuration for file I/O behavior.
-    """
-
-    model_config = pydantic_settings.SettingsConfigDict(
-        env_prefix="LAZYNWB_FILE_IO_",
-    )
-    use_remfile: bool = True
-    use_obstore: bool = False
-    anon: bool | None = None
-    fsspec_storage_options: dict[str, Any] = {
-        "anon": False,
-    }
-    disable_cache: bool = False
+_ACCESSOR_CACHE_LIMIT = 128
+_accessor_cache: collections.OrderedDict[tuple[object, ...], FileAccessor] = (
+    collections.OrderedDict()
+)
+_accessor_cache_lock = threading.RLock()
 
 
-# singleton config
-config = FileIOConfig()
+def _clear_accessor_cache() -> None:
+    """Release cached references without closing handles still used by callers."""
+    with _accessor_cache_lock:
+        logger.debug(
+            "clearing %d internal accessor cache entries", len(_accessor_cache)
+        )
+        _accessor_cache.clear()
 
-# cache for FileAccessor instances by canonical path
-_accessor_cache: dict[str, FileAccessor] = {}
-_cache_lock = threading.RLock()  # RLock allows same thread to acquire multiple times
+
+def _accessor_is_open(accessor: FileAccessor) -> bool:
+    """Check whether a borrowed backend handle can still serve reads."""
+    if accessor._hdmf_backend == FileAccessor.HDMFBackend.HDF5:
+        return bool(accessor._accessor)
+    store = accessor._accessor.store
+    return bool(getattr(store, "_is_open", True)) and store.is_readable()
 
 
 def clear_cache() -> None:
     """
-    Clear the FileAccessor caches.
+    Clear process-lifetime I/O and metadata caches.
 
-    Users can call this to reset cached h5py and zarr accessors.
+    Active FileAccessor instances are independent and remain open.
     """
-    with _cache_lock:
-        FileAccessor._clear_cache()
+    import lazynwb._hdf5.range_reader as hdf5_range_reader
+    import lazynwb._zarr.reader as zarr_reader
+    import lazynwb.tables
+
+    logger.debug("clearing process-lifetime range-reader and Zarr metadata caches")
+    _clear_accessor_cache()
+    hdf5_range_reader._clear_cache()
+    lazynwb.tables._clear_direct_hdf5_chunk_record_cache()
+    zarr_reader._clear_shared_metadata_catalog_cache()
+    logger.debug("cleared process-lifetime range-reader and Zarr metadata caches")
 
 
 def _get_accessor(path: lazynwb.types_.PathLike) -> FileAccessor:
+    if isinstance(path, FileAccessor):
+        logger.debug("reusing explicitly provided FileAccessor instance")
+        return path
     if isinstance(path, Iterable) and not isinstance(path, str):
         raise ValueError(f"Expected a single path, but received an iterable: {path!r}")
-    return FileAccessor(path)
+    if config.disable_cache:
+        logger.debug("bypassing internal accessor cache for %s", path)
+        return FileAccessor(path)
+    source = from_pathlike(path).as_posix()
+    # Configuration belongs in the key so a credential/backend change never
+    # borrows a handle opened under different settings. Do not log this key.
+    key = (
+        source,
+        config.use_remfile,
+        config.use_obstore,
+        config.anon,
+        repr(config.fsspec_storage_options),
+    )
+    with _accessor_cache_lock:
+        cached = _accessor_cache.get(key)
+        if cached is not None and _accessor_is_open(cached):
+            _accessor_cache.move_to_end(key)
+            logger.debug("internal accessor cache hit for %s", source)
+            return cached
+    # Opening different remote sources must not serialize behind the cache lock.
+    logger.debug("internal accessor cache miss for %s", source)
+    opened = FileAccessor(path)
+    with _accessor_cache_lock:
+        cached = _accessor_cache.get(key)
+        if cached is not None and _accessor_is_open(cached):
+            opened._close()
+            _accessor_cache.move_to_end(key)
+            return cached
+        _accessor_cache[key] = opened
+        _accessor_cache.move_to_end(key)
+        while len(_accessor_cache) > _ACCESSOR_CACHE_LIMIT:
+            # Drop ownership only: a TimeSeries/dataset may still use the handle.
+            _accessor_cache.popitem(last=False)
+            logger.debug("evicted oldest internal accessor cache entry")
+    return opened
 
 
 def _get_accessors(
@@ -68,7 +119,7 @@ def _get_accessors(
 ) -> tuple[FileAccessor, ...]:
     if not isinstance(paths, Iterable) or isinstance(paths, str):
         paths = [paths]  # ensure we have an iterable of paths
-    return tuple(FileAccessor(path) for path in paths)
+    return tuple(_get_accessor(path) for path in paths)
 
 
 def _s3_to_http(url: str) -> str:
@@ -88,60 +139,65 @@ def _open_file(path: lazynwb.types_.PathLike) -> h5py.File | zarr.Group:
     p = from_pathlike(path)
     u = upath.UPath(p, **_get_fsspec_storage_options())
     key = u.as_posix()
-    is_definitely_zarr = "zarr" in key
+    is_definitely_zarr = "zarr" in key.lower()
     logger.debug(
-        "opening file path=%s protocol=%s is_definitely_zarr=%s",
+        "opening %s with %s-preferred backend order",
         key,
-        u.protocol,
-        is_definitely_zarr,
+        "Zarr" if is_definitely_zarr else "HDF5",
     )
+    hdf5_error: Exception | None = None
     if not is_definitely_zarr:
         try:
             return _open_hdf5(
                 u, use_remfile=config.use_remfile, use_obstore=config.use_obstore
             )
         except Exception as exc:
-            logger.debug("HDF5 open failed for %s: %r", key, exc)
-    if config.use_obstore and u.protocol in _OBSTORE_PROTOCOLS:
-        try:
-            return _open_obstore_zarr(u)
-        except Exception as exc:
-            logger.debug("obstore Zarr open failed for %s: %r", key, exc)
+            hdf5_error = exc
+            logger.debug("failed to open %s as HDF5: %r", key, exc, exc_info=True)
     try:
         return _open_zarr(u)
     except Exception as exc:
-        logger.debug("fsspec Zarr open failed for %s: %r", key, exc)
-    raise ValueError(f"Failed to open {u} as HDF5 or Zarr")
+        logger.debug("failed to open %s as Zarr: %r", key, exc, exc_info=True)
+        raise ValueError(f"Failed to open {u} as HDF5 or Zarr") from (
+            exc if hdf5_error is None else hdf5_error
+        )
 
 
 _OBSTORE_PROTOCOLS = frozenset({"s3", "gs", "gcs", "az", "abfs"})
 
 
-def _open_obstore_zarr(path: upath.UPath) -> zarr.Group:
-    """Open a Zarr store with obstore's fsspec adapter."""
-    logger.debug(
-        "opening Zarr store with obstore filesystem path=%s protocol=%s",
-        path.as_posix(),
-        path.protocol,
-    )
-    fs = obstore.fsspec.FsspecStore(path.protocol, **_get_obstore_storage_options())
-    store = zarr.storage.FSStore(path.as_posix(), fs=fs, mode="r")
-    return zarr.open(store, mode="r")
-
-
 def _open_zarr(path: upath.UPath) -> zarr.Group:
-    """Open a Zarr store while preserving any UPath-backed filesystem options."""
-    if path.protocol:
+    key = path.as_posix()
+    if config.use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
+        try:
+            fs = obstore.fsspec.FsspecStore(
+                path.protocol,
+                **_get_obstore_storage_options(protocol=path.protocol),
+            )
+            store = zarr.storage.FSStore(key, fs=fs, mode="r")
+            logger.debug("opening remote Zarr store %s with obstore", key)
+            return zarr.open(store, mode="r")
+        except Exception as exc:
+            logger.debug("obstore Zarr open failed for %s: %r", key, exc, exc_info=True)
+    if path.protocol and path.protocol != "file":
+        storage_options = _get_fsspec_storage_options()
         logger.debug(
-            "opening Zarr store with fsspec filesystem path=%s protocol=%s",
-            path.as_posix(),
-            path.protocol,
+            "opening remote Zarr store %s with fsspec mapper (options=%s)",
+            key,
+            sorted(str(option) for option in storage_options),
         )
-        store = zarr.storage.FSStore(path.as_posix(), fs=path.fs, mode="r")
-        return zarr.open(store, mode="r")
-
-    logger.debug("opening local Zarr store path=%s", path.as_posix())
-    return zarr.open(path.as_posix(), mode="r")
+        mapper = fsspec.get_mapper(key, **storage_options)
+        try:
+            return zarr.open_consolidated(mapper, mode="r")
+        except Exception as exc:
+            logger.debug(
+                "remote Zarr store %s has no usable consolidated metadata: %r",
+                key,
+                exc,
+            )
+        return zarr.open_group(mapper, mode="r")
+    logger.debug("opening local Zarr store %s", key)
+    return zarr.open(key, mode="r")
 
 
 def _open_hdf5(
@@ -155,12 +211,15 @@ def _open_hdf5(
         try:
             file = remfile.File(url=_s3_to_http(path.as_posix()))
         except Exception as exc:  # remfile raises base Exception for many reasons
-            logger.warning(
+            logger.debug(
                 f"remfile failed to open {path}, falling back to fsspec: {exc!r}"
             )
     if use_obstore and path.protocol in _OBSTORE_PROTOCOLS:
         file = obstore.fsspec.BufferedFile(
-            fs=obstore.fsspec.FsspecStore(path.protocol, **_get_obstore_storage_options()),  # type: ignore[call-overload]
+            fs=obstore.fsspec.FsspecStore(
+                path.protocol,
+                **_get_obstore_storage_options(protocol=path.protocol),
+            ),  # type: ignore[call-overload]
             path=path.as_posix(),
         )
     if file is None and path.protocol in ("http", "https"):
@@ -180,25 +239,28 @@ def is_group(accessor) -> bool:
 
 def _resolve_anon_setting() -> bool:
     """Resolve anonymous-access intent from the global config."""
-    if config.anon is not None:
-        return config.anon
-    return bool(config.fsspec_storage_options.get("anon", False))
+    return lazynwb._storage_options._resolve_anon_setting(
+        anon=config.anon,
+        storage_options=config.fsspec_storage_options,
+    )
 
 
 def _get_fsspec_storage_options() -> dict[str, Any]:
     """Return normalized storage options for UPath/fsspec-backed access."""
-    options = dict(config.fsspec_storage_options)
-    options["anon"] = _resolve_anon_setting()
-    return options
+    return lazynwb._storage_options._get_fsspec_storage_options(
+        config.fsspec_storage_options,
+        anon=config.anon,
+    )
 
 
-def _get_obstore_storage_options() -> dict[str, Any]:
+def _get_obstore_storage_options(*, protocol: str | None = None) -> dict[str, Any]:
     """Return normalized storage options for obstore-backed access."""
-    options = dict(config.fsspec_storage_options)
-    anon = _resolve_anon_setting()
-    options.pop("anon", None)
-    if anon:
-        options["skip_signature"] = True
+    options = lazynwb._storage_options._get_obstore_storage_options(
+        config.fsspec_storage_options,
+        anon=config.anon,
+    )
+    if protocol == "s3":
+        return lazynwb._storage_options._add_default_s3_credential_provider(options)
     return options
 
 
@@ -238,92 +300,14 @@ class FileAccessor:
         ZARR = "zarr"
 
     _path: upath.UPath
-    _skip_init: bool
     _accessor: h5py.File | h5py.Group | zarr.Group
     _hdmf_backend: HDMFBackend
     """File-type backend used by this instance (e.g. HDF5, ZARR)"""
-
-    def __new__(
-        cls,
-        path: lazynwb.types_.PathLike,
-    ) -> FileAccessor:
-        """
-        Reuse existing FileAccessor for the same path if present in cache.
-        """
-        # be careful not to access attributes created in __init__ before they exist
-
-        # allow passing through if already a FileAccessor
-        if isinstance(path, FileAccessor):
-            logger.debug(
-                "path input is already a FileAccessor instance: returning as-is"
-            )
-            return path
-
-        # skip caching if disabled
-        if config.disable_cache:
-            return super().__new__(cls)
-
-        # normalize path to get cache key
-        # try lightweight version first:
-        if isinstance(path, str):
-            cache_key = path.replace("\\", "/")
-        elif hasattr(path, "as_posix"):
-            cache_key = path.as_posix()
-        else:
-            cache_key = from_pathlike(path, **_get_fsspec_storage_options()).as_posix()
-
-        with _cache_lock:
-            # return cached instance if it exists and is open
-            if cache_key in _accessor_cache:
-                instance = _accessor_cache[cache_key]
-
-                if "_accessor" not in instance.__dict__:
-                    logger.debug(
-                        f"cached instance for {cache_key} is not properly initialized, removing from cache"
-                    )
-                    del _accessor_cache[cache_key]
-                else:
-                    if instance._hdmf_backend == cls.HDMFBackend.ZARR:
-                        if (
-                            _is_open := getattr(
-                                instance._accessor.store, "_is_open", None
-                            )
-                        ) is not None:
-                            # zarr v3
-                            is_readable = _is_open
-                        else:
-                            # zarr v2
-                            is_readable = instance._accessor.store.is_readable()
-
-                    elif instance._hdmf_backend == cls.HDMFBackend.HDF5:
-                        is_readable = bool(instance._accessor)
-                    if is_readable:
-                        logger.debug(f"returning cached instance for {cache_key}")
-                        # mark to skip __init__ for cached instance
-                        instance._skip_init = True
-                    else:
-                        instance._skip_init = False
-                        logger.debug(
-                            f"cached instance for {cache_key} is stale, will recreate"
-                        )
-                    return instance
-
-            # create new instance and cache
-            logger.debug(f"creating new instance for {cache_key}")
-            instance = super().__new__(cls)
-            _accessor_cache[cache_key] = instance
-            return instance
 
     def __init__(
         self,
         path: lazynwb.types_.PathLike,
     ) -> None:
-        # skip init if returned from cache
-        if self.__dict__.get(
-            "_skip_init"
-        ):  # don't check attr directly: __getattr__ is overloaded
-            logger.debug("skipping init for cached instance")
-            return None
         self._path = from_pathlike(path)
         logger.debug(f"opening file {self._path}")
         self._accessor = _open_file(self._path)
@@ -337,31 +321,10 @@ class FileAccessor:
             return self.HDMFBackend.ZARR
         raise NotImplementedError(f"Unknown backend for {self._accessor!r}")
 
-    @classmethod
-    def _clear_cache(cls) -> None:
-        """
-        Clear the FileAccessor cache.
-        This is useful to reset the state of cached accessors.
-        """
-        global _accessor_cache
-        logger.debug("Closing all accessors in FileAccessor cache")
-        for accessor in _accessor_cache.values():
-            if "_accessor" not in accessor.__dict__:
-                logger.debug(
-                    f"FileAccessor {accessor} has no _accessor attribute, skipping close"
-                )
-                continue
-            if accessor._hdmf_backend == cls.HDMFBackend.HDF5:
-                accessor._accessor.close()
-            elif accessor._hdmf_backend == cls.HDMFBackend.ZARR:
-                accessor._accessor.store.close()
-        logger.debug("Clearing FileAccessor cache")
-        _accessor_cache.clear()
-
     def __getstate__(self) -> dict[str, Any]:
         """
         Custom pickle state for multiprocessing compatibility.
-        Only serialize the path, not the accessor or cache references.
+        Only serialize the path, not the live accessor.
         """
         return {
             "path": self._path,
@@ -375,18 +338,18 @@ class FileAccessor:
         """
         self._path = state["path"]
         self._hdmf_backend = state["hdmf_backend"]
+        logger.debug("reopening unpickled FileAccessor for %s", self._path)
+        self._accessor = _open_file(self._path)
 
-        # Check if already cached in new process
-        u_path = upath.UPath(self._path, **_get_fsspec_storage_options())
-        key = u_path.as_posix()
-
-        if key in _accessor_cache:
-            # Reuse existing accessor from cache
-            self._accessor = _accessor_cache[key]._accessor
-        else:
-            # Create new accessor and cache this instance
-            self._accessor = _open_file(self._path)
-            _accessor_cache[key] = self
+    def _close(self) -> None:
+        """Close this accessor's independently owned backend handle."""
+        if self._hdmf_backend == self.HDMFBackend.HDF5:
+            if bool(self._accessor):
+                logger.debug("closing HDF5 FileAccessor for %s", self._path)
+                self._accessor.close()
+            return
+        logger.debug("closing Zarr FileAccessor for %s", self._path)
+        self._accessor.store.close()
 
     def __getattr__(self, name) -> Any:
         if name == "_accessor":
@@ -421,31 +384,35 @@ class FileAccessor:
 
     def __exit__(self, *args, **kwargs) -> None:
         if self._path is not None:
-            if self._hdmf_backend == self.HDMFBackend.HDF5:
-                self._accessor.close()
-            elif self._hdmf_backend == self.HDMFBackend.ZARR:
-                self._accessor.store.close()
+            self._close()
 
 
 def get_internal_paths(
     nwb_path: lazynwb.types_.PathLike,
-    include_arrays: bool = True,
+    include_child_datasets: bool = False,
     include_table_columns: bool = False,
     include_metadata: bool = False,
     include_specifications: bool = False,
     parents: bool = False,
-) -> dict[str, h5py.Dataset | zarr.Array]:
+) -> list[str]:
     """
-    Traverse the internal structure of an NWB file and return a mapping of paths to data accessors.
+    Traverse the internal structure of an NWB file and return internal paths.
+
+    This API prefers catalog-backed HDF5/Zarr path summaries where available so
+    repeated calls can reuse metadata caches. Use ``get_internal_path_info`` when
+    metadata such as attrs, shape, group/dataset flags, or TimeSeries
+    classification is needed.
 
     Parameters
     ----------
     nwb_path : PathLike
         Path to the NWB file (local file path, S3 URL, or other supported path type).
+    include_child_datasets : bool, default False
+        Include child datasets such as TimeSeries ``data``, ``timestamps``, and
+        ``starting_time`` paths. DynamicTable columns are controlled separately by
+        ``include_table_columns``.
     include_table_columns : bool, default False
         Include individual table columns (which are actually arrays) in the output.
-    include_arrays : bool, default False
-        Include arrays like 'data' or 'timestamps' in a TimeSeries object.
     include_metadata : bool, default False
         Include top-level metadata paths (like /session_start_time or /general/subject) in the output.
     include_specifications : bool, default False
@@ -456,37 +423,576 @@ def get_internal_paths(
 
     Returns
     -------
-    dict[str, h5py.Dataset | zarr.Array]
-        Dictionary mapping internal file paths to their corresponding datasets or arrays.
-        Keys are internal paths (e.g., '/units/spike_times'), values are the actual
-        dataset/array objects that can be inspected for shape, dtype, etc.
+    list[str]
+        Internal NWB paths selected by the filtering options.
     """
+    path_entries = _discover_internal_path_entries(
+        nwb_path=nwb_path,
+        include_child_datasets=include_child_datasets,
+        include_table_columns=include_table_columns,
+        include_metadata=include_metadata,
+        include_specifications=include_specifications,
+        parents=parents,
+    )
+    paths = list(path_entries)
+    logger.debug(
+        "get_internal_paths returning %d paths for %r "
+        "(include_child_datasets=%s include_table_columns=%s include_metadata=%s "
+        "include_specifications=%s parents=%s)",
+        len(paths),
+        nwb_path,
+        include_child_datasets,
+        include_table_columns,
+        include_metadata,
+        include_specifications,
+        parents,
+    )
+    return paths
+
+
+def get_internal_path_info(
+    nwb_path: lazynwb.types_.PathLike,
+    include_child_datasets: bool = False,
+    include_table_columns: bool = False,
+    include_metadata: bool = False,
+    include_specifications: bool = False,
+    parents: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """
+    Traverse the internal structure of an NWB file and return path metadata.
+
+    This API preserves the previous metadata-focused discovery behavior. Use
+    ``get_internal_paths`` when only path strings are needed.
+
+    Parameters
+    ----------
+    nwb_path : PathLike
+        Path to the NWB file (local file path, S3 URL, or other supported path type).
+    include_child_datasets : bool, default False
+        Include child datasets such as TimeSeries ``data``, ``timestamps``, and
+        ``starting_time`` paths. DynamicTable columns are controlled separately by
+        ``include_table_columns``.
+    include_table_columns : bool, default False
+        Include individual table columns (which are actually arrays) in the output.
+    include_metadata : bool, default False
+        Include top-level metadata paths (like /session_start_time or /general/subject) in the output.
+    include_specifications : bool, default False
+        Include NWB schema-related paths in the output - rarely needed.
+    parents : bool, default False
+        If True, include paths that have children paths in the output, even if it is not a table
+        column or array itself, e.g. the path to a table (parent) as well as its columns (children).
+
+    Returns
+    -------
+    dict[str, dict[str, Any]]
+        Dictionary mapping internal file paths to metadata dictionaries. Metadata
+        keys include ``is_group``, ``is_dataset``, ``shape``, ``attrs``, and
+        ``is_timeseries``.
+    """
+    path_entries = _discover_internal_path_entries(
+        nwb_path=nwb_path,
+        include_child_datasets=include_child_datasets,
+        include_table_columns=include_table_columns,
+        include_metadata=include_metadata,
+        include_specifications=include_specifications,
+        parents=parents,
+    )
+    info = {
+        path: _path_metadata_from_entry(path, entry, path_entries)
+        for path, entry in path_entries.items()
+    }
+    logger.debug(
+        "get_internal_path_info returning metadata for %d paths in %r "
+        "(include_child_datasets=%s include_table_columns=%s include_metadata=%s "
+        "include_specifications=%s parents=%s)",
+        len(info),
+        nwb_path,
+        include_child_datasets,
+        include_table_columns,
+        include_metadata,
+        include_specifications,
+        parents,
+    )
+    return info
+
+
+def _discover_internal_path_entries(
+    *,
+    nwb_path: lazynwb.types_.PathLike,
+    include_child_datasets: bool,
+    include_table_columns: bool,
+    include_metadata: bool,
+    include_specifications: bool,
+    parents: bool,
+) -> dict[
+    str,
+    catalog_models._PathSummaryEntry
+    | h5py.Group
+    | h5py.Dataset
+    | zarr.Group
+    | zarr.Array,
+]:
+    summary = _get_catalog_path_summary_if_available(
+        nwb_path=nwb_path,
+        include_table_columns=include_table_columns,
+        include_child_datasets=include_child_datasets,
+        include_metadata=include_metadata,
+        include_specifications=include_specifications,
+        parents=parents,
+    )
+    if summary is not None:
+        logger.debug(
+            "internal path discovery returning catalog-backed entries for %r "
+            "(paths=%d)",
+            nwb_path,
+            len(summary),
+        )
+        return summary
+
+    logger.debug(
+        "internal path discovery falling back to accessor traversal for %r", nwb_path
+    )
     file_accessor = _get_accessor(nwb_path)
+    _warn_if_remote_hdf5_internal_path_traversal(file_accessor)
     paths_to_accessors = _traverse_internal_paths(
         file_accessor._accessor,
         include_table_columns=include_table_columns,
-        include_arrays=include_arrays,
+        include_child_datasets=include_child_datasets,
         include_metadata=include_metadata,
         include_specifications=include_specifications,
     )
     if not parents:
-        paths = list(paths_to_accessors.keys())
-        # remove paths that have children
-        for path in paths:
-            if any(p.startswith(path + "/") for p in paths):
-                del paths_to_accessors[path]
+        _remove_parent_path_entries(paths_to_accessors)
     return paths_to_accessors
 
 
-def _traverse_internal_paths(
-    group: h5py.Group | zarr.Group | zarr.Array,
-    include_arrays: bool = False,
+def _path_metadata_from_entry(
+    path: str,
+    entry: (
+        catalog_models._PathSummaryEntry
+        | h5py.Group
+        | h5py.Dataset
+        | zarr.Group
+        | zarr.Array
+    ),
+    path_entries: dict[str, Any],
+) -> dict[str, Any]:
+    if isinstance(entry, catalog_models._PathSummaryEntry):
+        return _path_metadata_from_summary_entry(entry)
+    return _path_metadata_from_accessor(path, entry, path_entries)
+
+
+def _path_metadata_from_summary_entry(
+    entry: catalog_models._PathSummaryEntry,
+) -> dict[str, Any]:
+    return {
+        "is_group": entry.is_group,
+        "is_dataset": entry.is_dataset,
+        "shape": entry.shape,
+        "attrs": dict(entry.attrs),
+        "is_timeseries": entry.is_timeseries,
+    }
+
+
+def _path_metadata_from_accessor(
+    path: str,
+    accessor: h5py.Group | h5py.Dataset | zarr.Group | zarr.Array,
+    path_entries: dict[str, Any],
+) -> dict[str, Any]:
+    is_group_entry = is_group(accessor)
+    return {
+        "is_group": is_group_entry,
+        "is_dataset": not is_group_entry,
+        "shape": getattr(accessor, "shape", None),
+        "attrs": dict(getattr(accessor, "attrs", {})),
+        "is_timeseries": _is_timeseries_accessor_path(path, accessor, path_entries),
+    }
+
+
+def _get_catalog_path_summary_if_available(
+    nwb_path: lazynwb.types_.PathLike,
+    include_child_datasets: bool = False,
     include_table_columns: bool = False,
     include_metadata: bool = False,
     include_specifications: bool = False,
-) -> dict[str, h5py.Dataset | zarr.Array]:
+    parents: bool = False,
+) -> dict[str, catalog_models._PathSummaryEntry] | None:
+    import lazynwb._zarr.reader as zarr_reader
+
+    backend_order = (
+        ("zarr", "hdf5")
+        if zarr_reader._source_name_has_zarr_suffix(nwb_path)
+        else ("hdf5", "zarr")
+    )
+    logger.debug(
+        "using catalog path summary backend order for %r: %s",
+        nwb_path,
+        " -> ".join(backend_order),
+    )
+    for backend_name in backend_order:
+        if backend_name == "hdf5":
+            entries = _get_hdf5_catalog_path_summary_entries_if_available(nwb_path)
+        else:
+            entries = _get_zarr_catalog_path_summary_entries_if_available(nwb_path)
+        if entries is None:
+            continue
+        summary = _filter_catalog_path_summary_entries(
+            entries,
+            include_child_datasets=include_child_datasets,
+            include_table_columns=include_table_columns,
+            include_metadata=include_metadata,
+            include_specifications=include_specifications,
+            parents=parents,
+        )
+        logger.debug(
+            "get_internal_paths-compatible discovery used %s catalog summary for %r "
+            "(entries=%d filtered=%d)",
+            backend_name,
+            nwb_path,
+            len(entries),
+            len(summary),
+        )
+        return summary
+    return None
+
+
+def _get_hdf5_catalog_path_summary_entries_if_available(
+    nwb_path: lazynwb.types_.PathLike,
+) -> tuple[catalog_models._PathSummaryEntry, ...] | None:
+    import lazynwb._hdf5.reader as hdf5_reader
+    import lazynwb.tables
+
+    catalog_source = _hdf5_catalog_source_if_available(nwb_path)
+    if catalog_source is None or not hdf5_reader._is_fast_hdf5_candidate(
+        catalog_source
+    ):
+        return None
+    reader = hdf5_reader._default_hdf5_backend_reader(catalog_source)
+    try:
+        return lazynwb.tables._run_async_value(reader.read_path_summary())
+    except hdf5_reader._NotHDF5Error:
+        logger.debug("catalog path summary rejected non-HDF5 source %r", nwb_path)
+        return None
+    except Exception as exc:
+        logger.debug(
+            "HDF5 catalog path summary unavailable for %r: %r",
+            nwb_path,
+            exc,
+        )
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            lazynwb.tables._run_async_value(reader.close())
+
+
+def _hdf5_catalog_source_if_available(
+    nwb_path: lazynwb.types_.PathLike,
+) -> lazynwb.types_.PathLike | None:
+    raw_path = _pathlike_to_string(nwb_path)
+    parsed = urllib.parse.urlsplit(raw_path)
+    if parsed.scheme in {"file", "http", "https", "s3", "gs", "gcs", "az", "abfs"}:
+        return raw_path
+    if parsed.scheme and not _has_windows_drive_scheme(raw_path, parsed):
+        logger.debug(
+            "HDF5 catalog path summary skipped unsupported source scheme %r for %r",
+            parsed.scheme,
+            nwb_path,
+        )
+        return None
+    try:
+        local_path = pathlib.Path(os.fsdecode(nwb_path)).expanduser()
+    except TypeError:
+        logger.debug(
+            "HDF5 catalog path summary skipped unsupported path-like source %r",
+            nwb_path,
+        )
+        return None
+    if not local_path.is_file():
+        return None
+    return local_path.resolve().as_uri()
+
+
+def _has_windows_drive_scheme(
+    raw_path: str,
+    parsed: urllib.parse.SplitResult,
+) -> bool:
+    return len(parsed.scheme) == 1 and len(raw_path) >= 2 and raw_path[1] == ":"
+
+
+def _pathlike_to_string(path: lazynwb.types_.PathLike) -> str:
+    as_posix = getattr(path, "as_posix", None)
+    if callable(as_posix):
+        try:
+            return str(as_posix())
+        except Exception:
+            logger.debug("failed to get as_posix() from path %r", path)
+    try:
+        return os.fsdecode(path)
+    except TypeError:
+        return str(path)
+
+
+def _get_zarr_catalog_path_summary_entries_if_available(
+    nwb_path: lazynwb.types_.PathLike,
+) -> tuple[catalog_models._PathSummaryEntry, ...] | None:
+    import lazynwb._zarr.reader as zarr_reader
+    import lazynwb.tables
+
+    if not zarr_reader._is_fast_zarr_candidate(nwb_path):
+        return None
+    reader = zarr_reader._default_zarr_backend_reader(nwb_path)
+    try:
+        return lazynwb.tables._run_async_value(reader.read_path_summary())
+    except Exception as exc:
+        logger.debug(
+            "Zarr catalog path summary unavailable for %r: %r",
+            nwb_path,
+            exc,
+        )
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            lazynwb.tables._run_async_value(reader.close())
+
+
+def _filter_catalog_path_summary_entries(
+    entries: Iterable[catalog_models._PathSummaryEntry],
+    *,
+    include_child_datasets: bool,
+    include_table_columns: bool,
+    include_metadata: bool,
+    include_specifications: bool,
+    parents: bool,
+) -> dict[str, catalog_models._PathSummaryEntry]:
+    entry_by_path = {entry.path: entry for entry in entries}
+    results: dict[str, catalog_models._PathSummaryEntry] = {}
+    table_paths: set[str] = set()
+    for path, entry in entry_by_path.items():
+        if "/specifications" in path:
+            if include_specifications:
+                results[path] = _classified_path_summary_entry(
+                    path, entry, entry_by_path
+                )
+            continue
+        shape = entry.shape
+        is_scalar = shape == () or shape == (1,)
+        is_array = shape is not None and not is_scalar
+        attrs = dict(entry.attrs)
+        is_rate_starting_time = path.endswith("/starting_time") and "rate" in attrs
+        if (
+            entry.is_dataset
+            and is_scalar
+            and not (is_rate_starting_time and include_child_datasets)
+        ):
+            continue
+        neurodata_type = attrs.get("neurodata_type", None)
+        is_neurodata = neurodata_type is not None
+        is_table = _is_table_summary_path(path, entry)
+        is_metadata = is_scalar or path.startswith("/general")
+        classified_entry = _classified_path_summary_entry(path, entry, entry_by_path)
+        if is_table:
+            table_paths.add(path)
+        if is_rate_starting_time and include_child_datasets:
+            results[path] = classified_entry
+        elif classified_entry.is_timeseries:
+            results[path] = classified_entry
+        elif is_metadata and not include_metadata:
+            continue
+        elif is_metadata and include_metadata:
+            results[path] = classified_entry
+        elif is_neurodata and neurodata_type not in (
+            "/",
+            "NWBFile",
+            "ProcessingModule",
+        ):
+            results[path] = classified_entry
+        elif is_array and include_child_datasets:
+            results[path] = classified_entry
+    if not include_table_columns:
+        for table_path in table_paths:
+            for path in tuple(results):
+                if path.startswith(table_path.rstrip("/") + "/"):
+                    results.pop(path, None)
+    if not parents:
+        _remove_parent_path_entries(results)
+    return results
+
+
+def _classified_path_summary_entry(
+    path: str,
+    entry: catalog_models._PathSummaryEntry,
+    entry_by_path: dict[str, catalog_models._PathSummaryEntry],
+) -> catalog_models._PathSummaryEntry:
+    is_timeseries = _is_timeseries_summary_path(path, entry, entry_by_path)
+    if entry.is_timeseries == is_timeseries:
+        return entry
+    return dataclasses.replace(entry, is_timeseries=is_timeseries)
+
+
+def _is_table_summary_path(
+    path: str,
+    entry: catalog_models._PathSummaryEntry,
+) -> bool:
+    if not entry.is_group:
+        return False
+    attrs = dict(entry.attrs)
+    return "colnames" in attrs or _looks_like_table_path(path)
+
+
+def _remove_parent_path_entries(path_entries: dict[str, Any]) -> None:
+    for path, entry in tuple(path_entries.items()):
+        if _is_user_level_parent_path(path, entry, path_entries):
+            continue
+        if any(other.startswith(path.rstrip("/") + "/") for other in path_entries):
+            path_entries.pop(path, None)
+
+
+def _is_user_level_parent_path(
+    path: str,
+    entry: Any,
+    path_entries: dict[str, Any],
+) -> bool:
+    if isinstance(entry, catalog_models._PathSummaryEntry):
+        return entry.is_timeseries or _is_table_summary_path(path, entry)
+    if _is_timeseries_accessor_path(path, entry, path_entries):
+        return True
+    attrs = dict(getattr(entry, "attrs", {}))
+    return is_group(entry) and ("colnames" in attrs or _looks_like_table_path(path))
+
+
+def _is_timeseries_summary_path(
+    path: str,
+    entry: catalog_models._PathSummaryEntry,
+    entry_by_path: dict[str, catalog_models._PathSummaryEntry],
+) -> bool:
+    if not entry.is_group:
+        return False
+    if _is_table_summary_path(path, entry):
+        return False
+    data_entry = entry_by_path.get(f"{path}/data")
+    timestamps_entry = entry_by_path.get(f"{path}/timestamps")
+    starting_time_entry = entry_by_path.get(f"{path}/starting_time")
+    has_data = bool(data_entry and data_entry.is_dataset)
+    has_timestamps = bool(timestamps_entry and timestamps_entry.is_dataset)
+    has_rate_starting_time = bool(
+        starting_time_entry
+        and starting_time_entry.is_dataset
+        and "rate" in starting_time_entry.attrs
+    )
+    attrs = dict(entry.attrs)
+    type_says_time_aligned = _neurodata_type_is_time_aligned(attrs)
+    if has_data and (has_timestamps or has_rate_starting_time):
+        return True
+    if has_timestamps:
+        return True
+    return type_says_time_aligned and (
+        has_data or has_rate_starting_time
+    )
+
+
+def _is_timeseries_accessor_path(
+    path: str,
+    accessor: Any,
+    path_entries: dict[str, Any],
+) -> bool:
+    if not is_group(accessor):
+        return False
+    attrs = dict(getattr(accessor, "attrs", {}))
+    if "colnames" in attrs or _looks_like_table_path(path):
+        return False
+    has_data = _path_entry_has_child_dataset(path, accessor, path_entries, "data")
+    has_timestamps = _path_entry_has_child_dataset(
+        path, accessor, path_entries, "timestamps"
+    )
+    has_rate_starting_time = _path_entry_has_rate_starting_time(
+        path, accessor, path_entries
+    )
+    type_says_time_aligned = _neurodata_type_is_time_aligned(attrs)
+    if has_data and (has_timestamps or has_rate_starting_time):
+        return True
+    if has_timestamps:
+        return True
+    return type_says_time_aligned and (
+        has_data or has_rate_starting_time
+    )
+
+
+def _neurodata_type_is_time_aligned(attrs: dict[str, Any]) -> bool:
+    neurodata_type = str(attrs.get("neurodata_type", "")).lower()
+    return (
+        "timeseries" in neurodata_type
+        or neurodata_type.endswith("series")
+        or neurodata_type == "events"
+    )
+
+
+def _path_entry_has_child_dataset(
+    path: str,
+    accessor: Any,
+    path_entries: dict[str, Any],
+    child_name: str,
+) -> bool:
+    child_path = f"{path.rstrip('/')}/{child_name}"
+    if child_path in path_entries:
+        return not is_group(path_entries[child_path])
+    child = accessor.get(child_name, None)
+    return child is not None and not is_group(child)
+
+
+def _path_entry_has_rate_starting_time(
+    path: str,
+    accessor: Any,
+    path_entries: dict[str, Any],
+) -> bool:
+    starting_time_path = f"{path.rstrip('/')}/starting_time"
+    starting_time = path_entries.get(starting_time_path)
+    if starting_time is not None:
+        return "rate" in dict(getattr(starting_time, "attrs", {}))
+    starting_time = accessor.get("starting_time", None)
+    return starting_time is not None and "rate" in dict(
+        getattr(starting_time, "attrs", {})
+    )
+
+
+def _looks_like_table_path(path: str) -> bool:
+    return any(
+        table_pattern in path
+        for table_pattern in (
+            "/intervals/",
+            "/units",
+            "/electrodes",
+            "/trials",
+            "/epochs",
+        )
+    )
+
+
+def _warn_if_remote_hdf5_internal_path_traversal(
+    file_accessor: FileAccessor,
+) -> None:
+    protocol = getattr(file_accessor._path, "protocol", None)
+    if (
+        file_accessor._hdmf_backend == FileAccessor.HDMFBackend.HDF5
+        and protocol not in (None, "", "file")
+    ):
+        warnings.warn(
+            "get_internal_paths is falling back to accessor-backed remote HDF5 "
+            "traversal and may be slow because the catalog path summary is "
+            "unavailable.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
+def _traverse_internal_paths(
+    group: h5py.Group | h5py.Dataset | zarr.Group | zarr.Array,
+    include_child_datasets: bool = False,
+    include_table_columns: bool = False,
+    include_metadata: bool = False,
+    include_specifications: bool = False,
+) -> dict[str, h5py.Group | h5py.Dataset | zarr.Group | zarr.Array]:
     """https://nwb-overview.readthedocs.io/en/latest/intro_to_nwb/2_file_structure.html"""
-    results: dict[str, h5py.Dataset | zarr.Array] = {}
+    results: dict[str, h5py.Group | h5py.Dataset | zarr.Group | zarr.Array] = {}
     if "/specifications" in group.name:
         if include_specifications:
             results[group.name] = group
@@ -495,18 +1001,24 @@ def _traverse_internal_paths(
     shape = getattr(group, "shape", None)
     is_scalar = shape == () or shape == (1,)
     is_array = shape is not None and not is_scalar
-    if is_scalar:
-        return {}
     attrs = dict(getattr(group, "attrs", {}))
+    is_rate_starting_time = group.name.endswith("/starting_time") and "rate" in attrs
+    if is_scalar and not (include_child_datasets and is_rate_starting_time):
+        return {}
     neurodata_type = attrs.get("neurodata_type", None)
     is_neurodata = neurodata_type is not None
     is_table = "colnames" in attrs
+    is_timeseries_group = _is_timeseries_accessor_path(group.name, group, {})
     is_metadata = is_scalar or group.name.startswith(
         "/general"
     )  # other metadata like /general/lab
-    if is_metadata and not include_metadata:
+    if is_rate_starting_time and include_child_datasets:
+        results[group.name] = group
+    elif is_metadata and not include_metadata:
         return {}
     elif is_metadata and include_metadata:
+        results[group.name] = group
+    elif is_timeseries_group:
         results[group.name] = group
     elif is_neurodata and neurodata_type not in (
         "/",
@@ -514,13 +1026,13 @@ def _traverse_internal_paths(
         "ProcessingModule",
     ):
         results[group.name] = group
-    elif is_array and include_arrays:  # has no neurodata_type
+    elif is_array and include_child_datasets:  # has no neurodata_type
         results[group.name] = group
     else:
         pass
     if is_table and not include_table_columns:
         return results
-    if not is_group(group) and len(group) > 0:
+    if not is_group(group):
         return results
     for subpath in group.keys():
         try:
@@ -529,7 +1041,7 @@ def _traverse_internal_paths(
                 **_traverse_internal_paths(
                     group[subpath],
                     include_table_columns=include_table_columns,
-                    include_arrays=include_arrays,
+                    include_child_datasets=include_child_datasets,
                     include_metadata=include_metadata,
                     include_specifications=include_specifications,
                 ),

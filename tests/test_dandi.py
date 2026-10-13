@@ -1,69 +1,49 @@
-"""Integration tests for DANDI Archive functionality.
-
-These tests make real network calls to the DANDI API and are marked as integration tests.
-They use a stable, small dandiset (000363) for testing.
-"""
+"""Opt-in DANDI:001637 integration framework smoke tests."""
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
-import lazynwb.file_io
-from lazynwb.dandi import (
-    from_dandi_asset,
-    get_dandiset_s3_urls,
-    scan_dandiset,
-)
+import tests._dandi_sample as dandi_sample
 
-# Test data constants - using a stable, published dandiset
-TEST_DANDISET_ID = "000363"
-TEST_VERSION = "0.231012.2129"
-TEST_ASSET_ID = "21c622b7-6d8e-459b-98e8-b968a97a1585"
-
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.dandi_sample]
 
 
-def test_get_dandiset_s3_urls_returns_valid_urls():
-    """Test that get_dandiset_s3_urls returns a list of valid S3 URLs."""
-    urls = get_dandiset_s3_urls(TEST_DANDISET_ID, TEST_VERSION)
-    assert isinstance(urls, list)
-    assert len(urls) > 0
-    for url in urls:
-        assert isinstance(url, str)
-        assert "s3" in url.lower()
-
-
-def test_get_dandiset_s3_urls_with_latest_version():
-    """Test fetching URLs with latest version."""
-    urls = get_dandiset_s3_urls(TEST_DANDISET_ID, version=None)
-    assert isinstance(urls, list)
-    assert len(urls) > 0
-
-
-def test_from_dandi_asset_returns_file_accessor():
-    """Test that from_dandi_asset returns a readable FileAccessor."""
-    accessor = from_dandi_asset(TEST_DANDISET_ID, TEST_ASSET_ID, TEST_VERSION)
-    assert isinstance(accessor, lazynwb.file_io.FileAccessor)
-    assert accessor.file is not None
-
-
-def test_from_dandi_asset_with_latest_version():
-    """Test creating FileAccessor with latest version."""
-    accessor = from_dandi_asset(TEST_DANDISET_ID, TEST_ASSET_ID, version=None)
-    assert isinstance(accessor, lazynwb.file_io.FileAccessor)
-
-
-def test_scan_dandiset():
-    """Test that scan_dandiset returns a LazyFrame with data."""
-    lf = scan_dandiset(
-        TEST_DANDISET_ID,
-        "/units",
-        version=TEST_VERSION,
-        max_assets=1,
-        infer_schema_length=1,
+def test_dandi_001637_sample_source_urls_resolve(
+    dandi_001637_sample_assets: tuple[dandi_sample._DandiSampleAsset, ...],
+    dandi_001637_resolved_sample_assets: tuple[
+        dandi_sample._DandiSampleResolvedAsset, ...
+    ],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=dandi_sample._LOGGER_NAME)
+    dandi_sample._log_resolved_sample_assets(
+        dandi_001637_resolved_sample_assets,
+        cache_scope="session",
     )
-    assert "spike_times" in lf.collect_schema()
 
+    resolved_by_id = {
+        resolved_asset.asset.asset_id: resolved_asset
+        for resolved_asset in dandi_001637_resolved_sample_assets
+    }
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    assert tuple(resolved_by_id) == tuple(
+        asset.asset_id for asset in dandi_001637_sample_assets
+    )
+    for sample_asset in dandi_001637_sample_assets:
+        resolved_asset = resolved_by_id[sample_asset.asset_id]
+        assert resolved_asset.asset.path == sample_asset.path
+        assert resolved_asset.source_url.startswith("https://")
+        assert "s3" in resolved_asset.source_url.lower()
+        assert resolved_asset.source_url == dandi_sample._sanitize_source_url_for_logging(
+            resolved_asset.source_url
+        )
+        assert sample_asset.asset_id in caplog.text
+        assert sample_asset.path in caplog.text
+
+    assert dandi_sample._DANDI_SAMPLE_DANDISET_ID in caplog.text
+    assert dandi_sample._DANDI_SAMPLE_VERSION in caplog.text
+    assert "source_url=" in caplog.text
+    assert "cache_scope=session" in caplog.text

@@ -10,6 +10,7 @@ from typing import Any
 import h5py
 import zarr
 
+import lazynwb._catalog._schema as catalog_schema
 import lazynwb.exceptions
 import lazynwb.file_io
 import lazynwb.types_
@@ -38,6 +39,14 @@ class RawTableColumnMetadata:
     shape: tuple[int, ...] | None
     ndim: int | None
     attrs: dict[str, Any]
+    maxshape: tuple[int | None, ...] | None
+    chunks: tuple[int, ...] | None
+    storage_layout: str | None
+    compression: str | None
+    compression_opts: object | None
+    filters: tuple[object, ...]
+    fill_value: object | None
+    read_capabilities: tuple[str, ...]
     is_group: bool
     is_dataset: bool
     is_metadata_table: bool
@@ -49,6 +58,7 @@ class RawTableColumnMetadata:
     is_multidimensional: bool
     index_column_name: str | None
     data_column_name: str | None
+    row_element_shape: tuple[int, ...] | None
     _accessor: TableColumnAccessor = dataclasses.field(repr=False, compare=False)
 
     @property
@@ -66,7 +76,7 @@ def get_table_column_metadata(
     t0 = time.time()
     file = (
         file_path
-        if isinstance(file_path, lazynwb.file_io.FileAccessor)
+        if _is_file_accessor_like(file_path)
         else lazynwb.file_io._get_accessor(file_path)
     )
     normalized_table_path = lazynwb.utils.normalize_internal_file_path(table_path)
@@ -76,26 +86,21 @@ def get_table_column_metadata(
         use_thread_pool=use_thread_pool,
         skip_references=skip_references,
     )
-    column_names = tuple(column_accessors)
-    is_metadata_table = normalized_table_path == "general" or _is_metadata(
-        column_accessors
+    column_facts = _column_facts_from_accessors(column_accessors)
+    table_rules = catalog_schema._get_table_schema_rules(
+        normalized_table_path,
+        column_facts.values(),
     )
-    is_timeseries = _is_timeseries(column_names)
-    is_timeseries_with_rate = _is_timeseries_with_rate(column_names)
-    timeseries_len = _get_timeseries_data_length(column_accessors, is_timeseries)
 
     columns = tuple(
         _metadata_from_accessor(
             accessor=accessor,
             backend=file._hdmf_backend.value,
-            column_names=column_names,
-            is_metadata_table=is_metadata_table,
-            is_timeseries=is_timeseries,
-            is_timeseries_with_rate=is_timeseries_with_rate,
+            column_facts=column_facts[name],
             name=name,
             source_path=file._path.as_posix(),
             table_path=normalized_table_path,
-            timeseries_len=timeseries_len,
+            table_rules=table_rules,
         )
         for name, accessor in column_accessors.items()
     )
@@ -114,85 +119,69 @@ def get_table_length_from_metadata(
 ) -> int:
     """Compute table length from raw table metadata without reading column data."""
     columns = tuple(columns)
-    columns_by_name = {column.name: column for column in columns}
-
-    if columns and all(column.is_metadata_table for column in columns):
-        logger.debug(
-            "table length for %s/%s resolved as one metadata row",
-            columns[0].source_path,
-            columns[0].table_path,
-        )
-        return 1
-
-    for column in columns:
-        if column.is_nominally_indexed:
-            index_column_name = column.index_column_name or column.name
-            index_column = columns_by_name.get(index_column_name)
-            if index_column is not None and index_column.shape is not None:
-                logger.debug(
-                    "table length for %s/%s resolved from indexed column %r: %d",
-                    column.source_path,
-                    column.table_path,
-                    index_column.name,
-                    index_column.shape[0],
-                )
-                return index_column.shape[0]
-        if column.ndim == 1 and column.shape is not None:
-            logger.debug(
-                "table length for %s/%s resolved from regular column %r: %d",
-                column.source_path,
-                column.table_path,
-                column.name,
-                column.shape[0],
-            )
-            return column.shape[0]
-        if column.ndim == 0:
-            logger.debug(
-                "table length for %s/%s resolved as metadata row",
-                column.source_path,
-                column.table_path,
-            )
-            return 1
-
-    for column in columns:
-        if column.shape:
-            logger.debug(
-                "table length for %s/%s resolved from multidimensional column %r: %d",
-                column.source_path,
-                column.table_path,
-                column.name,
-                column.shape[0],
-            )
-            return column.shape[0]
+    table_length = catalog_schema._get_table_length(columns)
+    if table_length is not None:
+        return table_length
 
     raise lazynwb.exceptions.InternalPathError("Could not determine table length")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _StorageFacts:
+    """Backend storage facts needed later for direct read planning."""
+
+    maxshape: tuple[int | None, ...] | None
+    chunks: tuple[int, ...] | None
+    storage_layout: str | None
+    compression: str | None
+    compression_opts: object | None
+    filters: tuple[object, ...]
+    fill_value: object | None
+    read_capabilities: tuple[str, ...]
 
 
 def _metadata_from_accessor(
     accessor: TableColumnAccessor,
     backend: str,
-    column_names: Iterable[str],
-    is_metadata_table: bool,
-    is_timeseries: bool,
-    is_timeseries_with_rate: bool,
+    column_facts: catalog_schema._ColumnFacts,
     name: str,
     source_path: str,
     table_path: str,
-    timeseries_len: int | None,
+    table_rules: catalog_schema._TableSchemaRules,
 ) -> RawTableColumnMetadata:
     is_group = lazynwb.file_io.is_group(accessor)
     dtype = getattr(accessor, "dtype", None)
-    shape = _shape_as_tuple(getattr(accessor, "shape", None))
-    ndim = getattr(accessor, "ndim", None)
-    is_nominally_indexed = _is_nominally_indexed_column(name, column_names)
-    is_index_column = is_nominally_indexed and name.endswith("_index")
-    index_column_name = _get_index_column_name(name, column_names)
-    data_column_name = _get_data_column_name(name, column_names)
-    is_timeseries_length_aligned = _is_timeseries_length_aligned(
-        is_timeseries=is_timeseries,
+    shape = column_facts.shape
+    ndim = column_facts.ndim
+    attrs = dict(getattr(accessor, "attrs", {}))
+    storage_facts = _get_storage_facts(accessor)
+    column_rules = table_rules.column_rules(
+        name,
         shape=shape,
-        timeseries_len=timeseries_len,
+        ndim=ndim,
     )
+    if column_rules.is_metadata_table and ndim is not None and ndim <= 1:
+        logger.debug(
+            "using metadata-only schema facts for tiny metadata column %r at %s/%s "
+            "(shape=%s dtype=%s)",
+            name,
+            source_path,
+            table_path,
+            shape,
+            dtype,
+        )
+    if (
+        name == "starting_time"
+        and column_rules.is_timeseries_with_rate
+        and "rate" in attrs
+    ):
+        logger.debug(
+            "resolved selected TimeSeries rate attr for %s/%s from %r: %r",
+            source_path,
+            table_path,
+            name,
+            attrs["rate"],
+        )
     return RawTableColumnMetadata(
         name=name,
         table_path=table_path,
@@ -201,20 +190,171 @@ def _metadata_from_accessor(
         dtype=dtype,
         shape=shape,
         ndim=ndim,
-        attrs=dict(getattr(accessor, "attrs", {})),
+        attrs=attrs,
+        maxshape=storage_facts.maxshape,
+        chunks=storage_facts.chunks,
+        storage_layout=storage_facts.storage_layout,
+        compression=storage_facts.compression,
+        compression_opts=storage_facts.compression_opts,
+        filters=storage_facts.filters,
+        fill_value=storage_facts.fill_value,
+        read_capabilities=storage_facts.read_capabilities,
         is_group=is_group,
         is_dataset=not is_group and dtype is not None,
-        is_metadata_table=is_metadata_table,
-        is_timeseries=is_timeseries,
-        is_timeseries_with_rate=is_timeseries_with_rate,
-        is_timeseries_length_aligned=is_timeseries_length_aligned,
-        is_nominally_indexed=is_nominally_indexed,
-        is_index_column=is_index_column,
+        is_metadata_table=column_rules.is_metadata_table,
+        is_timeseries=column_rules.is_timeseries,
+        is_timeseries_with_rate=column_rules.is_timeseries_with_rate,
+        is_timeseries_length_aligned=column_rules.is_timeseries_length_aligned,
+        is_nominally_indexed=column_rules.is_nominally_indexed,
+        is_index_column=column_rules.is_index_column,
         is_multidimensional=ndim is not None and ndim > 1,
-        index_column_name=index_column_name,
-        data_column_name=data_column_name,
+        index_column_name=column_rules.index_column_name,
+        data_column_name=column_rules.data_column_name,
+        row_element_shape=column_rules.row_element_shape,
         _accessor=accessor,
     )
+
+
+def _column_facts_from_accessors(
+    column_accessors: dict[str, TableColumnAccessor],
+) -> dict[str, catalog_schema._ColumnFacts]:
+    return {
+        name: catalog_schema._ColumnFacts(
+            name=name,
+            shape=_shape_as_tuple(getattr(accessor, "shape", None)),
+            ndim=getattr(accessor, "ndim", None),
+        )
+        for name, accessor in column_accessors.items()
+    }
+
+
+def _get_storage_facts(accessor: TableColumnAccessor) -> _StorageFacts:
+    maxshape = _shape_as_optional_int_tuple(getattr(accessor, "maxshape", None))
+    chunks = _shape_as_tuple(getattr(accessor, "chunks", None))
+    storage_layout = _get_storage_layout(accessor, chunks)
+    compression, compression_opts = _get_compression_facts(accessor)
+    filters = _get_filter_facts(accessor, compression, compression_opts)
+    fill_value = _get_fill_value(accessor)
+    read_capabilities = _get_read_capabilities(
+        accessor=accessor,
+        chunks=chunks,
+        compression=compression,
+        filters=filters,
+    )
+    logger.debug(
+        "storage facts for %s: layout=%s chunks=%s compression=%s filters=%s",
+        getattr(accessor, "name", type(accessor).__name__),
+        storage_layout,
+        chunks,
+        compression,
+        filters,
+    )
+    return _StorageFacts(
+        maxshape=maxshape,
+        chunks=chunks,
+        storage_layout=storage_layout,
+        compression=compression,
+        compression_opts=compression_opts,
+        filters=filters,
+        fill_value=fill_value,
+        read_capabilities=read_capabilities,
+    )
+
+
+def _get_storage_layout(
+    accessor: TableColumnAccessor,
+    chunks: tuple[int, ...] | None,
+) -> str | None:
+    if isinstance(accessor, h5py.Dataset):
+        layout = accessor.id.get_create_plist().get_layout()
+        if layout == h5py.h5d.CHUNKED:
+            return "chunked"
+        if layout == h5py.h5d.CONTIGUOUS:
+            return "contiguous"
+        if layout == h5py.h5d.COMPACT:
+            return "compact"
+        if layout == h5py.h5d.VIRTUAL:
+            return "virtual"
+        return f"hdf5:{layout}"
+    if isinstance(accessor, zarr.Array):
+        return "chunked" if chunks is not None else "array"
+    if lazynwb.file_io.is_group(accessor):
+        return "group"
+    return None
+
+
+def _get_compression_facts(
+    accessor: TableColumnAccessor,
+) -> tuple[str | None, object | None]:
+    compression = getattr(accessor, "compression", None)
+    compression_opts = getattr(accessor, "compression_opts", None)
+    if compression is not None:
+        return str(compression), compression_opts
+    compressor = getattr(accessor, "compressor", None)
+    if compressor is None:
+        return None, None
+    codec_id = getattr(compressor, "codec_id", None) or getattr(compressor, "id", None)
+    compression_name = str(codec_id or type(compressor).__name__)
+    get_config = getattr(compressor, "get_config", None)
+    if callable(get_config):
+        compression_opts = get_config()
+    else:
+        compression_opts = repr(compressor)
+    return compression_name, compression_opts
+
+
+def _get_filter_facts(
+    accessor: TableColumnAccessor,
+    compression: str | None,
+    compression_opts: object | None,
+) -> tuple[object, ...]:
+    filters: list[object] = []
+    if compression is not None:
+        filters.append(
+            {
+                "id": "compression",
+                "name": compression,
+                "options": compression_opts,
+            }
+        )
+    for attr_name in ("shuffle", "fletcher32", "scaleoffset"):
+        value = getattr(accessor, attr_name, None)
+        if value not in (None, False):
+            filters.append({"id": attr_name, "value": value})
+    zarr_filters = getattr(accessor, "filters", None)
+    if zarr_filters:
+        for zarr_filter in zarr_filters:
+            get_config = getattr(zarr_filter, "get_config", None)
+            filters.append(get_config() if callable(get_config) else repr(zarr_filter))
+    return tuple(filters)
+
+
+def _get_fill_value(accessor: TableColumnAccessor) -> object | None:
+    if hasattr(accessor, "fillvalue"):
+        return accessor.fillvalue
+    if hasattr(accessor, "fill_value"):
+        return accessor.fill_value
+    return None
+
+
+def _get_read_capabilities(
+    accessor: TableColumnAccessor,
+    chunks: tuple[int, ...] | None,
+    compression: str | None,
+    filters: tuple[object, ...],
+) -> tuple[str, ...]:
+    capabilities = ["metadata"]
+    if hasattr(accessor, "dtype"):
+        capabilities.extend(("shape", "dtype", "slice"))
+    if getattr(accessor, "ndim", None) == 0:
+        capabilities.append("scalar")
+    if chunks is not None:
+        capabilities.append("chunked")
+    if compression is not None or filters:
+        capabilities.append("filtered")
+    if lazynwb.file_io.is_group(accessor):
+        capabilities.append("children")
+    return tuple(capabilities)
 
 
 def _get_table_column_accessors(
@@ -228,7 +368,7 @@ def _get_table_column_accessors(
     t0 = time.time()
     file = (
         file_path
-        if isinstance(file_path, lazynwb.file_io.FileAccessor)
+        if _is_file_accessor_like(file_path)
         else lazynwb.file_io._get_accessor(file_path)
     )
     table = file[table_path]
@@ -326,70 +466,41 @@ def _drop_known_reference_columns(
 
 
 def _is_timeseries(group_keys: Iterable[str]) -> bool:
-    group_keys = set(group_keys)
-    return "data" in group_keys and (
-        "timestamps" in group_keys or "starting_time" in group_keys
-    )
+    return catalog_schema._is_timeseries(group_keys)
 
 
 def _is_timeseries_with_rate(group_keys: Iterable[str]) -> bool:
-    group_keys = set(group_keys)
-    return (
-        "data" in group_keys
-        and "starting_time" in group_keys
-        and "timestamps" not in group_keys
-    )
+    return catalog_schema._is_timeseries_with_rate(group_keys)
 
 
 def _is_metadata(column_accessors: dict[str, TableColumnAccessor]) -> bool:
     """Check whether a group is metadata rather than a row-oriented table."""
-    no_multi_dim_columns = all(
-        accessor.ndim <= 1
-        for accessor in column_accessors.values()
-        if hasattr(accessor, "dtype")
-    )
-    some_scalar_columns = any(
-        accessor.ndim == 0
-        for accessor in column_accessors.values()
-        if hasattr(accessor, "dtype")
-    )
-    return (
-        no_multi_dim_columns
-        and some_scalar_columns
-        and not _is_timeseries_with_rate(column_accessors.keys())
+    return catalog_schema._is_metadata(
+        _column_facts_from_accessors(column_accessors).values(),
+        is_timeseries_with_rate=catalog_schema._is_timeseries_with_rate(
+            column_accessors.keys()
+        ),
     )
 
 
 def _is_nominally_indexed_column(
     column_name: str, all_column_names: Iterable[str]
 ) -> bool:
-    all_column_names = set(all_column_names)
-    if column_name not in all_column_names:
-        return False
-    if column_name.endswith("_index"):
-        return column_name.split("_index")[0] in all_column_names
-    return f"{column_name}_index" in all_column_names
+    return catalog_schema._is_nominally_indexed_column(column_name, all_column_names)
 
 
 def _get_indexed_column_names(column_names: Iterable[str]) -> set[str]:
-    return {
-        column_name
-        for column_name in column_names
-        if _is_nominally_indexed_column(column_name, column_names)
-    }
+    return catalog_schema._get_indexed_column_names(column_names)
 
 
 def _get_timeseries_data_length(
     column_accessors: dict[str, TableColumnAccessor],
     is_timeseries: bool,
 ) -> int | None:
-    if not is_timeseries:
-        return None
-    data = column_accessors.get("data")
-    shape = getattr(data, "shape", None)
-    if not shape:
-        return None
-    return shape[0]
+    return catalog_schema._get_timeseries_data_length(
+        columns=_column_facts_from_accessors(column_accessors).values(),
+        is_timeseries=is_timeseries,
+    )
 
 
 def _is_timeseries_length_aligned(
@@ -397,42 +508,55 @@ def _is_timeseries_length_aligned(
     shape: tuple[int, ...] | None,
     timeseries_len: int | None,
 ) -> bool:
-    if not is_timeseries or timeseries_len is None or not shape:
-        return True
-    return shape[0] == timeseries_len
+    return catalog_schema._is_timeseries_length_aligned(
+        is_timeseries=is_timeseries,
+        shape=shape,
+        timeseries_len=timeseries_len,
+    )
 
 
 def _get_index_column_name(
     column_name: str,
     all_column_names: Iterable[str],
 ) -> str | None:
-    all_column_names = set(all_column_names)
-    if column_name.endswith("_index"):
-        return (
-            column_name
-            if _is_nominally_indexed_column(column_name, all_column_names)
-            else None
-        )
-    index_column_name = f"{column_name}_index"
-    if index_column_name in all_column_names:
-        return index_column_name
-    return None
+    return catalog_schema._get_index_column_name(column_name, all_column_names)
 
 
 def _get_data_column_name(
     column_name: str,
     all_column_names: Iterable[str],
 ) -> str | None:
-    all_column_names = set(all_column_names)
-    if not column_name.endswith("_index"):
-        return column_name
-    data_column_name = column_name.split("_index")[0]
-    if data_column_name in all_column_names:
-        return data_column_name
-    return None
+    return catalog_schema._get_data_column_name(column_name, all_column_names)
 
 
 def _shape_as_tuple(shape: Iterable[int] | None) -> tuple[int, ...] | None:
     if shape is None:
         return None
     return tuple(shape)
+
+
+def _shape_as_optional_int_tuple(
+    shape: Iterable[int | None] | None,
+) -> tuple[int | None, ...] | None:
+    if shape is None:
+        return None
+    return tuple(None if item is None else int(item) for item in shape)
+
+
+def _get_row_element_shape(
+    shape: tuple[int, ...] | None,
+    ndim: int | None,
+    is_index_column: bool,
+) -> tuple[int, ...] | None:
+    return catalog_schema._get_row_element_shape(
+        shape=shape,
+        ndim=ndim,
+        is_index_column=is_index_column,
+    )
+
+
+def _is_file_accessor_like(value: object) -> bool:
+    return isinstance(value, lazynwb.file_io.FileAccessor) or all(
+        hasattr(value, attr)
+        for attr in ("_accessor", "_hdmf_backend", "_path", "get", "__getitem__")
+    )
